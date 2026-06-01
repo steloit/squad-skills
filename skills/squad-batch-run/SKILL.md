@@ -76,7 +76,7 @@ Fall back to conservative inference from phase, tags, title, and description whe
 curl -sf "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true" > /dev/null
 ```
 
-- If server unreachable: instruct user to run `./kanban-board/start.sh` and stop.
+- If the board is unreachable: report the error (check `base_url` / auth) and stop.
 - If `plan_batch.py` fails: report error and stop.
 
 ### 1. Resolve project

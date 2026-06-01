@@ -225,13 +225,13 @@ This skill explores first, reports direction, then seeds the squad board with ph
    Use API:
    ```bash
    # Create task
-   curl -s -X POST http://localhost:5173/api/task \
+   curl -s -X POST https://steloit-squad.vercel.app/api/task \
      -H 'Content-Type: application/json' \
      -d "{\"title\": \"...\", \"project\": \"$PROJECT\", \"priority\": \"high\",
           \"level\": 3, \"description\": \"...\", \"tags\": \"...\"}"
 
    # Patch report anchor
-   curl -s -X PATCH "http://localhost:5173/api/task/$REPORT_ID?project=$PROJECT" \
+   curl -s -X PATCH "https://steloit-squad.vercel.app/api/task/$REPORT_ID?project=$PROJECT" \
      -H 'Content-Type: application/json' \
      -d "{\"description\": \"<updated description with task index>\"}"
    ```
