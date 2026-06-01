@@ -40,8 +40,8 @@ HOTSPOT_HINTS = {
 
 
 def load_squad_auth() -> dict[str, str]:
-    """Load global auth from ~/.claude/kanban-auth."""
-    auth_file = pathlib.Path.home() / ".claude" / "kanban-auth"
+    """Load global auth from ~/.claude/squad-auth."""
+    auth_file = pathlib.Path.home() / ".claude" / "squad-auth"
     result: dict[str, str] = {}
     if not auth_file.is_file():
         return result
@@ -62,8 +62,8 @@ def load_project_config(project: str) -> dict:
     candidates = []
     cwd = pathlib.Path.cwd().resolve()
     for directory in (cwd, *cwd.parents):
-        candidates.append(directory / ".codex" / "kanban.json")
-        candidates.append(directory / ".claude" / "kanban.json")
+        candidates.append(directory / ".codex" / "squad.json")
+        candidates.append(directory / ".claude" / "squad.json")
 
     seen: set[pathlib.Path] = set()
     for path in candidates:
@@ -364,16 +364,16 @@ def main() -> int:
     ssl_context = build_ssl_context()
     base_url = (
         args.base_url
-        or os.environ.get("KANBAN_BASE_URL")
-        or squad_auth.get("KANBAN_BASE_URL")
+        or os.environ.get("SQUAD_BASE_URL")
+        or squad_auth.get("SQUAD_BASE_URL")
         or config.get("base_url")
         or "http://localhost:5173"
     )
     auth_token = (
         args.auth_token
         if args.auth_token is not None
-        else os.environ.get("KANBAN_AUTH_TOKEN")
-        or squad_auth.get("KANBAN_AUTH_TOKEN")
+        else os.environ.get("SQUAD_AUTH_TOKEN")
+        or squad_auth.get("SQUAD_AUTH_TOKEN")
         or config.get("auth_token")
         or ""
     )

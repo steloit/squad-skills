@@ -5,22 +5,22 @@ All projects share a single centralized DB — the kanban-board server must be r
 
 ## DB Path & Project Config
 
-Read project config from `.codex/kanban.json` or `.claude/kanban.json` (created by `/squad-init`).
-Auth credentials are loaded from the global `~/.claude/kanban-auth` file (shared across all projects).
+Read project config from `.codex/squad.json` or `.claude/squad.json` (created by `/squad-init`).
+Auth credentials are loaded from the global `~/.claude/squad-auth` file (shared across all projects).
 
 ```bash
 # 1. Project config (project name only)
-CONFIG=$(cat .codex/kanban.json 2>/dev/null || cat .claude/kanban.json 2>/dev/null)
+CONFIG=$(cat .codex/squad.json 2>/dev/null || cat .claude/squad.json 2>/dev/null)
 PROJECT=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['project'])" 2>/dev/null || basename "$(pwd)")
 
-# 2. Auth from ~/.claude/kanban-auth (global, shared across projects)
-KANBAN_AUTH_FILE="$HOME/.claude/kanban-auth"
-if [ -f "$KANBAN_AUTH_FILE" ]; then
-  BASE_URL=$(grep '^KANBAN_BASE_URL=' "$KANBAN_AUTH_FILE" | cut -d= -f2-)
-  AUTH_TOKEN=$(grep '^KANBAN_AUTH_TOKEN=' "$KANBAN_AUTH_FILE" | cut -d= -f2-)
+# 2. Auth from ~/.claude/squad-auth (global, shared across projects)
+SQUAD_AUTH_FILE="$HOME/.claude/squad-auth"
+if [ -f "$SQUAD_AUTH_FILE" ]; then
+  BASE_URL=$(grep '^SQUAD_BASE_URL=' "$SQUAD_AUTH_FILE" | cut -d= -f2-)
+  AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$SQUAD_AUTH_FILE" | cut -d= -f2-)
 fi
 
-# 3. Fallback: legacy kanban.json with embedded auth (backward compat)
+# 3. Fallback: legacy squad.json with embedded auth (backward compat)
 if [ -z "${BASE_URL:-}" ]; then
   BASE_URL=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('base_url') or '')" 2>/dev/null || true)
 fi
@@ -45,16 +45,16 @@ AUTH_TOKEN=""
 AUTH_HEADER=()
 ```
 
-**Auth resolution priority:** `~/.claude/kanban-auth` > kanban.json (legacy) > defaults.
-`kanban.json` should only contain `{ "project": "..." }`. The `auth_token` and `base_url` fields in kanban.json are supported for backward compatibility but deprecated.
+**Auth resolution priority:** `~/.claude/squad-auth` > squad.json (legacy) > defaults.
+`squad.json` should only contain `{ "project": "..." }`. The `auth_token` and `base_url` fields in squad.json are supported for backward compatibility but deprecated.
 
 Quick debug check before a failing request:
 
 ```bash
 echo "KANBAN_PROJECT=$PROJECT"
-echo "KANBAN_BASE_URL=$BASE_URL"
-echo "KANBAN_AUTH_TOKEN=$([ -n "$AUTH_TOKEN" ] && echo configured || echo empty)"
-echo "KANBAN_AUTH_SOURCE=$([ -f "$HOME/.claude/kanban-auth" ] && echo kanban-auth || echo kanban.json)"
+echo "SQUAD_BASE_URL=$BASE_URL"
+echo "SQUAD_AUTH_TOKEN=$([ -n "$AUTH_TOKEN" ] && echo configured || echo empty)"
+echo "KANBAN_AUTH_SOURCE=$([ -f "$HOME/.claude/squad-auth" ] && echo squad-auth || echo squad.json)"
 ```
 
 ## Pipeline Levels

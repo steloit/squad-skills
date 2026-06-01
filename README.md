@@ -25,8 +25,8 @@ The skills talk to a Squad board over HTTP. Point them at your board and supply 
 
 ```bash
 # ~/.claude/squad-auth  (shared across your projects; never commit)
-KANBAN_BASE_URL=https://<your-squad-board-url>
-KANBAN_AUTH_TOKEN=<your-shared-token>
+SQUAD_BASE_URL=https://<your-squad-board-url>
+SQUAD_AUTH_TOKEN=<your-shared-token>
 ```
 
 Then register a project from its directory:

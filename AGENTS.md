@@ -24,8 +24,8 @@ npx skills update                            # update
 All skills talk to the Squad board over HTTP:
 
 ```bash
-KANBAN_BASE_URL=https://<your-squad-board>
-KANBAN_AUTH_TOKEN=<shared-token>
+SQUAD_BASE_URL=https://<your-squad-board>
+SQUAD_AUTH_TOKEN=<shared-token>
 ```
 
 ## Develop

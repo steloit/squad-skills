@@ -189,8 +189,8 @@ Run `/squad-init` first to register this project.
 
 Add to `.gitignore`:
 ```
-.codex/kanban.json
-.claude/kanban.json
+.codex/squad.json
+.claude/squad.json
 kanban-board/
 ```
 

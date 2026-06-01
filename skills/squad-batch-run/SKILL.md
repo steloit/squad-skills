@@ -81,7 +81,7 @@ curl -sf "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true"
 
 ### 1. Resolve project
 
-Read `.codex/kanban.json` or `.claude/kanban.json`.
+Read `.codex/squad.json` or `.claude/squad.json`.
 
 ### 2. Plan
 

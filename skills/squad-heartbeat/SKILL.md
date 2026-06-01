@@ -21,9 +21,9 @@ Scan all active projects (or a single project) for tasks that have had no agent 
 
    Load credentials using the standard shared.md pattern:
 
-   KANBAN_AUTH_FILE="$HOME/.claude/kanban-auth"
-   BASE_URL=$(grep '^KANBAN_BASE_URL=' "$KANBAN_AUTH_FILE" | cut -d= -f2-)
-   AUTH_TOKEN=$(grep '^KANBAN_AUTH_TOKEN=' "$KANBAN_AUTH_FILE" | cut -d= -f2-)
+   SQUAD_AUTH_FILE="$HOME/.claude/squad-auth"
+   BASE_URL=$(grep '^SQUAD_BASE_URL=' "$SQUAD_AUTH_FILE" | cut -d= -f2-)
+   AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$SQUAD_AUTH_FILE" | cut -d= -f2-)
    AUTH_HEADER=(-H "X-Kanban-Auth: $AUTH_TOKEN")
 
    Parse CLI arguments:
@@ -194,15 +194,15 @@ while i < len(args):
 
 # ── Auth setup ───────────────────────────────────────────────────
 import pathlib, os
-auth_file = pathlib.Path.home() / ".claude" / "kanban-auth"
+auth_file = pathlib.Path.home() / ".claude" / "squad-auth"
 base_url = "http://localhost:5173"
 auth_token = ""
 
 if auth_file.exists():
     for line in auth_file.read_text().splitlines():
-        if line.startswith("KANBAN_BASE_URL="):
+        if line.startswith("SQUAD_BASE_URL="):
             base_url = line.split("=", 1)[1]
-        elif line.startswith("KANBAN_AUTH_TOKEN="):
+        elif line.startswith("SQUAD_AUTH_TOKEN="):
             auth_token = line.split("=", 1)[1]
 
 def curl_get(url):
