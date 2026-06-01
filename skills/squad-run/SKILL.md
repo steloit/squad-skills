@@ -1,6 +1,6 @@
 ---
 name: squad-run
-description: Run the AI team pipeline for squad tasks — orchestration loop with 6 agents (Planner, Critic, Builder, Shield, Inspector, Ranger), single-step execution, and code review. Use /squad-run to execute tasks through the 7-column pipeline. AUTO-TRIGGER when: user says "implement task NNN" or any task ID + implement/build/do combination; or user confirms with "yes/ok/go/do it" after Claude proposes implementing a specific squad task.
+description: 'Run the AI team pipeline for squad tasks — orchestration loop with 6 agents (Planner, Critic, Builder, Shield, Inspector, Ranger), single-step execution, and code review. Use /squad-run to execute tasks through the 7-column pipeline. AUTO-TRIGGER when: user says "implement task NNN" or any task ID + implement/build/do combination; or user confirms with "yes/ok/go/do it" after Claude proposes implementing a specific squad task.'
 license: MIT
 ---
 

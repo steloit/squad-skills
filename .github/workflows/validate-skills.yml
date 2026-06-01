@@ -10,5 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: python3 -m pip install --quiet pyyaml
       - name: Validate Agent Skills (open standard)
         run: bash scripts/validate-skills.sh
