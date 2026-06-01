@@ -1,6 +1,6 @@
 # Squad Shared Context
 
-Manages project tasks in **PostgreSQL** via the kanban-board HTTP API.
+Manages project tasks in **PostgreSQL** via the Squad board HTTP API.
 All projects share a single centralized DB on the deployed Squad board.
 
 ## DB Path & Project Config
