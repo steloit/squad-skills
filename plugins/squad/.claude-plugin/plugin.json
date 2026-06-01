@@ -1,0 +1,8 @@
+{
+  "name": "squad",
+  "version": "0.1.0",
+  "description": "Steloit Squad — AI-team kanban pipeline + code-review skills",
+  "author": {
+    "name": "Steloit"
+  }
+}
