@@ -19,6 +19,22 @@ Squad is distributed as a Claude Code plugin. Install once and it auto-updates a
 /plugin install squad@steloit
 ```
 
+Updates arrive automatically (or `/plugin marketplace update`).
+
+### Codex & other open-standard tools
+
+The skills are portable [Agent Skills](https://agentskills.io) (`SKILL.md`), so any
+compatible tool can use them. Clone once and symlink into the tool's skills dir:
+
+```bash
+git clone https://github.com/steloit/squad-skills ~/squad-skills
+~/squad-skills/scripts/install.sh            # → ~/.agents/skills (Codex; follows symlinks)
+# update later:
+git -C ~/squad-skills pull
+```
+
+(`scripts/install.sh --claude` targets `~/.claude/skills`; `--target <dir>` for any other tool.)
+
 ## Configure
 
 The skills talk to a Squad board over HTTP. Point them at your board and supply the shared token:

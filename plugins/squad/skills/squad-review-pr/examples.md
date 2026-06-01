@@ -5,7 +5,7 @@
 ### 전체 플로우 (리뷰 + 코멘트 게시 + MD 저장)
 
 ```bash
-/review-pr https://bitbucket.org/ac-avi/device_gateway/pull-requests/3
+/squad-review-pr https://bitbucket.org/ac-avi/device_gateway/pull-requests/3
 ```
 
 실행 결과:
@@ -17,7 +17,7 @@
 ### 분석만 (코멘트 게시 안 함)
 
 ```bash
-/review-pr https://bitbucket.org/ac-avi/device_gateway/pull-requests/3 --no-post
+/squad-review-pr https://bitbucket.org/ac-avi/device_gateway/pull-requests/3 --no-post
 ```
 
 PR에 코멘트를 달지 않고 리뷰 결과만 보여줍니다. 먼저 결과를 확인하고 싶을 때 유용합니다.
@@ -25,7 +25,7 @@ PR에 코멘트를 달지 않고 리뷰 결과만 보여줍니다. 먼저 결과
 ### MD 저장 안 함
 
 ```bash
-/review-pr https://bitbucket.org/ac-avi/device_gateway/pull-requests/3 --no-save
+/squad-review-pr https://bitbucket.org/ac-avi/device_gateway/pull-requests/3 --no-save
 ```
 
 로컬 파일 저장을 건너뜁니다.
@@ -33,7 +33,7 @@ PR에 코멘트를 달지 않고 리뷰 결과만 보여줍니다. 먼저 결과
 ### 분석만 + 저장도 안 함
 
 ```bash
-/review-pr https://bitbucket.org/ac-avi/device_gateway/pull-requests/3 --no-post --no-save
+/squad-review-pr https://bitbucket.org/ac-avi/device_gateway/pull-requests/3 --no-post --no-save
 ```
 
 순수하게 리뷰 결과만 화면에 출력합니다.

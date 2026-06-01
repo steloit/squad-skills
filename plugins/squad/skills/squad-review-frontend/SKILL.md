@@ -1,11 +1,11 @@
 ---
-name: review-frontend
-description: "Frontend 코드 리뷰. PR의 프론트엔드 코드를 컴포넌트 설계, 상태 관리, 렌더링 성능, 접근성 관점으로 분석. 사용법: /review-frontend <PR_URL>"
+name: squad-review-frontend
+description: "Frontend 코드 리뷰. PR의 프론트엔드 코드를 컴포넌트 설계, 상태 관리, 렌더링 성능, 접근성 관점으로 분석. 사용법: /squad-review-frontend <PR_URL>"
 argument-hint: "<pr_url> [--no-post] [--no-save]"
 allowed-tools: Bash(python3 *), Read, Grep, WebFetch
 ---
 
-# /review-frontend - Frontend 코드 리뷰
+# /squad-review-frontend - Frontend 코드 리뷰
 
 PR URL을 입력받아 프론트엔드 코드를 도메인 전문 관점으로 분석하고, 구조화된 리뷰 코멘트를 PR에 자동으로 게시합니다.
 
@@ -40,7 +40,7 @@ PR URL을 입력받아 프론트엔드 코드를 도메인 전문 관점으로 �
 ### Step 2: PR 데이터 수집
 
 ```bash
-python3 ../review-pr/scripts/review_pr.py fetch <pr_url>
+python3 ../squad-review-pr/scripts/review_pr.py fetch <pr_url>
 ```
 
 JSON 출력을 분석합니다. `diff_file` 키가 있으면 diff가 별도 파일로 저장된 것이므로 Read 도구로 해당 파일을 읽으세요.
@@ -57,7 +57,7 @@ JSON 출력을 분석합니다. `diff_file` 키가 있으면 diff가 별도 파�
 3. **Jira 스토리 조회**: Step 2 JSON의 `jira_key` 값 확인
    - `jira_key`가 있으면:
      ```bash
-     python3 ../review-pr/scripts/review_pr.py jira <jira_key>
+     python3 ../squad-review-pr/scripts/review_pr.py jira <jira_key>
      ```
    - JSON이 없거나 오류가 나면 무시하고 진행
    - `jira_key`가 없으면 PR 제목/브랜치에서 `[A-Z]+-\d+` 패턴 수동 탐색
@@ -93,7 +93,7 @@ JSON 출력을 분석합니다. `diff_file` 키가 있으면 diff가 별도 파�
 `--no-post` 옵션이 **없는 경우**에만 실행합니다.
 
 ```bash
-python3 ../review-pr/scripts/review_pr.py comment <pr_url> < /tmp/review_pr_{id}.md
+python3 ../squad-review-pr/scripts/review_pr.py comment <pr_url> < /tmp/review_pr_{id}.md
 ```
 
 ### Step 5: 로컬 MD 저장
@@ -102,7 +102,7 @@ python3 ../review-pr/scripts/review_pr.py comment <pr_url> < /tmp/review_pr_{id}
 
 1. 파일명 정보 조회:
 ```bash
-python3 ../review-pr/scripts/review_pr.py save <pr_url>
+python3 ../squad-review-pr/scripts/review_pr.py save <pr_url>
 ```
 
 2. `/tmp/review_pr_{id}.md` 내용을 `reviews/{filename}`에 저장합니다. `reviews/` 디렉토리가 없으면 생성합니다.
@@ -119,5 +119,5 @@ python3 ../review-pr/scripts/review_pr.py save <pr_url>
 ## 추가 리소스
 
 - 프론트엔드 리뷰 관점 및 출력 포맷: [reference.md](reference.md)
-- 사용 예시: [../review-pr/examples.md](../review-pr/examples.md)
-- API 헬퍼 스크립트: [../review-pr/scripts/review_pr.py](../review-pr/scripts/review_pr.py)
+- 사용 예시: [../squad-review-pr/examples.md](../squad-review-pr/examples.md)
+- API 헬퍼 스크립트: [../squad-review-pr/scripts/review_pr.py](../squad-review-pr/scripts/review_pr.py)

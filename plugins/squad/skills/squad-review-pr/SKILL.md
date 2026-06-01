@@ -1,11 +1,11 @@
 ---
-name: review-pr
-description: "PR code review. Input URL → code analysis → post structured review comment + save MD. Auto-detects domain (backend/frontend/PLC). Usage: /review-pr <PR_URL>"
+name: squad-review-pr
+description: "PR code review. Input URL → code analysis → post structured review comment + save MD. Auto-detects domain (backend/frontend/PLC). Usage: /squad-review-pr <PR_URL>"
 argument-hint: "<pr_url> [--no-post] [--no-save]"
 allowed-tools: Bash(python3 *), Read, Grep, WebFetch
 ---
 
-# /review-pr - PR Code Review
+# /squad-review-pr - PR Code Review
 
 Analyzes code from a Bitbucket PR URL and automatically posts structured review comments to the PR. Auto-detects the code domain (backend, frontend, PLC) from file extensions in the diff.
 
@@ -76,9 +76,9 @@ Analyze the JSON output. If a `diff_file` key exists, the diff was saved to a se
    - **PLC**: `.ST`, `.st`, `.xml` (PLCOpen format)
    - **Mixed/General**: Falls back to the generic review rubric
 2. Load the appropriate domain reference file:
-   - Backend → [../review-backend/reference.md](../review-backend/reference.md)
-   - Frontend → [../review-frontend/reference.md](../review-frontend/reference.md)
-   - PLC → [../review-plc/reference.md](../review-plc/reference.md) + [../review-plc/plc-architecture-guide.md](../review-plc/plc-architecture-guide.md)
+   - Backend → [../squad-review-backend/reference.md](../squad-review-backend/reference.md)
+   - Frontend → [../squad-review-frontend/reference.md](../squad-review-frontend/reference.md)
+   - PLC → [../squad-review-plc/reference.md](../squad-review-plc/reference.md) + [../squad-review-plc/plc-architecture-guide.md](../squad-review-plc/plc-architecture-guide.md)
    - Mixed/General → [reference.md](reference.md)
 3. Analyze the diff using the domain-specific review perspectives.
 4. Review the target branch history for related commits to understand root cause.
@@ -118,9 +118,9 @@ Show the user a summary of results:
 ## Resources
 
 - General review rubric & output format: [reference.md](reference.md)
-- Backend-specific review rubric: [../review-backend/reference.md](../review-backend/reference.md)
-- Frontend-specific review rubric: [../review-frontend/reference.md](../review-frontend/reference.md)
-- PLC-specific review rubric: [../review-plc/reference.md](../review-plc/reference.md)
-- PLC architecture guide: [../review-plc/plc-architecture-guide.md](../review-plc/plc-architecture-guide.md)
+- Backend-specific review rubric: [../squad-review-backend/reference.md](../squad-review-backend/reference.md)
+- Frontend-specific review rubric: [../squad-review-frontend/reference.md](../squad-review-frontend/reference.md)
+- PLC-specific review rubric: [../squad-review-plc/reference.md](../squad-review-plc/reference.md)
+- PLC architecture guide: [../squad-review-plc/plc-architecture-guide.md](../squad-review-plc/plc-architecture-guide.md)
 - Usage examples: [examples.md](examples.md)
 - API helper script: [scripts/review_pr.py](scripts/review_pr.py)
