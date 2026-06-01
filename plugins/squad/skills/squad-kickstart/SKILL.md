@@ -1,10 +1,10 @@
 ---
-name: project-kickstart
+name: squad-kickstart
 description: Full project pipeline — SRS → Plan → Tasks + TDD → Rolling Wave Execute. Use when starting a new project or major feature from scratch. Default mode is Rolling Wave (implement one → verify → refine next → repeat). Use --big-bang for old all-upfront refine style.
 user_invocable: true
 ---
 
-# `/project-kickstart [topic]` — Full Project Pipeline
+# `/squad-kickstart [topic]` — Full Project Pipeline
 
 Runs the complete project lifecycle from idea to rolling implementation.
 
