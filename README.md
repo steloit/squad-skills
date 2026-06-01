@@ -21,15 +21,17 @@ npx skills update                            # update installed skills
 
 ## Configure
 
-The skills talk to a Squad board over HTTP. Point them at your board and supply the shared token:
+The skills default to the deployed board, so you only supply the shared token — read tool-agnostically, so set it whichever way suits you:
 
 ```bash
-# ~/.claude/squad-auth  (shared across your projects; never commit)
-SQUAD_BASE_URL=https://<your-squad-board-url>
-SQUAD_AUTH_TOKEN=<your-shared-token>
+# Option A — environment variable (works for every agent: Claude Code, Codex, Cursor)
+export SQUAD_AUTH_TOKEN='<your-shared-token>'        # add to ~/.zshrc or ~/.profile to persist
+
+# Option B — credential file (mode 600; keeps the secret out of your shell profile)
+mkdir -p ~/.squad && printf 'SQUAD_AUTH_TOKEN=%s\n' '<your-shared-token>' > ~/.squad/auth && chmod 600 ~/.squad/auth
 ```
 
-Then register a project from its directory:
+`SQUAD_BASE_URL` is optional — it defaults to the deployed board; set it (env, or `~/.squad/config`) only to point at a self-hosted board. Then register a project from its directory:
 
 ```
 /squad-init
