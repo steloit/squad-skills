@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 found=0
 fail=0
 
-for skill_md in "$REPO_ROOT"/plugins/*/skills/*/SKILL.md; do
+for skill_md in "$REPO_ROOT"/skills/*/SKILL.md; do
   [ -f "$skill_md" ] || continue
   found=$((found + 1))
   name="$(basename "$(dirname "$skill_md")")"
@@ -36,7 +36,7 @@ for skill_md in "$REPO_ROOT"/plugins/*/skills/*/SKILL.md; do
 done
 
 if [ "$found" -eq 0 ]; then
-  echo "❌ no skills found under plugins/*/skills/*"; exit 1
+  echo "❌ no skills found under skills/*"; exit 1
 fi
 
 if [ "$fail" -ne 0 ]; then

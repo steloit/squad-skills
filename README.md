@@ -1,34 +1,20 @@
 <p align="center">
-  <strong>Steloit Squad</strong> — AI-team kanban pipeline + code-review skills for Claude Code
+  <strong>Steloit Squad</strong> — AI-team kanban pipeline + code-review skills
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" />
-  <img src="https://img.shields.io/badge/Claude_Code-plugin-8A2BE2" alt="Claude Code Plugin" />
-  <img src="https://img.shields.io/badge/version-0.1.0-orange" alt="v0.1.0" />
+  <img src="https://img.shields.io/badge/Agent_Skills-open_standard-8A2BE2" alt="Agent Skills" />
 </p>
 
-Squad runs your tasks through an AI-team pipeline (Planner → Critic → Builder → Shield → Inspector → Ranger) on a shared kanban board, plus intent-aware PR review skills.
+Squad runs your tasks through an AI-team pipeline (Planner → Critic → Builder → Shield → Inspector → Ranger) on a shared kanban board, plus intent-aware PR review skills. Portable [Agent Skills](https://agentskills.io) (`SKILL.md`) — works with Claude Code, Codex, Cursor, Gemini CLI, and 50+ other agents.
 
 ## Install
 
-Squad is distributed as a Claude Code plugin. Install once and it auto-updates as this repo is updated.
-
-```
-/plugin marketplace add steloit/squad-skills
-/plugin install squad@steloit
-```
-
-Updates arrive automatically (or `/plugin marketplace update`).
-
-### Codex & other open-standard tools
-
-The skills are portable [Agent Skills](https://agentskills.io) (`SKILL.md`). Use the
-[`skills`](https://github.com/vercel-labs/skills) CLI — it auto-detects your installed
-agents (Codex, Cursor, Copilot, Gemini, 50+ others) and symlinks them to a canonical copy:
+One command for any agent — the [`skills`](https://github.com/vercel-labs/skills) CLI auto-detects your installed agents (Claude Code, Codex, Cursor, …) and installs to each:
 
 ```bash
-npx skills add steloit/squad-skills          # installs to detected agents (project-local)
+npx skills add steloit/squad-skills          # install to detected agents (project-local)
 npx skills add steloit/squad-skills -a codex -g   # one agent, global (user-wide)
 npx skills update                            # update installed skills
 ```

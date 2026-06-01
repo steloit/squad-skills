@@ -12,9 +12,3 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate Agent Skills (open standard)
         run: bash scripts/validate-skills.sh
-      - name: Validate plugin & marketplace manifests are valid JSON
-        run: |
-          for f in .claude-plugin/marketplace.json plugins/*/.claude-plugin/plugin.json; do
-            echo "checking $f"
-            python3 -c "import json,sys; json.load(open('$f'))"
-          done
