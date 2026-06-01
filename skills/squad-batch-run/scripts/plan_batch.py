@@ -40,47 +40,26 @@ HOTSPOT_HINTS = {
 
 
 def load_squad_auth() -> dict[str, str]:
-    """Load global auth from ~/.claude/squad-auth."""
-    auth_file = pathlib.Path.home() / ".claude" / "squad-auth"
+    """Resolve auth tool-agnostically: env vars take priority, then the
+    ~/.squad/auth (token) and ~/.squad/config (optional URL) files."""
     result: dict[str, str] = {}
-    if not auth_file.is_file():
-        return result
-    try:
-        for line in auth_file.read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if "=" in line:
-                key, _, value = line.partition("=")
-                result[key.strip()] = value.strip()
-    except OSError:
-        pass
-    return result
-
-
-def load_project_config(project: str) -> dict:
-    candidates = []
-    cwd = pathlib.Path.cwd().resolve()
-    for directory in (cwd, *cwd.parents):
-        candidates.append(directory / ".codex" / "squad.json")
-        candidates.append(directory / ".claude" / "squad.json")
-
-    seen: set[pathlib.Path] = set()
-    for path in candidates:
-        if path in seen or not path.is_file():
+    for f in (pathlib.Path.home() / ".squad" / "auth",
+              pathlib.Path.home() / ".squad" / "config"):
+        if not f.is_file():
             continue
-        seen.add(path)
         try:
-            data = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError):
-            continue
-        if not isinstance(data, dict):
-            continue
-        if data.get("project") not in {None, "", project}:
-            continue
-        return data
-
-    return {}
+            for line in f.read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                result.setdefault(key.strip(), value.strip())
+        except OSError:
+            pass
+    for key in ("SQUAD_AUTH_TOKEN", "SQUAD_BASE_URL"):
+        if os.environ.get(key):
+            result[key] = os.environ[key]
+    return result
 
 
 def build_ssl_context() -> ssl.SSLContext:
@@ -359,14 +338,12 @@ def main() -> int:
     parser.add_argument("--auth-token")
     args = parser.parse_args()
 
-    config = load_project_config(args.project)
     squad_auth = load_squad_auth()
     ssl_context = build_ssl_context()
     base_url = (
         args.base_url
         or os.environ.get("SQUAD_BASE_URL")
         or squad_auth.get("SQUAD_BASE_URL")
-        or config.get("base_url")
         or "https://steloit-squad.vercel.app"
     )
     auth_token = (
@@ -374,7 +351,6 @@ def main() -> int:
         if args.auth_token is not None
         else os.environ.get("SQUAD_AUTH_TOKEN")
         or squad_auth.get("SQUAD_AUTH_TOKEN")
-        or config.get("auth_token")
         or ""
     )
 

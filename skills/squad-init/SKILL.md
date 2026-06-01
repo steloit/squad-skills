@@ -50,36 +50,34 @@ fi
 
 ### 2. Write local project config
 
-Create both config files in the **current project root**:
-- `.claude/squad.json`
-- `.codex/squad.json`
+Create **one** tool-agnostic file at the **current project root**, committed to git so the whole team's agents target the same board project:
 
-```json
-{
-  "project": "<PROJECT_NAME>"
-}
+`.squadrc`
+```
+SQUAD_PROJECT=<PROJECT_NAME>
 ```
 
-**squad.json stores ONLY the project name.** Auth credentials (`base_url`, `auth_token`) are stored separately in `~/.claude/squad-auth`.
+**`.squadrc` holds ONLY the project name** (non-secret → safe to commit). The token lives in `SQUAD_AUTH_TOKEN` / `~/.squad/auth`; the board URL defaults to the deployed board.
 
-Use the Write tool to create both files with the same content.
+Use the Write tool to create `.squadrc`. Do **not** create `.codex/.claude/squad.json` — those are no longer read.
 
-### 2b. Set up global auth (if not exists)
+### 2b. Set up global auth (if not configured)
 
-Check if `~/.claude/squad-auth` exists. If not, and a `BASE_URL` was provided:
+The token is resolved from `SQUAD_AUTH_TOKEN` (env) or `~/.squad/auth`. If neither is set, tell the user how to configure it — never invent a token or write one into a project file:
 
 ```bash
-SQUAD_AUTH_FILE="$HOME/.claude/squad-auth"
-if [ ! -f "$SQUAD_AUTH_FILE" ]; then
-  # Write global auth file
-  cat > "$SQUAD_AUTH_FILE" << EOF
-SQUAD_BASE_URL=$BASE_URL
-SQUAD_AUTH_TOKEN=${SQUAD_AUTH_TOKEN:-}
-EOF
+if [ -z "${SQUAD_AUTH_TOKEN:-}" ] && [ ! -f "$HOME/.squad/auth" ]; then
+  echo "No Squad token found. Set it once (shared across all projects):"
+  echo "  export SQUAD_AUTH_TOKEN='<token>'      # add to ~/.zshrc to persist"
+  echo "  …or: mkdir -p ~/.squad && printf 'SQUAD_AUTH_TOKEN=%s\\n' '<token>' > ~/.squad/auth && chmod 600 ~/.squad/auth"
+fi
+
+# Persist a custom (non-default) board URL only — to ~/.squad/config
+if [ -n "$BASE_URL" ] && [ "$BASE_URL" != "https://steloit-squad.vercel.app" ]; then
+  mkdir -p "$HOME/.squad"
+  grep -q '^SQUAD_BASE_URL=' "$HOME/.squad/config" 2>/dev/null || printf 'SQUAD_BASE_URL=%s\n' "$BASE_URL" >> "$HOME/.squad/config"
 fi
 ```
-
-If `~/.claude/squad-auth` already exists, show its current `SQUAD_BASE_URL` and confirm it matches. Do NOT overwrite without asking.
 
 ### 2c. Auto-register project in projects table
 
@@ -141,10 +139,10 @@ Output:
 ```
 ✅ Project '<PROJECT_NAME>' registered in squad.
 
-  Config:  .codex/squad.json, .claude/squad.json
+  Config:  .squadrc (committed)
   DB:      PostgreSQL (shared central DB)
   Board:   <BASE_URL>/?project=<PROJECT_NAME>
-  Auth:    ~/.claude/squad-auth (global, shared across all projects)
+  Auth:    SQUAD_AUTH_TOKEN env / ~/.squad/auth (global secret)
 
 Add tasks with /squad add <title>
 ```
@@ -153,22 +151,19 @@ Add tasks with /squad add <title>
 
 ### Existing config detection
 
-If either `.codex/squad.json` or `.claude/squad.json` already exists:
-1. Read the `project` field and **strip `.db` suffix** (old format stored DB filename as project name)
-2. If the config contains `base_url` or `auth_token`, migrate them to `~/.claude/squad-auth` and remove from squad.json
-3. If the cleaned name differs from what's stored (e.g. `cpet.db` → `cpet`), show the migration clearly
-4. Ask the user whether to overwrite or keep as-is:
+If `.squadrc` already exists, read `SQUAD_PROJECT` (strip any `.db` suffix) and ask before overwriting:
 
 ```
-.codex/squad.json or .claude/squad.json already exists:
-  Current project: "cpet.db"  →  will use "cpet" (stripped .db suffix)
-  Current board: "https://board.example.com"
+.squadrc already exists:
+  Current project: "<name>"
 
 Options:
-1. Overwrite — update config
-2. Keep as-is — leave existing config unchanged
+1. Overwrite — update SQUAD_PROJECT
+2. Keep as-is — leave .squadrc unchanged
 ```
 
+If a legacy `.codex/squad.json` / `.claude/squad.json` exists but no `.squadrc`, do a **one-time migration**: read its `project` (strip `.db`), write `.squadrc`, and tell the user they can delete the legacy file. Never copy a legacy `auth_token` into `.squadrc` — move it to `~/.squad/auth`.
+
 - `/squad-init` defaults to `https://steloit-squad.vercel.app` unless you provide another deployment URL.
-- Auth credentials are stored globally in `~/.claude/squad-auth`, NOT in per-project squad.json. This prevents token duplication across repos and keeps secrets out of git.
-- For remote private boards, set `SQUAD_AUTH_TOKEN` in the shell before running `/squad-init`, or edit `~/.claude/squad-auth` directly.
+- The token is stored globally (`SQUAD_AUTH_TOKEN` env or `~/.squad/auth`), NOT in `.squadrc`. This prevents token duplication across repos and keeps secrets out of git.
+- For remote private boards, set `SQUAD_AUTH_TOKEN` in the shell before running `/squad-init`, or write `~/.squad/auth` (mode 600).

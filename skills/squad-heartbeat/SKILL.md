@@ -21,9 +21,11 @@ Scan all active projects (or a single project) for tasks that have had no agent 
 
    Load credentials using the standard shared.md pattern:
 
-   SQUAD_AUTH_FILE="$HOME/.claude/squad-auth"
-   BASE_URL=$(grep '^SQUAD_BASE_URL=' "$SQUAD_AUTH_FILE" | cut -d= -f2-)
-   AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$SQUAD_AUTH_FILE" | cut -d= -f2-)
+   AUTH_TOKEN="${SQUAD_AUTH_TOKEN:-}"
+   [ -z "$AUTH_TOKEN" ] && [ -f "$HOME/.squad/auth" ] && AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$HOME/.squad/auth" | cut -d= -f2-)
+   BASE_URL="${SQUAD_BASE_URL:-}"
+   [ -z "$BASE_URL" ] && [ -f "$HOME/.squad/config" ] && BASE_URL=$(grep '^SQUAD_BASE_URL=' "$HOME/.squad/config" | cut -d= -f2-)
+   BASE_URL="${BASE_URL:-https://steloit-squad.vercel.app}"
    AUTH_HEADER=(-H "X-Kanban-Auth: $AUTH_TOKEN")
 
    Parse CLI arguments:
@@ -192,18 +194,22 @@ while i < len(args):
     else:
         i += 1
 
-# ── Auth setup ───────────────────────────────────────────────────
+# ── Auth setup (tool-agnostic: env → ~/.squad files → default) ────
 import pathlib, os
-auth_file = pathlib.Path.home() / ".claude" / "squad-auth"
-base_url = "https://steloit-squad.vercel.app"
-auth_token = ""
+base_url = os.environ.get("SQUAD_BASE_URL", "")
+auth_token = os.environ.get("SQUAD_AUTH_TOKEN", "")
 
-if auth_file.exists():
-    for line in auth_file.read_text().splitlines():
-        if line.startswith("SQUAD_BASE_URL="):
-            base_url = line.split("=", 1)[1]
-        elif line.startswith("SQUAD_AUTH_TOKEN="):
-            auth_token = line.split("=", 1)[1]
+auth_file = pathlib.Path.home() / ".squad" / "auth"
+config_file = pathlib.Path.home() / ".squad" / "config"
+for f in (auth_file, config_file):
+    if not f.exists():
+        continue
+    for line in f.read_text().splitlines():
+        if not auth_token and line.startswith("SQUAD_AUTH_TOKEN="):
+            auth_token = line.split("=", 1)[1].strip()
+        elif not base_url and line.startswith("SQUAD_BASE_URL="):
+            base_url = line.split("=", 1)[1].strip()
+base_url = base_url or "https://steloit-squad.vercel.app"
 
 def curl_get(url):
     cmd = ["curl", "-s", url]

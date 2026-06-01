@@ -5,35 +5,22 @@ All projects share a single centralized DB on the deployed Squad board.
 
 ## DB Path & Project Config
 
-Read project config from `.codex/squad.json` or `.claude/squad.json` (created by `/squad-init`).
+Read the project name from `.squadrc` (`SQUAD_PROJECT=`, committed at the repo root, created by `/squad-init`).
 Auth is resolved tool-agnostically: the `SQUAD_AUTH_TOKEN` env var first, then the `~/.squad/auth` credential file (mode 600).
 
 ```bash
-# 1. Project config (project name only)
-CONFIG=$(cat .codex/squad.json 2>/dev/null || cat .claude/squad.json 2>/dev/null)
-PROJECT=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['project'])" 2>/dev/null || basename "$(pwd)")
+# 1. Project name: .squadrc → directory name
+PROJECT=""
+[ -f .squadrc ] && PROJECT=$(grep '^SQUAD_PROJECT=' .squadrc | cut -d= -f2-)
+[ -z "$PROJECT" ] && PROJECT=$(basename "$(pwd)")
 
-# 2. Auth — env vars first (tool-agnostic: any agent's shell inherits them)
-BASE_URL="${SQUAD_BASE_URL:-}"
+# 2. Auth token — env first (tool-agnostic), then the ~/.squad/auth secret file
 AUTH_TOKEN="${SQUAD_AUTH_TOKEN:-}"
+[ -z "$AUTH_TOKEN" ] && [ -f "$HOME/.squad/auth" ] && AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$HOME/.squad/auth" | cut -d= -f2-)
 
-# 3. Files: token (secret) from ~/.squad/auth, optional URL from ~/.squad/config
-if [ -z "$AUTH_TOKEN" ] && [ -f "$HOME/.squad/auth" ]; then
-  AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$HOME/.squad/auth" | cut -d= -f2-)
-fi
-if [ -z "$BASE_URL" ] && [ -f "$HOME/.squad/config" ]; then
-  BASE_URL=$(grep '^SQUAD_BASE_URL=' "$HOME/.squad/config" | cut -d= -f2-)
-fi
-
-# 4. Fallback: legacy squad.json with embedded auth (backward compat)
-if [ -z "${BASE_URL:-}" ]; then
-  BASE_URL=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('base_url') or '')" 2>/dev/null || true)
-fi
-if [ -z "${AUTH_TOKEN:-}" ]; then
-  AUTH_TOKEN=$(echo "$CONFIG" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('auth_token') or '')" 2>/dev/null || true)
-fi
-
-# 5. Defaults
+# 3. Board URL — env → ~/.squad/config → deployed default
+BASE_URL="${SQUAD_BASE_URL:-}"
+[ -z "$BASE_URL" ] && [ -f "$HOME/.squad/config" ] && BASE_URL=$(grep '^SQUAD_BASE_URL=' "$HOME/.squad/config" | cut -d= -f2-)
 BASE_URL="${BASE_URL:-https://steloit-squad.vercel.app}"
 AUTH_HEADER=()
 if [ -n "$AUTH_TOKEN" ]; then
@@ -41,17 +28,9 @@ if [ -n "$AUTH_TOKEN" ]; then
 fi
 ```
 
-If neither config file exists, prompt user to run `/squad-init`, or fall back to:
+If `.squadrc` is absent, `PROJECT` falls back to the directory name — prompt the user to run `/squad-init` to register it explicitly.
 
-```bash
-PROJECT=$(basename "$(pwd)")
-BASE_URL="https://steloit-squad.vercel.app"
-AUTH_TOKEN=""
-AUTH_HEADER=()
-```
-
-**Auth resolution priority:** `SQUAD_AUTH_TOKEN` env > `~/.squad/auth` > squad.json (legacy) > defaults.
-`squad.json` should only contain `{ "project": "..." }`. The `auth_token` and `base_url` fields in squad.json are supported for backward compatibility but deprecated.
+**Resolution:** token = `SQUAD_AUTH_TOKEN` env > `~/.squad/auth`; URL = `SQUAD_BASE_URL` env > `~/.squad/config` > deployed default; project = `.squadrc` (`SQUAD_PROJECT=`) > directory name.
 
 **If `AUTH_TOKEN` is empty** (no env var, no `~/.squad/auth`), the board returns `401` on write. Don't guess — tell the user to set the shared token tool-agnostically, then retry (no extra skill needed):
 
@@ -69,7 +48,7 @@ Quick debug check before a failing request:
 echo "KANBAN_PROJECT=$PROJECT"
 echo "SQUAD_BASE_URL=$BASE_URL"
 echo "SQUAD_AUTH_TOKEN=$([ -n "$AUTH_TOKEN" ] && echo configured || echo empty)"
-echo "KANBAN_AUTH_SOURCE=$([ -n "${SQUAD_AUTH_TOKEN:-}" ] && echo env || { [ -f "$HOME/.squad/auth" ] && echo squad-auth-file || echo squad.json; })"
+echo "KANBAN_AUTH_SOURCE=$([ -n "${SQUAD_AUTH_TOKEN:-}" ] && echo env || { [ -f "$HOME/.squad/auth" ] && echo squad-auth-file || echo none; })"
 ```
 
 ## Pipeline Levels

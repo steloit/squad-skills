@@ -81,7 +81,7 @@ curl -sf "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true"
 
 ### 1. Resolve project
 
-Read `.codex/squad.json` or `.claude/squad.json`.
+Read the project name from `.squadrc` (`SQUAD_PROJECT=`) — see `squad/shared.md` for the full resolution.
 
 ### 2. Plan
 

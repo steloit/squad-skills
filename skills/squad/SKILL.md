@@ -185,14 +185,7 @@ Relations: `extends`, `serves`, `depends_on`, `shares_data`.
 
 ## Setup & Web Board
 
-Run `/squad-init` first to register this project.
+Run `/squad-init` first to register this project — it writes `.squadrc` (`SQUAD_PROJECT=…`) at the repo root, committed so your whole team's agents target the same board project. The token never goes in a project file (it lives in the `SQUAD_AUTH_TOKEN` env var or `~/.squad/auth`).
 
-Add to `.gitignore`:
-```
-.codex/squad.json
-.claude/squad.json
-kanban-board/
-```
-
-Open the deployed board at `https://steloit-squad.vercel.app/?project=<PROJECT>` (or via the configured `base_url`).
+Open the deployed board at `https://steloit-squad.vercel.app/?project=<PROJECT>` (or via the configured `SQUAD_BASE_URL`).
 Features: 7-column pipeline, drag-and-drop (valid transitions only), card lifecycle modal, agent log viewer, 10s auto-refresh.

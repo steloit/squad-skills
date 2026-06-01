@@ -191,7 +191,7 @@ CREATE TABLE IF NOT EXISTS projects (
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | TEXT | Project identifier (matches squad.json `project` field) |
+| `id` | TEXT | Project identifier (matches `.squadrc` `SQUAD_PROJECT`) |
 | `name` | TEXT | Display name (often same as id) |
 | `purpose` | TEXT | WHY this project exists — used for AI context docking |
 | `stack` | TEXT | Technologies / frameworks used |
