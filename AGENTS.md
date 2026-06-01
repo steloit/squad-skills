@@ -12,9 +12,10 @@ a plugin; the open `SKILL.md` format makes them portable to every other tool.
 
 | Tool | How |
 |------|-----|
-| **Claude Code** | `/plugin marketplace add steloit/squad-skills` → `/plugin install squad@steloit` (auto-updates) |
-| **Codex / open-standard tools** | `git clone` this repo, then `scripts/install.sh` (symlinks into `~/.agents/skills`; `git pull` to update) |
-| **Any tool, manual** | point the tool's skills dir at `plugins/squad/skills/` |
+| **Any agent** (Codex, Cursor, Copilot, Gemini, …) | `npx skills add steloit/squad-skills` — auto-detects installed agents, symlinks to a canonical copy. Update with `npx skills update`. |
+| **Claude Code** (native) | `/plugin marketplace add steloit/squad-skills` → `/plugin install squad@steloit` (auto-updates) |
+
+`npx skills add steloit/squad-skills -a codex` targets one agent; add `-g` to install globally (user-wide) instead of project-local.
 
 ## Configure
 

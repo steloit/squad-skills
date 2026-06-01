@@ -23,17 +23,15 @@ Updates arrive automatically (or `/plugin marketplace update`).
 
 ### Codex & other open-standard tools
 
-The skills are portable [Agent Skills](https://agentskills.io) (`SKILL.md`), so any
-compatible tool can use them. Clone once and symlink into the tool's skills dir:
+The skills are portable [Agent Skills](https://agentskills.io) (`SKILL.md`). Use the
+[`skills`](https://github.com/vercel-labs/skills) CLI — it auto-detects your installed
+agents (Codex, Cursor, Copilot, Gemini, 50+ others) and symlinks them to a canonical copy:
 
 ```bash
-git clone https://github.com/steloit/squad-skills ~/squad-skills
-~/squad-skills/scripts/install.sh            # → ~/.agents/skills (Codex; follows symlinks)
-# update later:
-git -C ~/squad-skills pull
+npx skills add steloit/squad-skills          # installs to detected agents (project-local)
+npx skills add steloit/squad-skills -a codex -g   # one agent, global (user-wide)
+npx skills update                            # update installed skills
 ```
-
-(`scripts/install.sh --claude` targets `~/.claude/skills`; `--target <dir>` for any other tool.)
 
 ## Configure
 
