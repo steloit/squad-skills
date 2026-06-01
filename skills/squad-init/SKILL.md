@@ -34,19 +34,14 @@ ARG2="${2:-}"
 #   /squad-init my-project https://board.example.com
 #   /squad-init https://board.example.com
 if printf '%s' "$ARG1" | grep -Eq '^https?://'; then
-  PROJECT=$(basename "$(pwd)" | sed 's/\.db$//')
+  PROJECT=$(basename "$(pwd)")
   BASE_URL="$ARG1"
 else
-  PROJECT=$(printf '%s' "$ARG1" | sed 's/^-*//' | sed 's/\.db$//')
-  if [ -z "$PROJECT" ]; then
-    PROJECT=$(basename "$(pwd)" | sed 's/\.db$//')
-  fi
+  PROJECT=$(printf '%s' "$ARG1" | sed 's/^-*//')
+  [ -z "$PROJECT" ] && PROJECT=$(basename "$(pwd)")
   BASE_URL="${ARG2:-https://steloit-squad.vercel.app}"
 fi
-
 ```
-
-**Always strip `.db` suffix** — old configs stored the DB filename as the project name (e.g. `cpet.db`), which would conflict without this fix.
 
 ### 2. Write local project config
 
@@ -59,7 +54,7 @@ SQUAD_PROJECT=<PROJECT_NAME>
 
 **`.squadrc` holds ONLY the project name** (non-secret → safe to commit). The token lives in `SQUAD_AUTH_TOKEN` / `~/.squad/auth`; the board URL defaults to the deployed board.
 
-Use the Write tool to create `.squadrc`. Do **not** create `.codex/.claude/squad.json` — those are no longer read.
+Use the Write tool to create `.squadrc`.
 
 ### 2b. Set up global auth (if not configured)
 
@@ -85,19 +80,10 @@ After writing the config, upsert the current project to the projects table via P
 Infer project metadata from the local environment:
 
 ```bash
-# Infer category from path
-PARENT_DIR=$(basename "$(dirname "$(pwd)")")
-if [ "$PARENT_DIR" = "edwards" ]; then
-  CATEGORY="edwards"
-elif echo "$PROJECT" | grep -qE 'skills|squad'; then
-  CATEGORY="skills"
-elif echo "$PROJECT" | grep -qE 'tools|assist|gmail|jira'; then
-  CATEGORY="tools"
-elif [ "$PROJECT" = "community.skills" ]; then
-  CATEGORY="community"
-else
-  CATEGORY="personal"
-fi
+# Category defaults to "personal"; change it on the board if needed.
+CATEGORY="personal"
+echo "$PROJECT" | grep -qiE 'skill|squad' && CATEGORY="skills"
+echo "$PROJECT" | grep -qiE 'tool|api|cli'  && CATEGORY="tools"
 
 # Infer purpose from CLAUDE.md (first non-heading, non-empty line)
 PURPOSE=""
@@ -151,7 +137,7 @@ Add tasks with /squad add <title>
 
 ### Existing config detection
 
-If `.squadrc` already exists, read `SQUAD_PROJECT` (strip any `.db` suffix) and ask before overwriting:
+If `.squadrc` already exists, read `SQUAD_PROJECT` and ask before overwriting:
 
 ```
 .squadrc already exists:
@@ -161,8 +147,6 @@ Options:
 1. Overwrite — update SQUAD_PROJECT
 2. Keep as-is — leave .squadrc unchanged
 ```
-
-If a legacy `.codex/squad.json` / `.claude/squad.json` exists but no `.squadrc`, do a **one-time migration**: read its `project` (strip `.db`), write `.squadrc`, and tell the user they can delete the legacy file. Never copy a legacy `auth_token` into `.squadrc` — move it to `~/.squad/auth`.
 
 - `/squad-init` defaults to `https://steloit-squad.vercel.app` unless you provide another deployment URL.
 - The token is stored globally (`SQUAD_AUTH_TOKEN` env or `~/.squad/auth`), NOT in `.squadrc`. This prevents token duplication across repos and keeps secrets out of git.

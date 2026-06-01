@@ -125,7 +125,7 @@ Fetch all projects grouped by category. Useful for understanding the full projec
 ALL_PROJECTS=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects")
 ```
 
-Output: projects grouped by category (edwards, personal, tools, skills, community) with names and purposes.
+Output: projects grouped by category (e.g. personal, tools, skills) with names and purposes.
 
 ### `/squad project brief` — View/Update Project Brief
 

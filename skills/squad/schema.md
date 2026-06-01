@@ -197,7 +197,7 @@ CREATE TABLE IF NOT EXISTS projects (
 | `stack` | TEXT | Technologies / frameworks used |
 | `brief` | TEXT | Compressed project context: current state + direction + recent decisions. Injected into agent prompts for low-token-cost project awareness |
 | `status` | TEXT | `active` / `archived` / `paused` |
-| `category` | TEXT | Grouping: `edwards`, `personal`, `tools`, `skills`, `community` |
+| `category` | TEXT | Free-form grouping (e.g. `personal`, `tools`, `skills`) |
 | `repo_url` | TEXT | Git remote URL |
 
 ## Table: project_links
