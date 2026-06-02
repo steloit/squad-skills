@@ -188,7 +188,31 @@ curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID/reorder?project=$PR
 
 # Delete
 curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/task/$ID?project=$PROJECT"
+
+# Upload an image attachment (base64 over JSON; stored in R2, served from a public URL)
+DATA=$(base64 < "$IMG_PATH" | tr -d '\n')
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/attachment?project=$PROJECT" \
+  -H 'Content-Type: application/json' \
+  -d "$(jq -n --arg filename "$(basename "$IMG_PATH")" --arg data "$DATA" '{filename: $filename, data: $data}')"
+# → {"success":true,"attachment":{"filename","storedName","url","size","uploaded_at"}}
+
+# Delete an attachment (storedName from the task's attachments array)
+curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/task/$ID/attachment/$STORED_NAME?project=$PROJECT"
+
+# Download a task's attachments to local files (host-agnostic; temp dir, no repo pollution)
+DIR="${TMPDIR:-/tmp}/squad-attachments/$ID"; mkdir -p "$DIR"
+curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=attachments" \
+  | jq -r '.attachments[]? | "\(.url)\t\(.filename)"' \
+  | while IFS=$'\t' read -r url fn; do curl -s "$url" -o "$DIR/$fn"; done   # files now in $DIR
 ```
+
+The `attachments` field on a task read is a JSON array of `{filename, storedName, url, size, uploaded_at}` — the `url` is a public R2 link, and the web board renders it for humans. Accepted: png, jpg/jpeg, gif, webp, svg. Deleting a task removes its R2 objects.
+
+**Viewing an attachment as an agent is host-dependent**:
+- **Claude Code**: download it (above), then `Read` the local file — it renders as vision. ✅
+- **Codex**: a URL in the prompt is treated as *text* (not fetched); Codex sees images only when attached at launch via `--image <path>`. So download first then pass `--image`, or just cite the `url`.
+
+Don't assume an agent auto-sees an attachment — surface the `url`/local path and use the host's image tool where available.
 
 If `AUTH_TOKEN` is set, keep using the shared `AUTH_HEADER` array so every request can target the same protected board deployment without repeating conditional header logic.
 

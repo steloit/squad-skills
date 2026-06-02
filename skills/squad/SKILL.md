@@ -28,7 +28,8 @@ BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summar
 ### `/squad add <title>` — Add Task
 
 1. Ask user for priority, level (L1/L2/L3), description, tags (use AskUserQuestion)
-2. Build JSON safely with `jq` (see shared.md → JSON Safety), POST to API, output confirmation with new task ID
+2. Build JSON safely with `jq` (see shared.md → JSON Safety), POST to API, capture the new task ID
+3. **Images**: if the user gave image **file path(s)** (e.g. `/squad add "Login bug" --image ./bug.png`, or "attach ./shot.png"), upload each to the new task via the attachment API (see shared.md → "Upload an image attachment"). Output the task ID + the returned attachment `url`(s). A pasted image with no path → ask the user to save it to a file first (the upload reads a local file).
 
 ### `/squad move <ID> <status>` — Move Task
 
@@ -38,7 +39,7 @@ BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summar
 
 ### `/squad edit <ID>` — Edit Task
 
-Ask user which fields to modify, then PATCH via API.
+Ask user which fields to modify, then PATCH via API. To attach an image to an existing task, upload a local image file via the attachment API (shared.md → "Upload an image attachment").
 
 ### `/squad remove <ID>` — Delete Task
 
