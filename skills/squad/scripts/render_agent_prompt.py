@@ -41,7 +41,7 @@ def parse_set(values):
 def resolve_provider(cli_provider):
     if cli_provider:
         return cli_provider
-    env_provider = os.getenv("KANBAN_MODEL_PROVIDER", "")
+    env_provider = os.getenv("SQUAD_MODEL_PROVIDER", "")
     if env_provider:
         return env_provider
     if os.getenv("CODEX_THREAD_ID") or os.getenv("CODEX_CI"):

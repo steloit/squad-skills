@@ -45,10 +45,10 @@ mkdir -p ~/.squad && printf 'SQUAD_AUTH_TOKEN=%s\n' '<token>' > ~/.squad/auth &&
 Quick debug check before a failing request:
 
 ```bash
-echo "KANBAN_PROJECT=$PROJECT"
+echo "SQUAD_PROJECT=$PROJECT"
 echo "SQUAD_BASE_URL=$BASE_URL"
 echo "SQUAD_AUTH_TOKEN=$([ -n "$AUTH_TOKEN" ] && echo configured || echo empty)"
-echo "KANBAN_AUTH_SOURCE=$([ -n "${SQUAD_AUTH_TOKEN:-}" ] && echo env || { [ -f "$HOME/.squad/auth" ] && echo squad-auth-file || echo none; })"
+echo "SQUAD_AUTH_SOURCE=$([ -n "${SQUAD_AUTH_TOKEN:-}" ] && echo env || { [ -f "$HOME/.squad/auth" ] && echo squad-auth-file || echo none; })"
 ```
 
 ## Pipeline Levels

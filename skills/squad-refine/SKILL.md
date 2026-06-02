@@ -114,7 +114,7 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
 Resolve `MODEL_REFINER` from `../squad/models.json`:
 
 ```bash
-MODEL_PROVIDER=${KANBAN_MODEL_PROVIDER:-}
+MODEL_PROVIDER=${SQUAD_MODEL_PROVIDER:-}
 if [ -z "$MODEL_PROVIDER" ] && [ -n "${CODEX_THREAD_ID:-}${CODEX_CI:-}" ]; then MODEL_PROVIDER=codex; fi
 if [ -z "$MODEL_PROVIDER" ] && [ -n "${CLAUDE_PROJECT_DIR:-}${CLAUDECODE:-}" ]; then MODEL_PROVIDER=claude; fi
 if [ -z "$MODEL_PROVIDER" ] && [ -d .claude ]; then MODEL_PROVIDER=claude; fi

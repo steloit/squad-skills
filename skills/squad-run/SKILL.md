@@ -65,7 +65,7 @@ Read the task's `level` field first to determine which steps to execute.
 
 Resolve real model names from `../squad/models.json` using provider:
 
-- `KANBAN_MODEL_PROVIDER` env var if set (`claude` or `codex`)
+- `SQUAD_MODEL_PROVIDER` env var if set (`claude` or `codex`)
 - else `codex` when `CODEX_*` env is present
 - else `claude` when `CLAUDE_*` env is present
 - else `claude` when `.claude/` exists
@@ -75,7 +75,7 @@ Resolve real model names from `../squad/models.json` using provider:
 For Codex, the router should prefer the higher-capability entries in `models.json` for the full `squad-run` pipeline.
 
 ```bash
-MODEL_PROVIDER=${KANBAN_MODEL_PROVIDER:-}
+MODEL_PROVIDER=${SQUAD_MODEL_PROVIDER:-}
 if [ -z "$MODEL_PROVIDER" ] && [ -n "${CODEX_THREAD_ID:-}${CODEX_CI:-}" ]; then MODEL_PROVIDER=codex; fi
 if [ -z "$MODEL_PROVIDER" ] && [ -n "${CLAUDE_PROJECT_DIR:-}${CLAUDECODE:-}" ]; then MODEL_PROVIDER=claude; fi
 if [ -z "$MODEL_PROVIDER" ] && [ -d .claude ]; then MODEL_PROVIDER=claude; fi
@@ -367,7 +367,7 @@ curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
 # 1. Commit pending changes
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
   git add -A
-  git commit -m "feat: <TITLE> [kanban #<ID>]"
+  git commit -m "feat: <TITLE> [squad #<ID>]"
 fi
 COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "no-git")
 

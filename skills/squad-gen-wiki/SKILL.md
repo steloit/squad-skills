@@ -78,7 +78,7 @@ sources: {소스 수}
 
 ## Sources
 - CLAUDE.md
-- kanban #ID: {exploration report title}
+- squad #ID: {exploration report title}
 - README.md
 ```
 
