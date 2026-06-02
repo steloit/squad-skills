@@ -2,6 +2,8 @@
 name: squad-heartbeat
 description: Scan squad boards for stagnant tasks and optionally mark them. Detects tasks with no agent activity for N days (default 3), outputs a markdown report table, and appends Heartbeat entries to agent_log unless --dry-run.
 license: MIT
+metadata:
+  internal: true
 ---
 
 > Shared context: read `../squad/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.

@@ -1,6 +1,8 @@
 ---
 name: squad-batch-run
 description: Run multiple squad tasks end-to-end in Rolling Wave order — refine each task based on the prior card's actual implementation, then implement, then verify, then refine the next. Use for epic-level batch execution. --big-bang flag disables rolling wave for simple independent tasks.
+metadata:
+  internal: true
 ---
 
 # Squad Batch Run

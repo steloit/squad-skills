@@ -1,6 +1,8 @@
 ---
 name: squad-gen-wiki
 description: 프로젝트의 전체 아키텍처, 목표, 주요 결정사항을 wiki/ 디렉토리에 합성하여 정리합니다. 첫 실행 시 전체 생성, update로 변경분 반영. 매 카드가 아닌 프로젝트 수준의 지식을 정리합니다.
+metadata:
+  internal: true
 ---
 
 > Shared context: read `../squad/shared.md` for DB path, API endpoints, auth, and error handling.

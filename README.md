@@ -14,9 +14,19 @@ Squad runs your tasks through an AI-team pipeline (Planner → Critic → Builde
 One command for any agent — the [`skills`](https://github.com/vercel-labs/skills) CLI auto-detects your installed agents (Claude Code, Codex, Cursor, …) and installs to each:
 
 ```bash
-npx skills add steloit/squad-skills          # install to detected agents (project-local)
+npx skills add steloit/squad-skills          # the 5 core skills, to detected agents
 npx skills add steloit/squad-skills -a codex -g   # one agent, global (user-wide)
-npx skills update                            # update installed skills
+npx skills update                            # update installed skills later
+```
+
+You get the **5 core skills**: `squad` (board), `squad-init` (register a project), `squad-run` (run the pipeline), `squad-refine` (refine requirements), `squad-explore` (scope work).
+
+### Maintainers — internal skills
+
+The repo also ships specialized skills (`squad-batch-run`, `squad-review-*`, `squad-gen-wiki`, `squad-heartbeat`, `squad-kickstart`) flagged `metadata.internal: true`, so they stay hidden from the install above. To pull them too:
+
+```bash
+INSTALL_INTERNAL_SKILLS=1 npx skills add steloit/squad-skills
 ```
 
 ## Configure

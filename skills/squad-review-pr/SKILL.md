@@ -3,6 +3,8 @@ name: squad-review-pr
 description: "PR code review. Input URL → code analysis → post structured review comment + save MD. Auto-detects domain (backend/frontend/PLC). Usage: /squad-review-pr <PR_URL>"
 argument-hint: "<pr_url> [--no-post] [--no-save]"
 allowed-tools: Bash(python3 *), Read, Grep, WebFetch
+metadata:
+  internal: true
 ---
 
 # /squad-review-pr - PR Code Review

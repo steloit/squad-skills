@@ -3,6 +3,8 @@ name: squad-review-plc
 description: "CODESYS ST 코드 리뷰. PR의 PLC 코드를 Infrastructure 아키텍처, 네이밍 규칙, 시퀀스 데드락, 모듈화 관점으로 분석. 사용법: /squad-review-plc <PR_URL>"
 argument-hint: "<pr_url> [--no-post] [--no-save]"
 allowed-tools: Bash(python3 *), Read, Grep, WebFetch
+metadata:
+  internal: true
 ---
 
 # /squad-review-plc - CODESYS ST PLC 코드 리뷰

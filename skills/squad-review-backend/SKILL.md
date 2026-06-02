@@ -3,6 +3,8 @@ name: squad-review-backend
 description: "Backend 코드 리뷰. PR의 백엔드 코드를 API 설계, DB, 보안, 동시성, 에러 처리 관점으로 분석. 사용법: /squad-review-backend <PR_URL>"
 argument-hint: "<pr_url> [--no-post] [--no-save]"
 allowed-tools: Bash(python3 *), Read, Grep, WebFetch
+metadata:
+  internal: true
 ---
 
 # /squad-review-backend - Backend 코드 리뷰

@@ -3,6 +3,8 @@ name: squad-review-frontend
 description: "Frontend 코드 리뷰. PR의 프론트엔드 코드를 컴포넌트 설계, 상태 관리, 렌더링 성능, 접근성 관점으로 분석. 사용법: /squad-review-frontend <PR_URL>"
 argument-hint: "<pr_url> [--no-post] [--no-save]"
 allowed-tools: Bash(python3 *), Read, Grep, WebFetch
+metadata:
+  internal: true
 ---
 
 # /squad-review-frontend - Frontend 코드 리뷰
