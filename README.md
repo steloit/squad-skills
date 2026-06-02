@@ -60,6 +60,23 @@ mkdir -p ~/.squad && printf 'SQUAD_AUTH_TOKEN=%s\n' '<your-shared-token>' > ~/.s
 | `/squad-gen-wiki` | Synthesize a project wiki |
 | `/squad-heartbeat` | Detect stagnant tasks |
 
+## Testing & evals
+
+Two tiers — full detail in **[EVALS.md](EVALS.md)**:
+
+- **`tests/` — deterministic** (pytest): the non-LLM logic — selector parsing, grouping/parallel rules, auth resolution, prompt rendering. No keys, runs on every PR.
+  ```bash
+  pip install -r tests/requirements.txt && python -m pytest tests/ -q
+  ```
+- **`evals/` — behavioral** (DeepEval): runs the real agent headless against a `squad-eval` board project, scored on **board-state ground truth + a GEval rubric**. Needs `ANTHROPIC_API_KEY` + a board token; runs on-demand/nightly (costs tokens). Skips cleanly without them.
+  ```bash
+  pip install -r evals/requirements.txt && python -m pytest evals/ -q
+  ```
+
+### Known gap
+
+`ToolCorrectnessMetric` is **intentionally not wired in yet**. While the skills talk to the board over `Bash(curl)`, every tool call is just "Bash" — there's nothing meaningful to score. It becomes valuable **after an MCP migration** exposes typed `squad_*` tools; the harness is structured so it drops in then without rework.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Derived from prior MIT-licensed work; see [NOTICE](NOTICE) for attribution.
