@@ -28,7 +28,7 @@ Scan all active projects (or a single project) for tasks that have had no agent 
    BASE_URL="${SQUAD_BASE_URL:-}"
    [ -z "$BASE_URL" ] && [ -f "$HOME/.squad/config" ] && BASE_URL=$(grep '^SQUAD_BASE_URL=' "$HOME/.squad/config" | cut -d= -f2-)
    BASE_URL="${BASE_URL:-https://steloit-squad.vercel.app}"
-   AUTH_HEADER=(-H "Authorization: Bearer $AUTH_TOKEN")
+   AUTH_HEADER=(); [ -n "$AUTH_TOKEN" ] && AUTH_HEADER=(-H "Authorization: Bearer $AUTH_TOKEN")
 
    Parse CLI arguments:
    - --project X  → scan only project X (default: all active projects)

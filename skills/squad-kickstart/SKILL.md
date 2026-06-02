@@ -10,6 +10,8 @@ metadata:
 
 Runs the complete project lifecycle from idea to rolling implementation.
 
+> Shared context: read `../squad/shared.md` for auth resolution (`SQUAD_AUTH_TOKEN` → `~/.squad/auth`, `Authorization: Bearer` header), `$BASE_URL`, API endpoints, pipeline levels, and the JSON-safety rule. Resolve `PROJECT` / `BASE_URL` / `AUTH_HEADER` from there before any API call.
+
 **Default mode: Rolling Wave Planning**
 ```
 ① SRS
@@ -106,16 +108,13 @@ Minimum fields per task:
 - `level`: L1/L2/L3 based on implementation plan
 
 ```bash
-curl -s -X POST "$BASE_URL/api/task" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "title": "...",
-    "project": "$PROJECT",
-    "priority": "high",
-    "level": 2,
-    "description": "## Goal\nOne-line goal\n\n## Scope\n- In: ...\n- Out: ...",
-    "tags": "phase:1,epic:auth"
-  }'
+# Build JSON safely with jq (see ../squad/shared.md → JSON Safety); $PROJECT and text expand correctly.
+PAYLOAD=$(jq -n --arg title "<task title>" --arg project "$PROJECT" \
+  --arg description "$(printf '## Goal\nOne-line goal\n\n## Scope\n- In: ...\n- Out: ...')" \
+  --arg tags "phase:1,epic:auth" \
+  '{title:$title, project:$project, priority:"high", level:2, description:$description, tags:$tags}')
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
+  -H 'Content-Type: application/json' -d "$PAYLOAD"
 ```
 
 **E2E test task**: add one E2E validation task at the end of each epic (required).

@@ -108,6 +108,7 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
    - Update level/priority/tags if discussed
    - Append to agent_log:
      { "agent": "Refiner", "model": "<MODEL_REFINER>", "message": "Requirements refined. N questions across M rounds.", "timestamp": "..." }
+```
 
 ### Model Routing
 
@@ -127,7 +128,6 @@ provider = sys.argv[1] or d["default_provider"]
 print(d["providers"][provider]["refiner"])
 PY
 )
-```
 ```
 
 ### Interview Tips
