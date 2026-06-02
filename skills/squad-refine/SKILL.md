@@ -112,22 +112,10 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
 
 ### Model Routing
 
-Resolve `MODEL_REFINER` from `../squad/models.json`:
+Resolve `MODEL_PROVIDER` + the `read_model` helper per `../squad/shared.md` → **Model Resolution**, then:
 
 ```bash
-MODEL_PROVIDER=${SQUAD_MODEL_PROVIDER:-}
-if [ -z "$MODEL_PROVIDER" ] && [ -n "${CODEX_THREAD_ID:-}${CODEX_CI:-}" ]; then MODEL_PROVIDER=codex; fi
-if [ -z "$MODEL_PROVIDER" ] && [ -n "${CLAUDE_PROJECT_DIR:-}${CLAUDECODE:-}" ]; then MODEL_PROVIDER=claude; fi
-if [ -z "$MODEL_PROVIDER" ] && [ -d .claude ]; then MODEL_PROVIDER=claude; fi
-if [ -z "$MODEL_PROVIDER" ] && [ -d .codex ]; then MODEL_PROVIDER=codex; fi
-
-MODEL_REFINER=$(python3 - "$MODEL_PROVIDER" <<'PY'
-import json, pathlib, sys
-d = json.loads(pathlib.Path("../squad/models.json").read_text())
-provider = sys.argv[1] or d["default_provider"]
-print(d["providers"][provider]["refiner"])
-PY
-)
+MODEL_REFINER=$(read_model refiner)
 ```
 
 ### Interview Tips

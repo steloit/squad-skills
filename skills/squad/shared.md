@@ -79,6 +79,39 @@ Req → Plan → Review Plan → Impl → Review Impl → Test → Done
 
 Model keys are resolved to real provider models through `models.json`.
 
+### Model Resolution
+
+Skills that dispatch agents (squad-run, squad-refine, …) resolve models the same way — defined once here. Detect the provider, then `read_model <key>` / `read_effort <key>` look the key up in `models.json`.
+
+```bash
+# Provider: SQUAD_MODEL_PROVIDER env → Codex/Claude env signals → .claude/.codex dir → models.json default_provider
+MODEL_PROVIDER=${SQUAD_MODEL_PROVIDER:-}
+if [ -z "$MODEL_PROVIDER" ] && [ -n "${CODEX_THREAD_ID:-}${CODEX_CI:-}" ]; then MODEL_PROVIDER=codex; fi
+if [ -z "$MODEL_PROVIDER" ] && [ -n "${CLAUDE_PROJECT_DIR:-}${CLAUDECODE:-}" ]; then MODEL_PROVIDER=claude; fi
+if [ -z "$MODEL_PROVIDER" ] && [ -d .claude ]; then MODEL_PROVIDER=claude; fi
+if [ -z "$MODEL_PROVIDER" ] && [ -d .codex ]; then MODEL_PROVIDER=codex; fi
+
+read_model() {   # read_model <key> → real model name for the resolved provider
+  local key="$1"
+  python3 - "$MODEL_PROVIDER" "$key" <<'PY'
+import json, pathlib, sys
+d = json.loads(pathlib.Path("../squad/models.json").read_text())
+provider = sys.argv[1] or d["default_provider"]
+print(d["providers"][provider][sys.argv[2]])
+PY
+}
+
+read_effort() {  # read_effort <key> → reasoning_effort for provider/key (may be empty)
+  local key="$1"
+  python3 - "$MODEL_PROVIDER" "$key" <<'PY'
+import json, pathlib, sys
+d = json.loads(pathlib.Path("../squad/models.json").read_text())
+provider = sys.argv[1] or d["default_provider"]
+print(d.get("reasoning_effort", {}).get(provider, {}).get(sys.argv[2], ""))
+PY
+}
+```
+
 ### Move Protocol (required before any move)
 
 Always follow this sequence before moving a card.

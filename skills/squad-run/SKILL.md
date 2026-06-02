@@ -73,37 +73,9 @@ Resolve real model names from `../squad/models.json` using provider:
 
 For Codex, the router should prefer the higher-capability entries in `models.json` for the full `squad-run` pipeline.
 
+First resolve `MODEL_PROVIDER` and the `read_model` / `read_effort` helpers per `../squad/shared.md` → **Model Resolution**, then look up each agent's model:
+
 ```bash
-MODEL_PROVIDER=${SQUAD_MODEL_PROVIDER:-}
-if [ -z "$MODEL_PROVIDER" ] && [ -n "${CODEX_THREAD_ID:-}${CODEX_CI:-}" ]; then MODEL_PROVIDER=codex; fi
-if [ -z "$MODEL_PROVIDER" ] && [ -n "${CLAUDE_PROJECT_DIR:-}${CLAUDECODE:-}" ]; then MODEL_PROVIDER=claude; fi
-if [ -z "$MODEL_PROVIDER" ] && [ -d .claude ]; then MODEL_PROVIDER=claude; fi
-if [ -z "$MODEL_PROVIDER" ] && [ -d .codex ]; then MODEL_PROVIDER=codex; fi
-
-read_model() {
-  local key="$1"
-  python3 - "$MODEL_PROVIDER" "$key" <<'PY'
-import json, pathlib, sys
-p = pathlib.Path("../squad/models.json")
-d = json.loads(p.read_text())
-provider = sys.argv[1] or d["default_provider"]
-key = sys.argv[2]
-print(d["providers"][provider][key])
-PY
-}
-
-read_effort() {
-  local key="$1"
-  python3 - "$MODEL_PROVIDER" "$key" <<'PY'
-import json, pathlib, sys
-p = pathlib.Path("../squad/models.json")
-d = json.loads(p.read_text())
-provider = sys.argv[1] or d["default_provider"]
-key = sys.argv[2]
-print(d.get("reasoning_effort", {}).get(provider, {}).get(key, ""))
-PY
-}
-
 MODEL_PLANNER=$(read_model planner)
 MODEL_CRITIC=$(read_model critic)
 MODEL_BUILDER=$(read_model builder)
