@@ -5,6 +5,7 @@ license: MIT
 ---
 
 > Shared context: read `../squad/shared.md` for project config & auth, pipeline levels, status transitions, API endpoints, and error handling.
+> Safety principles: read `../squad/principles.md` — **mandatory, not optional.**
 
 ## `/squad-explore [topic]` — Explore & Plan
 

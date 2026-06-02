@@ -8,6 +8,8 @@ metadata:
 
 # Squad Batch Run
 
+> Safety principles: read `../squad/principles.md` — **mandatory, not optional.**
+
 Execute several squad tasks as one orchestrated batch using **Rolling Wave Planning** by default.
 
 Default loop per task:
