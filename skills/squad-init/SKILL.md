@@ -1,6 +1,6 @@
 ---
 name: squad-init
-description: "Register and initialize the current project in PostgreSQL squad. Usage: /squad-init or /squad-init my-project-name. Run with /squad-init."
+description: "Register the current project on the Squad board so /squad commands target it. Usage: /squad-init or /squad-init my-project-name. Run with /squad-init."
 license: MIT
 ---
 
