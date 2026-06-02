@@ -1,0 +1,29 @@
+"""Shared fixtures: load the skill scripts as modules (their dirs aren't packages)."""
+import importlib.util
+import pathlib
+
+import pytest
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+def _load(rel_path: str, name: str):
+    spec = importlib.util.spec_from_file_location(name, ROOT / rel_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="session")
+def plan_batch():
+    return _load("skills/squad-batch-run/scripts/plan_batch.py", "plan_batch")
+
+
+@pytest.fixture(scope="session")
+def render_mod():
+    return _load("skills/squad/scripts/render_agent_prompt.py", "render_agent_prompt")
+
+
+@pytest.fixture(scope="session")
+def repo_root():
+    return ROOT

@@ -1,0 +1,4 @@
+# Behavioral eval suite (heavy — needs ANTHROPIC_API_KEY + board token; run on-demand/nightly)
+pytest>=8
+pyyaml>=6
+deepeval>=4

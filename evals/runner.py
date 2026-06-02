@@ -1,0 +1,111 @@
+"""Headless-agent runner + board helpers for the behavioral eval suite.
+
+Invokes Claude Code in headless mode (`claude -p --output-format stream-json`) so a
+scenario runs the *real* skills against a live board, then reads board state as the
+deterministic ground truth. Token/URL resolve exactly like the skills do.
+"""
+from __future__ import annotations
+
+import json
+import os
+import pathlib
+import shutil
+import subprocess
+import urllib.error
+import urllib.parse
+import urllib.request
+
+BASE_URL = (os.environ.get("SQUAD_BASE_URL")
+            or "https://steloit-squad.vercel.app").rstrip("/")
+
+
+def token() -> str:
+    t = os.environ.get("SQUAD_AUTH_TOKEN", "")
+    if not t:
+        f = pathlib.Path.home() / ".squad" / "auth"
+        if f.is_file():
+            for line in f.read_text().splitlines():
+                if line.startswith("SQUAD_AUTH_TOKEN="):
+                    t = line.split("=", 1)[1].strip()
+    return t
+
+
+def have_agent() -> bool:
+    """Behavioral evals need the claude CLI + an API key. Skip cleanly otherwise."""
+    return bool(shutil.which("claude")) and bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+
+def have_board() -> bool:
+    return bool(token())
+
+
+# ── Agent invocation ─────────────────────────────────────────────────────────
+def run_agent(prompt: str, cwd: str | None = None, timeout: int = 600) -> dict:
+    """Run one headless turn; return {output, tools, returncode}."""
+    proc = subprocess.run(
+        ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
+         "--dangerously-skip-permissions"],
+        capture_output=True, text=True, timeout=timeout, cwd=cwd,
+    )
+    output, tools = "", []
+    for line in proc.stdout.splitlines():
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if ev.get("type") == "assistant":
+            for block in ev.get("message", {}).get("content", []):
+                if block.get("type") == "text":
+                    output += block["text"]
+                elif block.get("type") == "tool_use":
+                    tools.append(block.get("name", "?"))
+        elif ev.get("type") == "result" and ev.get("result"):
+            output = ev["result"]  # final assembled result wins
+    return {"output": output.strip(), "tools": tools, "returncode": proc.returncode}
+
+
+# ── Board API (Authorization: Bearer) ────────────────────────────────────────
+def _api(method: str, path: str, body: dict | None = None) -> dict:
+    url = f"{BASE_URL}{path}"
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("Authorization", f"Bearer {token()}")
+    if data:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            txt = r.read().decode()
+            return json.loads(txt) if txt else {}
+    except urllib.error.HTTPError as e:
+        return {"_error": e.code, "_body": e.read().decode(errors="replace")}
+
+
+def board_tasks(project: str) -> list[dict]:
+    board = _api("GET", f"/api/board?project={urllib.parse.quote(project)}&summary=true")
+    cols = ["todo", "plan", "plan_review", "impl", "impl_review", "test", "done"]
+    return [t for c in cols for t in (board.get(c) or [])]
+
+
+def get_task(project: str, task_id: int) -> dict:
+    return _api("GET", f"/api/task/{task_id}?project={urllib.parse.quote(project)}")
+
+
+def create_task(project: str, title: str, priority: str = "medium",
+                level: int = 1, description: str = "") -> dict:
+    res = _api("POST", "/api/task",
+               {"title": title, "project": project, "priority": priority,
+                "level": level, "description": description})
+    return res.get("task", res)
+
+
+def delete_task(project: str, task_id: int) -> None:
+    _api("DELETE", f"/api/task/{task_id}?project={urllib.parse.quote(project)}")
+
+
+def delete_tasks_by_title(project: str, marker: str) -> int:
+    n = 0
+    for t in board_tasks(project):
+        if marker in (t.get("title") or ""):
+            delete_task(project, t["id"])
+            n += 1
+    return n

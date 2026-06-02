@@ -1,0 +1,35 @@
+name: evals (behavioral)
+
+# Heavy, LLM-driven behavioral evals: runs the real agent headless against the
+# `squad-eval` board project and scores with DeepEval. Costs tokens — so it runs
+# on-demand and nightly, NOT on every PR. Skips cleanly if secrets are absent.
+#
+# Required repo secrets: ANTHROPIC_API_KEY, SQUAD_AUTH_TOKEN
+# Pre-req: a `squad-eval` project must exist on the board (run /squad-init there once).
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *" # 06:00 UTC nightly
+
+jobs:
+  behavioral:
+    runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      SQUAD_AUTH_TOKEN: ${{ secrets.SQUAD_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Install Claude Code + the Squad skills + deps
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          npx --yes skills add steloit/squad-skills --skill squad --skill squad-refine -g || true
+          pip install -r evals/requirements.txt
+      - name: Run behavioral evals (skips if secrets/CLI absent)
+        run: python -m pytest evals/ -q

@@ -1,0 +1,45 @@
+# Golden behavioral scenarios — run the real agent against the `squad-eval` project.
+# Each scenario: a prompt the agent receives, optional setup, deterministic board
+# assertions (ground truth), and a GEval rubric for output quality.
+#
+# Titles use the marker "[[eval]]" so created tasks are cleaned up after each run.
+
+- id: add-task
+  prompt: >
+    Use the squad skill to add a task to project "squad-eval" titled
+    "[[eval]] smoke add" with priority low and level 1. Report the new task ID.
+  expect:
+    board:
+      task_with_title: "[[eval]] smoke add"
+      priority: low
+      level: 1
+    rubric: >
+      The response confirms a task was created on the board and reports its
+      numeric task ID. It does not claim failure or ask for missing setup.
+
+- id: board-view
+  prompt: >
+    Use the squad skill to show the board for project "squad-eval"
+    (a /squad list / context view). Summarize what's on it.
+  expect:
+    rubric: >
+      The response presents the squad-eval board state (columns / tasks / counts)
+      without errors. It does not report an auth failure or a missing project.
+
+- id: refine-vague
+  setup:
+    create_task:
+      title: "[[eval]] vague: improve onboarding"
+      priority: medium
+      level: 2
+      description: "make onboarding better"
+  prompt: >
+    Use /squad-refine on task {{task_id}} in project "squad-eval". Drive the
+    refinement and save a concrete spec (assume sensible defaults; don't block on
+    questions).
+  expect:
+    task_description_contains_any: ["## Goal", "## Scope", "## Acceptance"]
+    rubric: >
+      The response shows a refined requirement with at least a Goal and Scope (and
+      ideally Acceptance Criteria), grounded and concrete rather than the original
+      one-line description.
