@@ -91,6 +91,14 @@ EFFORT_INSPECTOR=$(read_effort inspector)
 EFFORT_RANGER=$(read_effort ranger)
 ```
 
+#### Decisions Registry
+
+Per `../squad/shared.md` → **Decisions Registry**:
+- Before planning, give the **Planner** the contents of `docs/decisions.md` (if present) as
+  context — like the project brief. It cites relevant `D-NNN` and does **not** re-decide them.
+- At the **Done** transition, if the task established or changed a cross-task convention, append a
+  new `D-NNN` entry to `docs/decisions.md` and reference it from the card's `decision_log`.
+
 #### Implementation
 
 ```bash

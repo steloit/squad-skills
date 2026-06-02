@@ -337,6 +337,31 @@ The `model` value should be the resolved provider model from `models.json` (not 
 | `Ranger` | `title`, `implementation_notes` | `test_results` | `done` or `impl` |
 | All agents | — | append signed entry to `agent_log` | — |
 
+## Decisions Registry
+
+Cross-task decisions live in **`docs/decisions.md`** in the project repo — source-controlled,
+read by any agent, **not on the board**. The board owns *tasks*; the repo owns *decisions*. A
+task's `decision_log` just references entries by id (`D-NNN`).
+
+**Record one when** a choice is *cross-task significant* — a pattern future work must follow, or
+a non-obvious tradeoff. Not every implementation choice earns an entry.
+
+**Format** — append-only; an accepted entry is **never edited**, only superseded:
+
+```
+### D-007 · Multi-step forms use the shared WizardStepper
+Status: accepted · Date: 2026-06-02 · Task: #42 · Supersedes: —
+Context:      Three transaction forms each rolled their own stepper.
+Decision:     All multi-step forms use WizardStepper; validate on Next only.
+Consequences: Consistent UX. Rejected: per-form steppers, modal wizard.
+```
+
+- **Read** the registry before planning; cite relevant `D-NNN` and follow them — never re-decide.
+- **Append** a new entry when a task establishes/changes a convention. To retire one, add a new
+  entry with `Supersedes: D-NNN` and flip the old to `Status: superseded by D-MMM` — the chain is
+  the record, don't delete.
+- If `docs/decisions.md` doesn't exist yet, create it (one-line `# Decisions` header) on first use.
+
 ## Task Dependencies
 
 ### Convention
