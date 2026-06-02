@@ -108,31 +108,19 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
    - Update level/priority/tags if discussed
    - Append to agent_log:
      { "agent": "Refiner", "model": "<MODEL_REFINER>", "message": "Requirements refined. N questions across M rounds.", "timestamp": "..." }
+```
 
 ### Model Routing
 
-Resolve `MODEL_REFINER` from `../squad/models.json`:
+Resolve `MODEL_PROVIDER` + the `read_model` helper per `../squad/shared.md` → **Model Resolution**, then:
 
 ```bash
-MODEL_PROVIDER=${SQUAD_MODEL_PROVIDER:-}
-if [ -z "$MODEL_PROVIDER" ] && [ -n "${CODEX_THREAD_ID:-}${CODEX_CI:-}" ]; then MODEL_PROVIDER=codex; fi
-if [ -z "$MODEL_PROVIDER" ] && [ -n "${CLAUDE_PROJECT_DIR:-}${CLAUDECODE:-}" ]; then MODEL_PROVIDER=claude; fi
-if [ -z "$MODEL_PROVIDER" ] && [ -d .claude ]; then MODEL_PROVIDER=claude; fi
-if [ -z "$MODEL_PROVIDER" ] && [ -d .codex ]; then MODEL_PROVIDER=codex; fi
-
-MODEL_REFINER=$(python3 - "$MODEL_PROVIDER" <<'PY'
-import json, pathlib, sys
-d = json.loads(pathlib.Path("../squad/models.json").read_text())
-provider = sys.argv[1] or d["default_provider"]
-print(d["providers"][provider]["refiner"])
-PY
-)
-```
+MODEL_REFINER=$(read_model refiner)
 ```
 
 ### Interview Tips
 
-- If the user wrote "로그인 기능 추가" → ask: OAuth/email? Session/JWT? Which pages need auth guards?
-- If the user wrote "성능 개선" → ask: Which page/API? Current latency? Target latency? Measurement method?
-- If the user wrote "UI 수정" → ask: Which component? What's wrong now? Mockup/reference? Responsive?
-- Prefer showing concrete options over open-ended "어떤 걸 원하세요?"
+- If the user wrote "add login" → ask: OAuth/email? Session/JWT? Which pages need auth guards?
+- If the user wrote "improve performance" → ask: Which page/API? Current latency? Target latency? Measurement method?
+- If the user wrote "fix the UI" → ask: Which component? What's wrong now? Mockup/reference? Responsive?
+- Prefer showing concrete options over open-ended "what do you want?"

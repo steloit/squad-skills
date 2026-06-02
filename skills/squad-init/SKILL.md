@@ -61,7 +61,12 @@ Use the Write tool to create `.squadrc`.
 The token is resolved from `SQUAD_AUTH_TOKEN` (env) or `~/.squad/auth`. If neither is set, tell the user how to configure it — never invent a token or write one into a project file:
 
 ```bash
-if [ -z "${SQUAD_AUTH_TOKEN:-}" ] && [ ! -f "$HOME/.squad/auth" ]; then
+# Resolve the token (env → ~/.squad/auth) and build the auth header used by 2c.
+AUTH_TOKEN="${SQUAD_AUTH_TOKEN:-}"
+[ -z "$AUTH_TOKEN" ] && [ -f "$HOME/.squad/auth" ] && AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$HOME/.squad/auth" | cut -d= -f2-)
+AUTH_HEADER=(); [ -n "$AUTH_TOKEN" ] && AUTH_HEADER=(-H "Authorization: Bearer $AUTH_TOKEN")
+
+if [ -z "$AUTH_TOKEN" ]; then
   echo "No Squad token found. Set it once (shared across all projects):"
   echo "  export SQUAD_AUTH_TOKEN='<token>'      # add to ~/.zshrc to persist"
   echo "  …or: mkdir -p ~/.squad && printf 'SQUAD_AUTH_TOKEN=%s\\n' '<token>' > ~/.squad/auth && chmod 600 ~/.squad/auth"
@@ -85,33 +90,22 @@ CATEGORY="personal"
 echo "$PROJECT" | grep -qiE 'skill|squad' && CATEGORY="skills"
 echo "$PROJECT" | grep -qiE 'tool|api|cli'  && CATEGORY="tools"
 
-# Infer purpose from CLAUDE.md (first non-heading, non-empty line)
-PURPOSE=""
+# Infer purpose + stack from CLAUDE.md (best-effort)
+PURPOSE=""; STACK=""
 if [ -f "CLAUDE.md" ]; then
-  PURPOSE=$(grep -v '^#' CLAUDE.md | grep -v '^---' | grep -v '^\s*$' | head -1 | cut -c1-300)
-fi
-
-# Infer stack from CLAUDE.md
-STACK=""
-if [ -f "CLAUDE.md" ]; then
+  PURPOSE=$(grep -v '^#' CLAUDE.md | grep -v '^---' | grep -v '^[[:space:]]*$' | head -1 | cut -c1-300)
   STACK=$(grep -iE 'stack|tech|typescript|javascript|python|react|vue|next|node|vite' CLAUDE.md | head -1 | cut -c1-200)
 fi
-
-# Infer repo_url from git remote
 REPO_URL=$(git remote get-url origin 2>/dev/null || echo "")
 
-# Upsert project
-PROJ_PAYLOAD=$(python3 -c "
-import json
-print(json.dumps({
-  'id': '$PROJECT',
-  'name': '$PROJECT',
-  'purpose': '''$PURPOSE''' if '''$PURPOSE''' else None,
-  'stack': '''$STACK''' if '''$STACK''' else None,
-  'category': '$CATEGORY',
-  'repo_url': '$REPO_URL' if '$REPO_URL' else None,
-}))
-")
+# Build the payload safely with jq — never interpolate file/user text into code (see shared.md "JSON Safety").
+PROJ_PAYLOAD=$(jq -n \
+  --arg id "$PROJECT" --arg name "$PROJECT" --arg category "$CATEGORY" \
+  --arg purpose "$PURPOSE" --arg stack "$STACK" --arg repo_url "$REPO_URL" \
+  '{id: $id, name: $name, category: $category,
+    purpose:  (if $purpose  == "" then null else $purpose  end),
+    stack:    (if $stack    == "" then null else $stack    end),
+    repo_url: (if $repo_url == "" then null else $repo_url end)}')
 curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/projects" \
   -H 'Content-Type: application/json' \
   -d "$PROJ_PAYLOAD" > /dev/null 2>&1 || true

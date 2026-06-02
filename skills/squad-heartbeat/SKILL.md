@@ -28,7 +28,7 @@ Scan all active projects (or a single project) for tasks that have had no agent 
    BASE_URL="${SQUAD_BASE_URL:-}"
    [ -z "$BASE_URL" ] && [ -f "$HOME/.squad/config" ] && BASE_URL=$(grep '^SQUAD_BASE_URL=' "$HOME/.squad/config" | cut -d= -f2-)
    BASE_URL="${BASE_URL:-https://steloit-squad.vercel.app}"
-   AUTH_HEADER=(-H "Authorization: Bearer $AUTH_TOKEN")
+   AUTH_HEADER=(); [ -n "$AUTH_TOKEN" ] && AUTH_HEADER=(-H "Authorization: Bearer $AUTH_TOKEN")
 
    Parse CLI arguments:
    - --project X  → scan only project X (default: all active projects)
@@ -134,7 +134,7 @@ Scan all active projects (or a single project) for tasks that have had no agent 
      auth_token = sys.argv[7]
 
      auth_header = ['-H', f'Authorization: Bearer {auth_token}'] if auth_token else []
-     now = datetime.datetime.utcnow().isoformat() + 'Z'
+     now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
      # Fetch current agent_log
      result = subprocess.run(
@@ -246,7 +246,7 @@ if not projects:
     sys.exit(0)
 
 # ── Scan boards ──────────────────────────────────────────────────
-now = datetime.datetime.utcnow()
+now = datetime.datetime.now(datetime.timezone.utc)
 active_columns = ["todo", "plan", "plan_review", "impl", "impl_review", "test"]
 stagnant_tasks = []
 
@@ -293,9 +293,12 @@ for proj in projects:
 
             # Parse timestamp and compute days
             try:
-                # Handle various ISO formats
-                clean_ts = re.sub(r"\.\d+", "", last_ts.replace("Z", "+00:00").replace("+00:00", ""))
+                # Normalize: drop fractional seconds + map 'Z' → '+00:00' (fromisoformat is strict pre-3.11),
+                # then coerce to UTC-aware so it compares with `now` (also UTC-aware).
+                clean_ts = re.sub(r"(T\d\d:\d\d:\d\d)\.\d+", r"\1", last_ts.strip()).replace("Z", "+00:00")
                 ts_dt = datetime.datetime.fromisoformat(clean_ts)
+                if ts_dt.tzinfo is None:
+                    ts_dt = ts_dt.replace(tzinfo=datetime.timezone.utc)
             except (ValueError, AttributeError):
                 print(f"Warning: task #{task_id} has unparseable timestamp '{last_ts}', skipping", file=sys.stderr)
                 continue
@@ -351,7 +354,7 @@ for t in stagnant_tasks:
             "agent": "Heartbeat",
             "model": "system",
             "message": f"\u26a0\ufe0f Stagnant {t['days']} days in {t['status']}. Last activity: {t['last_ts']}",
-            "timestamp": now.isoformat() + "Z",
+            "timestamp": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         })
 
         curl_patch(

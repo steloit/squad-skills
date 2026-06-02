@@ -4,7 +4,7 @@ description: Manage tasks on the Squad board. Supports task CRUD (add, edit, mov
 license: MIT
 ---
 
-> Shared context: read `shared.md` for DB path, pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
+> Shared context: read `shared.md` for project config & auth, pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
 
 ## Commands
 
@@ -33,9 +33,9 @@ BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summar
 
 ### `/squad move <ID> <status>` — Move Task
 
-> **반드시 `shared.md` → Move Protocol 순서를 따를 것.**
-> Step 1(현재 status+level 확인) → Step 2(매트릭스 조회) → Step 3(이동 실행).
-> 400 시 응답의 `.allowed[0]`으로 1회 자기 교정, 2회 실패 시 사용자 알림.
+> **Always follow `shared.md` → Move Protocol in order.**
+> Step 1 (check current status + level) → Step 2 (consult the matrix) → Step 3 (execute the move).
+> On 400: self-correct once via the response's `.allowed[0]`; notify the user after 2 failures.
 
 ### `/squad edit <ID>` — Edit Task
 
