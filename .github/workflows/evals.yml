@@ -1,16 +1,24 @@
 name: evals (behavioral)
 
 # Heavy, LLM-driven behavioral evals: runs the real agent headless against the
-# `squad-eval` board project and scores with DeepEval. Costs tokens — so it runs
+# `squad-eval` board project, N trials/scenario, and gates on regressions vs the
+# git-versioned trailing baseline (evals/history.jsonl). Costs tokens — so it runs
 # on-demand and nightly, NOT on every PR. Skips cleanly if secrets are absent.
 #
-# Required repo secrets: ANTHROPIC_API_KEY, SQUAD_AUTH_TOKEN
-# Pre-req: a `squad-eval` project must exist on the board (run /squad-init there once).
+# Required repo secrets: ANTHROPIC_API_KEY (CI has no interactive Claude login), SQUAD_AUTH_TOKEN
+# Pre-req: the `squad-eval` project exists on the board (already registered).
 
 on:
   workflow_dispatch:
+    inputs:
+      trials:
+        description: "Trials per scenario"
+        default: "5"
   schedule:
     - cron: "0 6 * * *" # 06:00 UTC nightly
+
+permissions:
+  contents: write # push the rolling history.jsonl back to the branch
 
 jobs:
   behavioral:
@@ -18,6 +26,11 @@ jobs:
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       SQUAD_AUTH_TOKEN: ${{ secrets.SQUAD_AUTH_TOKEN }}
+      # Pin the agent model so CI cost is predictable (never silently bills Opus/1M rates).
+      # Sonnet 4.6 ≈ 3-5× cheaper than Opus; swap to claude-haiku-4-5-20251001 to go cheaper still.
+      ANTHROPIC_MODEL: claude-sonnet-4-6
+      DEEPEVAL_TELEMETRY_OPT_OUT: "YES"
+      ERROR_REPORTING: "NO"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
@@ -31,5 +44,39 @@ jobs:
           npm install -g @anthropic-ai/claude-code
           npx --yes skills add steloit/squad-skills --skill squad --skill squad-refine -g || true
           pip install -r evals/requirements.txt
-      - name: Run behavioral evals (skips if secrets/CLI absent)
-        run: python -m pytest evals/ -q
+
+      - name: Run behavioral evals (gated)
+        id: evals
+        continue-on-error: true
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "ANTHROPIC_API_KEY not set — skipping behavioral evals in CI."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python evals/run_evals.py --heavy --trials "${{ github.event.inputs.trials || '5' }}" --gate
+
+      - name: Upload trend report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: evals/results/report.html
+          if-no-files-found: ignore
+
+      - name: Commit rolling history
+        if: steps.evals.outputs.skipped != 'true'
+        run: |
+          if ! git diff --quiet -- evals/history.jsonl; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add evals/history.jsonl
+            git commit -m "chore(evals): nightly trend [skip ci]"
+            git push
+          fi
+
+      - name: Enforce gate
+        if: steps.evals.outcome == 'failure'
+        run: |
+          echo "::error::Behavioral eval gate failed — regression or hard board-state failure."
+          exit 1

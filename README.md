@@ -68,9 +68,9 @@ Two tiers — full detail in **[EVALS.md](EVALS.md)**:
   ```bash
   pip install -r tests/requirements.txt && python -m pytest tests/ -q
   ```
-- **`evals/` — behavioral** (DeepEval): runs the real agent headless against a `squad-eval` board project, scored on **board-state ground truth + a GEval rubric**. Needs `ANTHROPIC_API_KEY` + a board token; runs on-demand/nightly (costs tokens). Skips cleanly without them.
+- **`evals/` — behavioral** (DeepEval): runs the real agent headless against a `squad-eval` board project (**N trials/scenario**), scored on **board-state ground truth + a GEval rubric**. Records to a git-versioned `history.jsonl` and flags **regressions vs a trailing baseline** (Welch's t-test) + writes an HTML trend dashboard. Uses your **Claude Code login — no API key needed locally** (+ a board token); on-demand/nightly (costs tokens/credits).
   ```bash
-  pip install -r evals/requirements.txt && python -m pytest evals/ -q
+  pip install -r evals/requirements.txt && python evals/run_evals.py --trials 3
   ```
 
 ### Known gap

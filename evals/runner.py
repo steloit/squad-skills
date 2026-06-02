@@ -31,8 +31,19 @@ def token() -> str:
 
 
 def have_agent() -> bool:
-    """Behavioral evals need the claude CLI + an API key. Skip cleanly otherwise."""
-    return bool(shutil.which("claude")) and bool(os.environ.get("ANTHROPIC_API_KEY"))
+    """Behavioral evals need the `claude` CLI. Auth comes from the user's Claude Code
+    login (subscription) OR ANTHROPIC_API_KEY — either works for `claude -p`, so no
+    separate API key is required."""
+    return bool(shutil.which("claude"))
+
+
+def claude_text(prompt: str, timeout: int = 180) -> str:
+    """A plain headless turn (no tools) — used as a keyless LLM judge via the CLI login."""
+    proc = subprocess.run(
+        ["claude", "-p", prompt, "--output-format", "text"],
+        capture_output=True, text=True, timeout=timeout,
+    )
+    return (proc.stdout or "").strip()
 
 
 def have_board() -> bool:
@@ -41,14 +52,26 @@ def have_board() -> bool:
 
 # ── Agent invocation ─────────────────────────────────────────────────────────
 def run_agent(prompt: str, cwd: str | None = None, timeout: int = 600) -> dict:
-    """Run one headless turn; return {output, tools, returncode}."""
-    proc = subprocess.run(
-        ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
-         "--dangerously-skip-permissions"],
-        capture_output=True, text=True, timeout=timeout, cwd=cwd,
-    )
+    """Run one headless turn; return {output, tools, returncode}.
+
+    On timeout the run is recorded as a FAILED trial (returncode -1) rather than
+    crashing the suite — headless `claude -p` can hang on parallel sub-agent
+    fan-out under a non-TTY parent (claude-code#56540), so heavy multi-agent
+    scenarios must fail-soft and let the gate flag them.
+    """
+    try:
+        proc = subprocess.run(
+            ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
+             "--dangerously-skip-permissions"],
+            capture_output=True, text=True, timeout=timeout, cwd=cwd,
+        )
+        stdout, returncode = proc.stdout, proc.returncode
+    except subprocess.TimeoutExpired as e:
+        stdout = e.stdout if isinstance(e.stdout, str) else (
+            e.stdout.decode(errors="replace") if e.stdout else "")
+        returncode = -1
     output, tools = "", []
-    for line in proc.stdout.splitlines():
+    for line in (stdout or "").splitlines():
         try:
             ev = json.loads(line)
         except json.JSONDecodeError:
@@ -61,7 +84,7 @@ def run_agent(prompt: str, cwd: str | None = None, timeout: int = 600) -> dict:
                     tools.append(block.get("name", "?"))
         elif ev.get("type") == "result" and ev.get("result"):
             output = ev["result"]  # final assembled result wins
-    return {"output": output.strip(), "tools": tools, "returncode": proc.returncode}
+    return {"output": output.strip(), "tools": tools, "returncode": returncode}
 
 
 # ── Board API (Authorization: Bearer) ────────────────────────────────────────
@@ -109,3 +132,19 @@ def delete_tasks_by_title(project: str, marker: str) -> int:
             delete_task(project, t["id"])
             n += 1
     return n
+
+
+# ── Projects (squad-init creates one; need read/delete for cleanup) ────────────
+def list_projects() -> list[dict]:
+    res = _api("GET", "/api/projects")
+    if isinstance(res, list):
+        return res
+    return res.get("projects", []) if isinstance(res, dict) else []
+
+
+def get_project(project: str) -> dict:
+    return _api("GET", f"/api/projects/{urllib.parse.quote(project)}")
+
+
+def delete_project(project: str) -> None:
+    _api("DELETE", f"/api/projects/{urllib.parse.quote(project)}")

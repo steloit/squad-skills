@@ -1,4 +1,4 @@
-# Behavioral eval suite (heavy — needs ANTHROPIC_API_KEY + board token; run on-demand/nightly)
-pytest>=8
+# Behavioral eval harness (evals/run_evals.py) — runs the real agent against a board.
+# Needs the `claude` CLI (agent + keyless judge) + a board token; ANTHROPIC_API_KEY for CI.
 pyyaml>=6
 deepeval>=4
