@@ -1,0 +1,195 @@
+# Golden behavioral scenarios — run the real agent against the `squad-eval` project.
+# Coverage: all 5 core skills (squad ×2, squad-init, squad-refine, squad-explore, squad-run).
+#
+# Each scenario: a `prompt` the agent receives, optional `setup`, deterministic `expect`
+# checks (board/file ground truth), and a GEval `rubric` for output quality.
+#
+# expect schema:
+#   board_task: {title_contains, priority, level, status, status_not, tags_contains,
+#                description_contains_any[], progressed}   # locate one task, assert fields
+#   board_has:  [{title_contains|tags_contains}, ...]      # ≥1 task must match each
+#   file_contains: {path, any[]}                           # a file in the run cwd
+#   rubric: "..."                                          # LLM-as-judge quality bar
+#
+# setup: create_task{}, workdir_files{path: content}, git_init: true, no_squadrc: true
+# heavy: true → skipped unless --heavy (spawns sub-agents / commits; costlier).
+# Tasks created during a trial are deleted afterward (snapshot-diff + "[[eval]]" sweep).
+
+# ── squad (create) ──────────────────────────────────────────────────────────
+- id: add-task
+  prompt: >
+    Use the squad skill to add a task to project "squad-eval" titled
+    "[[eval]] smoke add" with priority low and level 1. Assume sensible defaults
+    for anything else and do not ask questions. Report the new task ID.
+  expect:
+    board_task:
+      title_contains: "[[eval]] smoke add"
+      priority: low
+      level: 1
+    rubric: >
+      The response confirms a task was created on the board and reports its
+      numeric task ID. It does not claim failure or ask for missing setup.
+
+# ── squad (read) ────────────────────────────────────────────────────────────
+- id: board-view
+  prompt: >
+    Use the squad skill to show the board for project "squad-eval"
+    (a /squad list / context view). Summarize what's on it.
+  expect:
+    rubric: >
+      The response presents the squad-eval board state (columns / tasks / counts)
+      without errors. It does not report an auth failure or a missing project.
+
+# ── squad-init (register a project) ──────────────────────────────────────────
+- id: squad-init
+  setup:
+    git_init: true
+    no_squadrc: true          # squad-init is the skill that WRITES .squadrc
+  prompt: >
+    Use /squad-init to register this repository on the Squad board under the
+    project name "squad-eval-initprobe". Assume sensible defaults and do not ask
+    questions; if a .squadrc already exists, overwrite it.
+  expect:
+    file_contains:
+      path: .squadrc
+      any: ["SQUAD_PROJECT="]
+    rubric: >
+      The response confirms the project was registered on the Squad board and a
+      local .squadrc was written. It does not report an auth failure or block
+      waiting for input.
+
+# ── squad-refine (rough task → concrete spec) ─────────────────────────────────
+- id: refine-vague
+  setup:
+    create_task:
+      title: "[[eval]] vague: improve onboarding"
+      priority: medium
+      level: 2
+      description: "make onboarding better"
+  prompt: >
+    Use /squad-refine on task {{task_id}} in project "squad-eval". Drive the
+    refinement and save a concrete spec (assume sensible defaults; don't block on
+    questions).
+  expect:
+    board_task:
+      title_contains: "[[eval]] vague"
+      description_contains_any: ["## Goal", "## Scope", "## Acceptance"]
+    rubric: >
+      The response shows a refined requirement with at least a Goal and Scope (and
+      ideally Acceptance Criteria), grounded and concrete rather than the original
+      one-line description.
+
+# ── squad-explore (codebase → phased task plan) ───────────────── heavy ───────
+- id: explore
+  heavy: true
+  timeout: 1200          # spawns Explore + Plan sub-agents
+  setup:
+    workdir_files:
+      "src/app.py": |
+        def create_user(payload):
+            # no validation today
+            return {"id": 1, **payload}
+      "src/api.py": |
+        from app import create_user
+        def handle(req):
+            return create_user(req.json)
+  prompt: >
+    Use /squad-explore on the topic "add input validation to the user-creation
+    flow" for project "squad-eval". Assume sensible defaults; do not ask clarifying
+    questions; pick a reasonable direction and create the phased task cards.
+  expect:
+    board_has:
+      - title_contains: "[Explore]"
+      - tags_contains: "explore"
+    rubric: >
+      The response shows a brief codebase exploration and reports creating phased
+      task cards (including an [Explore] report task) on the board — not a refusal
+      or a request for clarification.
+
+# ── squad-run (execute the pipeline on a task) ────────────────── heavy ───────
+- id: run-step
+  heavy: true
+  timeout: 1200          # runs the multi-agent pipeline + commits
+  setup:
+    git_init: true
+    create_task:
+      title: "[[eval]] run: create hello file"
+      priority: low
+      level: 1
+      description: "Create a file HELLO.md containing the single line: hello from squad-eval."
+  prompt: >
+    Run the squad pipeline on task {{task_id}} in project "squad-eval" using
+    `/squad-run {{task_id}} --auto` so it does not pause for approval. Assume
+    sensible defaults and do not ask questions.
+  expect:
+    board_task:
+      title_contains: "[[eval]] run"
+      progressed: true
+    rubric: >
+      The response shows the squad pipeline executing at least one agent on the
+      task and advancing it (a plan and/or an implementation step), rather than an
+      error or a request for approval.
+
+# ── harder scenarios (headroom, so "better" is visible — see EVALS.md) ────────
+# Demanding multi-criteria rubrics: the skills should land BELOW 1.0 here, leaving
+# room for improvements to register as 🟢 instead of saturating at the ceiling.
+
+# squad — judgment: vague bug report → well-triaged task
+- id: squad-triage
+  prompt: >
+    Use the squad skill to add ONE task to project "squad-eval" for this report:
+    "Users say the dashboard is slow and sometimes crashes when filtering large date
+    ranges." Prefix the title with "[[eval]] triage:". Choose an appropriate priority
+    and level yourself, set relevant tags, and briefly justify your choices. Assume
+    sensible defaults; do not ask questions.
+  expect:
+    board_task:
+      title_contains: "[[eval]] triage:"
+    rubric: >
+      Full marks ONLY if the task: (1) recognizes these are TWO distinct problems —
+      slowness AND crashes — not one vague issue; (2) sets priority "high" (crashes are
+      user-facing); (3) sets level 3 (needs investigation + reproduction, not a trivial
+      fix); (4) carries at least two relevant tags (e.g. performance, bug, dashboard);
+      and (5) justifies EACH of priority, level, and tags specifically to this report.
+      Reduce the score for every item that is missing, generic, or wrong — priority
+      below high, level below 3, one-or-zero useful tags, treating it as a single vague
+      issue, or boilerplate reasoning.
+
+# squad-refine — rigor: deceptively-simple task → testable spec that surfaces gaps
+- id: refine-gaps
+  setup:
+    create_task:
+      title: "[[eval]] add CSV export"
+      priority: medium
+      level: 2
+      description: "Add CSV export to the reports page. Should be fast."
+  prompt: >
+    Use /squad-refine on task {{task_id}} in project "squad-eval". Produce a rigorous
+    spec: define testable acceptance criteria and surface the ambiguities/edge cases
+    in the original (what "fast" means, large exports, special characters in data).
+    Assume sensible defaults; do not block on questions.
+  expect:
+    board_task:
+      description_contains_any: ["## Acceptance", "## Edge"]
+    rubric: >
+      The refined description defines TESTABLE acceptance criteria (measurable, not
+      vague), surfaces at least one concrete edge case or ambiguity from the original
+      (e.g. quantifies "fast", handles large exports or special characters), and stays
+      specific to CSV export rather than generic boilerplate. Penalize leaving "fast"
+      undefined, generic filler sections, or acceptance criteria that aren't verifiable.
+
+# squad — robustness: a project that does not exist must be handled gracefully
+- id: bad-project
+  prompt: >
+    Use the squad skill to show the board for project
+    "definitely-not-a-real-project-zzz" and report what you find. Assume sensible
+    defaults; do not ask questions.
+  expect:
+    rubric: >
+      Full marks ONLY if the response: (1) correctly diagnoses that the project is
+      UNREGISTERED / unknown — explicitly distinguished from a registered-but-empty
+      board; (2) fabricates NO tasks; (3) gives the precise remedy (register it with
+      /squad-init); and (4) shows no raw HTTP status or stack-trace dump. Reduce the
+      score for a generic "no tasks found" that fails to diagnose the unregistered
+      state, for any hallucinated task, for omitting the /squad-init remedy, or for an
+      error dump.

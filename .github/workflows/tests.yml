@@ -1,0 +1,21 @@
+name: tests
+
+# Deterministic unit tests for the skill scripts. No secrets, no LLM, no network —
+# the per-PR regression gate. (Behavioral evals run separately in evals.yml.)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deterministic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r tests/requirements.txt
+      - run: python -m pytest tests/ -q

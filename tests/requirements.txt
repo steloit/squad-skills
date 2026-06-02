@@ -1,0 +1,2 @@
+# Deterministic test suite (no keys, runs on every PR)
+pytest>=8

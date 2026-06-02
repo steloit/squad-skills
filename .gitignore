@@ -16,3 +16,7 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Local eval reports (HTML/JSON artifacts)
+evals/results/
+.deepeval*
