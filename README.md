@@ -23,7 +23,7 @@ You get the **5 core skills**: `squad` (board), `squad-init` (register a project
 
 ### Maintainers — internal skills
 
-The repo also ships specialized skills (`squad-batch-run`, `squad-review-*`, `squad-gen-wiki`, `squad-heartbeat`, `squad-kickstart`) flagged `metadata.internal: true`, so they stay hidden from the install above. To pull them too:
+The repo also ships specialized skills (`squad-batch-run`, `squad-gen-wiki`, `squad-heartbeat`, `squad-kickstart`) flagged `metadata.internal: true`, so they stay hidden from the install above. To pull them too:
 
 ```bash
 INSTALL_INTERNAL_SKILLS=1 npx skills add steloit/squad-skills
@@ -59,7 +59,6 @@ mkdir -p ~/.squad && printf 'SQUAD_AUTH_TOKEN=%s\n' '<your-shared-token>' > ~/.s
 | `/squad-explore` | Codebase exploration → phased task plan |
 | `/squad-gen-wiki` | Synthesize a project wiki |
 | `/squad-heartbeat` | Detect stagnant tasks |
-| `/squad-review-pr` | PR code review (auto-detects backend/frontend/PLC) |
 
 ## License
 
