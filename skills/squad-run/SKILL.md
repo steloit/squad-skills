@@ -10,14 +10,13 @@ license: MIT
 
 1. User mentions a squad task ID and requests implementation:
    - "implement task #NNN" / "build task NNN" / "do NNN" / "run NNN"
-   - Korean equivalents: "태스크 NNN 구현해줘" / "NNN 해줘" / "NNN 번 작업해줘"
    - Any message pairing a task number with implement / build / work on / do
 
 2. Claude has proposed implementing a specific squad task and the user confirms:
-   - Pattern: Claude says "Shall I implement task #NNN [title]?" → User replies "yes", "ok", "go", "do it", "응", "해줘", "그래", "ㅇㅇ"
+   - Pattern: Claude says "Shall I implement task #NNN [title]?" → User replies "yes", "ok", "go", "do it"
    - This confirmation **must** trigger `/squad-run <ID>` automatically — do not implement manually
 
-3. User says "next task" / "continue" / "다음 태스크 해줘" when a task is in progress:
+3. User says "next task" / "continue" when a task is in progress:
    - Fetch board context first, identify next todo task, then run it
 
 **When auto-triggered**: extract task ID and call `/squad-run <ID>` — never implement code manually and patch squad state afterward.

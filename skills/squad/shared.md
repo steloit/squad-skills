@@ -3,7 +3,7 @@
 Manages project tasks in **PostgreSQL** via the Squad board HTTP API.
 All projects share a single centralized DB on the deployed Squad board.
 
-## DB Path & Project Config
+## Project Config & Auth
 
 Read the project name from `.squadrc` (`SQUAD_PROJECT=`, committed at the repo root, created by `/squad-init`).
 Auth is resolved tool-agnostically: the `SQUAD_AUTH_TOKEN` env var first, then the `~/.squad/auth` credential file (mode 600).
@@ -79,11 +79,11 @@ Req → Plan → Review Plan → Impl → Review Impl → Test → Done
 
 Model keys are resolved to real provider models through `models.json`.
 
-### Move Protocol (이동 전 필수)
+### Move Protocol (required before any move)
 
-카드를 이동하기 전 반드시 이 순서를 따른다.
+Always follow this sequence before moving a card.
 
-**Step 1 — 현재 상태 확인**
+**Step 1 — Check current state**
 
 ```bash
 TASK=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=status,level")
@@ -91,9 +91,9 @@ STATUS=$(echo "$TASK" | jq -r '.status')
 LEVEL=$(echo "$TASK" | jq -r '.level')
 ```
 
-**Step 2 — Level × Status 매트릭스로 다음 상태 결정**
+**Step 2 — Determine next status via the Level × Status matrix**
 
-| 현재 Status  | L1 Quick | L2 Standard       | L3 Full                |
+| Current Status | L1 Quick | L2 Standard       | L3 Full                |
 |-------------|----------|-------------------|------------------------|
 | `todo`      | `impl`   | `plan`            | `plan`                 |
 | `plan`      | —        | `impl`            | `plan_review` / `todo` |
@@ -103,7 +103,7 @@ LEVEL=$(echo "$TASK" | jq -r '.level')
 | `test`      | —        | —                 | `done` / `impl`        |
 | `done`      | (terminal) | (terminal)      | (terminal)             |
 
-**Step 3 — 이동 실행**
+**Step 3 — Execute the move**
 
 ```bash
 RESPONSE=$(curl -s -w "\n%{http_code}" "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
@@ -113,24 +113,24 @@ HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | head -1)
 ```
 
-**400 발생 시 자기 교정 (1회)**
+**Self-correction on 400 (once)**
 
 ```bash
 if [ "$HTTP_CODE" = "400" ]; then
-  # API 응답의 allowed 배열에서 유효한 목적지를 읽어 재시도
+  # Read a valid destination from the response's allowed[] array and retry
   ALLOWED=$(echo "$BODY" | jq -r '.allowed[0]')
   if [ -n "$ALLOWED" ] && [ "$ALLOWED" != "null" ]; then
     curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
       -H 'Content-Type: application/json' \
       -d "{\"status\": \"$ALLOWED\"}"
   else
-    # allowed도 없으면: 상태 유지, agent_log에 기록, 사용자에게 알림
+    # If allowed is also empty: keep status, log to agent_log, notify the user
     echo "ERROR: cannot move task $ID from $STATUS — API returned: $BODY"
   fi
 fi
 ```
 
-2회 연속 실패 시: 상태 유지, `agent_log`에 실패 내역 기록, 사용자에게 알림.
+On 2 consecutive failures: keep status, record the failure in `agent_log`, notify the user.
 
 ## API Access
 

@@ -132,7 +132,7 @@ PY
 
 ### Interview Tips
 
-- If the user wrote "로그인 기능 추가" → ask: OAuth/email? Session/JWT? Which pages need auth guards?
-- If the user wrote "성능 개선" → ask: Which page/API? Current latency? Target latency? Measurement method?
-- If the user wrote "UI 수정" → ask: Which component? What's wrong now? Mockup/reference? Responsive?
-- Prefer showing concrete options over open-ended "어떤 걸 원하세요?"
+- If the user wrote "add login" → ask: OAuth/email? Session/JWT? Which pages need auth guards?
+- If the user wrote "improve performance" → ask: Which page/API? Current latency? Target latency? Measurement method?
+- If the user wrote "fix the UI" → ask: Which component? What's wrong now? Mockup/reference? Responsive?
+- Prefer showing concrete options over open-ended "what do you want?"

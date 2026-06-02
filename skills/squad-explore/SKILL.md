@@ -4,7 +4,7 @@ description: Codebase exploration skill for uncertain implementation direction. 
 license: MIT
 ---
 
-> Shared context: read `../squad/shared.md` for DB path, pipeline levels, status transitions, API endpoints, and error handling.
+> Shared context: read `../squad/shared.md` for project config & auth, pipeline levels, status transitions, API endpoints, and error handling.
 
 ## `/squad-explore [topic]` — Explore & Plan
 

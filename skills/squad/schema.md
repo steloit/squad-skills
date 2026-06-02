@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 | `plan_review_count` | INTEGER | Plan review iteration count |
 | `impl_review_count` | INTEGER | Impl review iteration count |
 | `level` | INTEGER | Pipeline level: 1 (Quick), 2 (Standard), 3 (Full) |
-| `attachments` | TEXT | JSON array of attachment file names |
+| `attachments` | TEXT | JSON array of attachment objects: `{filename, storedName, url, size, uploaded_at}` |
 | `notes` | TEXT | JSON array of note objects |
 | `decision_log` | TEXT | Key architecture decisions by Planner (markdown table) |
 | `done_when` | TEXT | Verifiable completion criteria written by Planner (markdown checklist) |
@@ -220,4 +220,4 @@ CREATE TABLE IF NOT EXISTS project_links (
 ## Schema Migrations
 
 New columns are added with `ADD COLUMN IF NOT EXISTS` in PostgreSQL — idempotent, no try/catch needed.
-The `kanban-api.ts` plugin runs migrations automatically on server startup.
+Schema migrations run automatically on the board server at startup.
