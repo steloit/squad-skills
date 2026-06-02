@@ -164,7 +164,7 @@ log.append({
   'model': 'MODEL',
   'message': 'MESSAGE',
   'tokens': TOKENS,  # optional: estimated input+output tokens, omit if unknown
-  'timestamp': datetime.datetime.utcnow().isoformat() + 'Z'
+  'timestamp': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 })
 subprocess.run(['curl','-s',*auth_header,'-X','PATCH',f'{base_url}/api/task/{task_id}?project={project}','-H','Content-Type: application/json','-d',json.dumps({'agent_log':json.dumps(log)})], capture_output=True)
 "
