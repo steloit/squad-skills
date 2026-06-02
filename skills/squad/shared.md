@@ -24,7 +24,7 @@ BASE_URL="${SQUAD_BASE_URL:-}"
 BASE_URL="${BASE_URL:-https://steloit-squad.vercel.app}"
 AUTH_HEADER=()
 if [ -n "$AUTH_TOKEN" ]; then
-  AUTH_HEADER=(-H "X-Kanban-Auth: $AUTH_TOKEN")
+  AUTH_HEADER=(-H "Authorization: Bearer $AUTH_TOKEN")
 fi
 ```
 

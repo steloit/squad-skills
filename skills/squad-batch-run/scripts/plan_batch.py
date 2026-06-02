@@ -105,7 +105,7 @@ def fetch_task(
     auth_state = "present" if auth_token else "missing"
     request = urllib.request.Request(url)
     if auth_token:
-        request.add_header("X-Kanban-Auth", auth_token)
+        request.add_header("Authorization", f"Bearer {auth_token}")
     try:
         with urllib.request.urlopen(request, timeout=10, context=ssl_context) as response:
             return json.load(response)

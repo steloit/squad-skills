@@ -26,7 +26,7 @@ Scan all active projects (or a single project) for tasks that have had no agent 
    BASE_URL="${SQUAD_BASE_URL:-}"
    [ -z "$BASE_URL" ] && [ -f "$HOME/.squad/config" ] && BASE_URL=$(grep '^SQUAD_BASE_URL=' "$HOME/.squad/config" | cut -d= -f2-)
    BASE_URL="${BASE_URL:-https://steloit-squad.vercel.app}"
-   AUTH_HEADER=(-H "X-Kanban-Auth: $AUTH_TOKEN")
+   AUTH_HEADER=(-H "Authorization: Bearer $AUTH_TOKEN")
 
    Parse CLI arguments:
    - --project X  → scan only project X (default: all active projects)
@@ -131,7 +131,7 @@ Scan all active projects (or a single project) for tasks that have had no agent 
      base_url = sys.argv[6]
      auth_token = sys.argv[7]
 
-     auth_header = ['-H', f'X-Kanban-Auth: {auth_token}'] if auth_token else []
+     auth_header = ['-H', f'Authorization: Bearer {auth_token}'] if auth_token else []
      now = datetime.datetime.utcnow().isoformat() + 'Z'
 
      # Fetch current agent_log
@@ -214,14 +214,14 @@ base_url = base_url or "https://steloit-squad.vercel.app"
 def curl_get(url):
     cmd = ["curl", "-s", url]
     if auth_token:
-        cmd += ["-H", f"X-Kanban-Auth: {auth_token}"]
+        cmd += ["-H", f"Authorization: Bearer {auth_token}"]
     r = subprocess.run(cmd, capture_output=True, text=True)
     return json.loads(r.stdout)
 
 def curl_patch(url, payload):
     cmd = ["curl", "-s", "-X", "PATCH", url, "-H", "Content-Type: application/json", "-d", json.dumps(payload)]
     if auth_token:
-        cmd += ["-H", f"X-Kanban-Auth: {auth_token}"]
+        cmd += ["-H", f"Authorization: Bearer {auth_token}"]
     subprocess.run(cmd, capture_output=True)
 
 # ── Fetch projects ───────────────────────────────────────────────
