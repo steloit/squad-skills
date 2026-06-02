@@ -22,6 +22,7 @@ license: MIT
 **When auto-triggered**: extract task ID and call `/squad-run <ID>` — never implement code manually and patch squad state afterward.
 
 > Shared context: read `../squad/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
+> Safety principles: read `../squad/principles.md` — **mandatory, not optional.**
 > Schema: read `../squad/schema.md` for full DB schema, column descriptions, and JSON field formats.
 
 ## Commands

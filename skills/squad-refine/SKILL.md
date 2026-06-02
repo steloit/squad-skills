@@ -5,6 +5,7 @@ license: MIT
 ---
 
 > Shared context: read `../squad/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
+> Safety principles: read `../squad/principles.md` — **mandatory, not optional.**
 
 ## `/squad-refine <ID>` — Refine Backlog Requirements
 
