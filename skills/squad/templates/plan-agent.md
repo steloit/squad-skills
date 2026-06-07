@@ -26,7 +26,7 @@ Sign all your work with: `> **Planner** \`<MODEL_PLANNER>\` · <TIMESTAMP>`
 ## Previous Review Feedback
 <critic_feedback>
 
-> **Status note**: the card is ALREADY in status `plan` when you run — the orchestrator performed the `todo → plan` entry move and set `current_agent` on dispatch. Do NOT move it back to `todo`. Exit with a single level-correct move to `<plan_next_status>` (`plan_review` for L3, `impl` for L2).
+> **Status note**: the card is ALREADY in status `plan` when you run — the orchestrator performed the `todo → plan` entry move and set `current_agent` on dispatch. Do NOT move it back to `todo`, and do NOT set status yourself. Write your plan and exit — the orchestrator advances the card to the next status after the plan is written. The Planner must NOT set status.
 
 ## Your Job
 1. Read the requirements carefully
@@ -68,10 +68,10 @@ Write a markdown plan with your signature header at the top:
 ```bash
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-# Write signed plan and advance status in a single valid transition.
-# The card is at `plan`; advance plan → <plan_next_status> (plan_review for L3, impl for L2).
+# Write signed plan; the orchestrator owns the status move.
+# Do NOT set status — write plan / decision_log / done_when + current_agent:null only.
 curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
-  -d "{\"plan\": \"> **Planner** \`<MODEL_PLANNER>\` · $TIMESTAMP\n\n<PLAN_MARKDOWN>\", \"decision_log\": \"<DECISION_TABLE_MARKDOWN>\", \"done_when\": \"<DONE_WHEN_CHECKLIST>\", \"status\": \"<plan_next_status>\", \"current_agent\": null}"
+  -d "{\"plan\": \"> **Planner** \`<MODEL_PLANNER>\` · $TIMESTAMP\n\n<PLAN_MARKDOWN>\", \"decision_log\": \"<DECISION_TABLE_MARKDOWN>\", \"done_when\": \"<DONE_WHEN_CHECKLIST>\", \"current_agent\": null}"
 # Optional: include "tokens": <ESTIMATED_TOKENS> in agent_log entry (estimated input+output tokens)
 ```
