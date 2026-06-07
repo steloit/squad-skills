@@ -45,13 +45,13 @@ L1 Quick:
   todo → Worker(builder) implements → commit → done
 
 L2 Standard:
-  todo → Plan Agent(planner) → impl (skip plan_review)
+  todo → [orchestrator: todo→plan, current_agent=Planner] → Plan Agent(planner) @plan → impl (skip plan_review)
   impl → Worker(builder) + TDD Tester(shield) → impl_review
   impl_review → Code Review → [user confirm] → commit → done / reject → impl
 
 L3 Full:
-  todo → Plan Agent(planner) → plan_review
-  plan_review → Review Agent(critic) → [user confirm] → impl / reject → plan
+  todo → [orchestrator: todo→plan, current_agent=Planner] → Plan Agent(planner) @plan → plan_review
+  plan_review → Review Agent(critic) → [user confirm] → impl / reject → plan (re-dispatches Planner with <critic_feedback>)
   impl → Worker(builder) + TDD Tester(shield) → impl_review
   impl_review → Code Review(inspector) → [user confirm] → test / reject → impl
   test → Test Runner(ranger) → pass → commit → done / fail → impl
@@ -97,8 +97,22 @@ EFFORT_RANGER=$(read_effort ranger)
 # 1. Read current task state (status + level only)
 TASK=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=status,level")
 STATUS=$(echo "$TASK" | jq -r '.status')
+LEVEL=$(echo "$TASK" | jq -r '.level')
 
-# 2. Dispatch agent (see Agent Dispatch below)
+# Compute the Planner's level-aware exit status (used by step ④ / render helper):
+#   L3 → plan_review, L2 → impl. (L1 never reaches the Planner.)
+if [ "$LEVEL" = "3" ]; then PLAN_NEXT=plan_review; else PLAN_NEXT=impl; fi
+
+# 2. Pipeline-entry / dispatch (see Agent Dispatch below)
+#    When STATUS == todo:
+#      L1  → ONE PATCH {"status":"impl","current_agent":"Builder"}, then dispatch Builder.
+#      L2/L3 → ONE PATCH {"status":"plan","current_agent":"Planner"} (the todo→plan entry
+#              move), then dispatch the Planner. The card is in the PLAN column before the
+#              Planner begins — step ② below is this same single level-aware entry PATCH.
+#    When STATUS == plan (fresh entry OR Critic-reject re-entry via plan_review→plan):
+#      dispatch the Planner WITHOUT re-moving status. plan→plan is not a legal transition
+#      and MUST NOT be attempted (idempotent re-entry). Set current_agent:"Planner" only.
+#    All other statuses: dispatch the column's agent (see Agent Dispatch table).
 # 3. After agent: append to agent_log (see schema.md for format)
 # 4. Re-read state, loop until done or circuit breaker
 ```
@@ -109,7 +123,7 @@ Each agent has a fixed **nickname** used consistently across all records. The ta
 
 | Nickname | Role | Model Key | Reasoning Effort (codex) | Status trigger |
 |----------|------|-------|---------------------------|----------------|
-| `Planner` | Plan Agent | `planner` | `high` | `todo` |
+| `Planner` | Plan Agent | `planner` | `high` | `plan` |
 | `Critic` | Plan Review Agent | `critic` | `medium` | `plan_review` |
 | `Builder` | Worker Agent | `builder` | `high` | `impl` (step 1) |
 | `Shield` | TDD Tester | `shield` | `medium` | `impl` (step 2) |
@@ -124,7 +138,7 @@ Template files are at `../squad/templates/`.
 
 | Status | Template | Nickname | Model Key |
 |--------|----------|----------|-------|
-| `todo` | `templates/plan-agent.md` | `Planner` | `planner` |
+| `plan` | `templates/plan-agent.md` | `Planner` | `planner` |
 | `plan_review` | `templates/review-agent.md` | `Critic` | `critic` |
 | `impl` step 1 | `templates/worker-agent.md` | `Builder` | `builder` |
 | `impl` step 2 | `templates/tdd-tester.md` | `Shield` | `shield` |
@@ -243,8 +257,18 @@ Template files are at `../squad/templates/`.
    TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,implementation_notes
    Extract only the fields listed above for each agent
 
-② Mark agent as active
-   curl PATCH /api/task/$ID  →  { "current_agent": "<Nickname>" }
+② Enter the agent's column + mark it active — ONE level-aware PATCH
+   The entry status move and current_agent assignment are a SINGLE PATCH (never a
+   separate/third call). Pick the body by the agent being dispatched:
+     • Planner from `todo` (L1): not applicable — L1 dispatches Builder, see below.
+     • Planner from `todo` (L2/L3):  { "status": "plan", "current_agent": "Planner" }
+     • Builder from `todo` (L1):     { "status": "impl", "current_agent": "Builder" }
+     • Planner already at `plan` (fresh entry handled above, OR Critic-reject
+       re-entry via plan_review→plan):  { "current_agent": "Planner" }  (NO status move —
+       plan→plan is illegal; idempotent re-dispatch)
+     • Any agent already in its own column (Critic@plan_review, Inspector@impl_review,
+       Ranger@test, Shield@impl): { "current_agent": "<Nickname>" }  (no status change)
+   curl PATCH /api/task/$ID  →  <body above>
 
 ③ Read template file
    Read tool: ../squad/templates/<agent>.md
@@ -263,6 +287,7 @@ Template files are at `../squad/templates/`.
      <plan_review_comments>   → plan_review_comments field value
      <dependencies_context>   → per-agent dep context from step ⓪ʙ (empty string if none)
      <critic_feedback>        → latest plan_review_comments comment (empty if first run)
+     <plan_next_status>       → $PLAN_NEXT (plan_review for L3, impl for L2)
      <inspector_feedback>     → latest review_comments comment (empty if first run)
      <TIMESTAMP>              → current UTC time (ISO 8601)
      <MODEL_PLANNER>          → $MODEL_PLANNER
@@ -296,6 +321,7 @@ Template files are at `../squad/templates/`.
      --set plan_review_comments="$PLAN_REVIEW_COMMENTS" \
      --set dependencies_context="$DEPS_CONTEXT" \
      --set critic_feedback="$CRITIC_FEEDBACK" \
+     --set plan_next_status="$PLAN_NEXT" \
      --set inspector_feedback="$INSPECTOR_FEEDBACK" \
      --set TIMESTAMP="$TIMESTAMP")
    ```

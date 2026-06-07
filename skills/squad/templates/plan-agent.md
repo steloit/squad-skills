@@ -26,6 +26,8 @@ Sign all your work with: `> **Planner** \`<MODEL_PLANNER>\` · <TIMESTAMP>`
 ## Previous Review Feedback
 <critic_feedback>
 
+> **Status note**: the card is ALREADY in status `plan` when you run — the orchestrator performed the `todo → plan` entry move and set `current_agent` on dispatch. Do NOT move it back to `todo`. Exit with a single level-correct move to `<plan_next_status>` (`plan_review` for L3, `impl` for L2).
+
 ## Your Job
 1. Read the requirements carefully
 2. Analyze the codebase to understand the current state
@@ -66,9 +68,10 @@ Write a markdown plan with your signature header at the top:
 ```bash
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
-# Write signed plan and advance status
+# Write signed plan and advance status in a single valid transition.
+# The card is at `plan`; advance plan → <plan_next_status> (plan_review for L3, impl for L2).
 curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
-  -d "{\"plan\": \"> **Planner** \`<MODEL_PLANNER>\` · $TIMESTAMP\n\n<PLAN_MARKDOWN>\", \"decision_log\": \"<DECISION_TABLE_MARKDOWN>\", \"done_when\": \"<DONE_WHEN_CHECKLIST>\", \"status\": \"plan_review\", \"current_agent\": null}"
+  -d "{\"plan\": \"> **Planner** \`<MODEL_PLANNER>\` · $TIMESTAMP\n\n<PLAN_MARKDOWN>\", \"decision_log\": \"<DECISION_TABLE_MARKDOWN>\", \"done_when\": \"<DONE_WHEN_CHECKLIST>\", \"status\": \"<plan_next_status>\", \"current_agent\": null}"
 # Optional: include "tokens": <ESTIMATED_TOKENS> in agent_log entry (estimated input+output tokens)
 ```
