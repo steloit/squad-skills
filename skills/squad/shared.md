@@ -331,6 +331,7 @@ The `model` value should be the resolved provider model from `models.json` (not 
 | `Refiner` | `title`, `description` | `description` (rewrite) | stays `todo` |
 | `Planner` | `description` | `plan`, `decision_log`, `done_when` | `plan_review` |
 | `Critic` | `description`, `plan`, `decision_log`, `done_when` | `plan_review_comments` | `impl` or `plan` |
+| `Founder` | `description`, `plan`, project brief | signed `agent_log` entry (advisory) | stays `plan_review` (optional `[f]`) |
 | `Builder` | `description`, `plan`, `done_when`, `plan_review_comments` | `implementation_notes` | (none) |
 | `Shield` | `description`, `implementation_notes` | `implementation_notes` (append) | `impl_review` |
 | `Inspector` | `description`, `plan`, `done_when`, `implementation_notes` | `review_comments` | `test` or `impl` |

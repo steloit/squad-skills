@@ -26,6 +26,43 @@ Implementing / Plan Review / Impl Review / Testing / Recently Done / Next Todo.
 BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true")
 ```
 
+### `/squad context save` — Save Session State
+
+Captures current board state + git branch + decisions made this session to `.squad-context.md`.
+Use before ending a session so the next session can resume without context loss.
+
+```bash
+BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true")
+BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
+DIRTY=$(git diff --stat 2>/dev/null | tail -1 || echo "")
+```
+
+Write `.squad-context.md` with:
+1. **Saved at**: timestamp + branch
+2. **In Progress**: tasks currently in `impl` / `impl_review` / `test` columns (ID, title, status)
+3. **Pending Review**: tasks in `plan_review` or `impl_review` (needs human decision)
+4. **Next Todo**: first task in `todo` column
+5. **Git State**: branch name, dirty working tree summary (`$DIRTY`)
+6. **Decisions this session**: ask user "Any decisions to note before saving?" and append their answer verbatim
+
+Add `.squad-context.md` to `.gitignore` if not already present (it's session-local, not shared state).
+
+### `/squad context restore` — Restore Session State
+
+Loads `.squad-context.md` if it exists, then fetches the live board to show what changed since save.
+Use at session start instead of `/squad context` when you were mid-task last session.
+
+```bash
+SAVED=$(cat .squad-context.md 2>/dev/null || echo "")
+BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true")
+```
+
+Output:
+1. Show saved state (what was in progress, decisions noted)
+2. Show current live board state
+3. Highlight any status changes since the save (tasks that moved columns)
+4. Suggest: "Resume task #ID [title]?" for the first in-progress task
+
 ### `/squad add <title>` — Add Task
 
 1. Ask user for priority, level (L1/L2/L3), description, tags (use AskUserQuestion)
@@ -100,6 +137,163 @@ else:
     print(f"| **Total** | **{total_entries}** | **{total_tokens:,}** |")
 PY
 ```
+
+### `/squad stats health` — Code Health Score
+
+Auto-detects available tools and computes a 0–10 composite code health score.
+Use when: "health check", "how healthy is this codebase". Runs locally — no board access needed.
+
+```bash
+python3 - <<'PY'
+import subprocess, json, sys
+
+checks = []
+
+def run(cmd, label, parse=None):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        ok = r.returncode == 0
+        detail = parse(r) if parse else ""
+        checks.append({"label": label, "ok": ok, "detail": detail})
+    except FileNotFoundError:
+        pass  # tool not installed — skip silently
+    except subprocess.TimeoutExpired:
+        checks.append({"label": label, "ok": False, "detail": "timeout"})
+
+# TypeScript
+run(["npx", "--no", "tsc", "--noEmit", "--pretty", "false"],
+    "TypeScript",
+    lambda r: f"{r.stdout.count('error TS')} errors" if r.returncode != 0 else "")
+
+# Python type check (pyright preferred, mypy fallback)
+if subprocess.run(["which", "pyright"], capture_output=True).returncode == 0:
+    run(["pyright", "--outputjson"], "Pyright",
+        lambda r: f"{json.loads(r.stdout).get('summary',{}).get('errorCount',0)} errors" if r.stdout else "")
+elif subprocess.run(["which", "mypy"], capture_output=True).returncode == 0:
+    run(["mypy", ".", "--ignore-missing-imports"], "mypy",
+        lambda r: r.stdout.strip().split('\n')[-1] if r.stdout else "")
+
+# Linter
+if subprocess.run(["which", "ruff"], capture_output=True).returncode == 0:
+    run(["ruff", "check", "--statistics"], "ruff",
+        lambda r: r.stdout.strip().split('\n')[0] if r.stdout else "")
+elif subprocess.run(["npx", "--no", "eslint", "--version"], capture_output=True).returncode == 0:
+    run(["npx", "--no", "eslint", ".", "--max-warnings=0"], "ESLint",
+        lambda r: f"{r.stdout.count('warning') + r.stdout.count('error')} issues" if r.returncode != 0 else "")
+
+# Tests
+if subprocess.run(["which", "pytest"], capture_output=True).returncode == 0:
+    run(["pytest", "--tb=no", "-q"], "pytest",
+        lambda r: r.stdout.strip().split('\n')[-1] if r.stdout else "")
+elif subprocess.run(["npx", "--no", "jest", "--version"], capture_output=True).returncode == 0:
+    run(["npx", "--no", "jest", "--passWithNoTests", "--silent"], "Jest",
+        lambda r: r.stderr.strip().split('\n')[-1] if r.stderr else "")
+
+# Rust
+run(["cargo", "check", "--quiet"], "cargo check")
+
+# Shell lint
+if subprocess.run(["which", "shellcheck"], capture_output=True).returncode == 0:
+    sh_files = subprocess.run(["find", ".", "-name", "*.sh", "-not", "-path", "*/.git/*"],
+                               capture_output=True, text=True).stdout.strip().split()
+    if sh_files:
+        run(["shellcheck"] + sh_files[:20], "shellcheck",
+            lambda r: f"{r.stdout.count('SC')} warnings" if r.returncode != 0 else "")
+
+# Score
+if not checks:
+    print("## Code Health\nNo supported tools found (tsc/pyright/ruff/pytest/jest/cargo/shellcheck).")
+    sys.exit(0)
+
+passed = sum(1 for c in checks if c["ok"])
+score = round(passed / len(checks) * 10, 1)
+grade = "🟢" if score >= 8 else "🟡" if score >= 5 else "🔴"
+
+print(f"## Code Health: {grade} {score}/10  ({passed}/{len(checks)} checks passed)\n")
+print("| Check | Status | Detail |")
+print("|-------|--------|--------|")
+for c in checks:
+    icon = "✅" if c["ok"] else "❌"
+    print(f"| {c['label']} | {icon} | {c['detail'] or ''} |")
+PY
+```
+
+### `/squad retro` — Retrospective Analysis
+
+Analyzes completed tasks + git history to produce a sprint retrospective report.
+Use at the end of a week/sprint: "squad retro", "what did we ship this week".
+
+```bash
+BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT")
+python3 << 'PY' <<< "$BOARD"
+import json, sys, subprocess
+from collections import defaultdict
+
+board = json.load(sys.stdin)
+columns = ['todo', 'plan', 'plan_review', 'impl', 'impl_review', 'test', 'done']
+done_tasks = board.get('done', [])
+
+print("## Retrospective\n")
+
+# --- Completed tasks ---
+print(f"### Completed: {len(done_tasks)} tasks\n")
+if done_tasks:
+    print("| ID | Title | Level | Rework |")
+    print("|----|-------|-------|--------|")
+    for t in done_tasks[-10:]:
+        rework = t.get('impl_review_count', 0) or 0
+        flag = f"⚠️ {rework}x" if rework > 1 else "✅"
+        print(f"| {t.get('id','')} | {t.get('title','')[:45]} | L{t.get('level',1)} | {flag} |")
+
+# --- Rework rate ---
+rework_tasks = [t for t in done_tasks if (t.get('impl_review_count') or 0) > 1]
+rate = len(rework_tasks) / len(done_tasks) * 100 if done_tasks else 0
+print(f"\n**Rework rate**: {rate:.0f}% ({len(rework_tasks)}/{len(done_tasks)} tasks needed re-impl)")
+
+# --- Pipeline snapshot (non-done) ---
+snapshot = {col: len(board.get(col, [])) for col in columns[:-1] if board.get(col)}
+if snapshot:
+    print("\n### Pipeline Snapshot\n")
+    print("| Column | Count |")
+    print("|--------|-------|")
+    for col, count in snapshot.items():
+        print(f"| {col} | {count} |")
+
+# --- Agent token spend (done tasks) ---
+agent_stats = defaultdict(lambda: {'entries': 0, 'tokens': 0})
+for t in done_tasks:
+    raw = t.get('agent_log')
+    if not raw:
+        continue
+    try:
+        logs = json.loads(raw) if isinstance(raw, str) else raw
+    except (json.JSONDecodeError, TypeError):
+        continue
+    for entry in logs:
+        a = entry.get('agent', 'unknown')
+        agent_stats[a]['entries'] += 1
+        agent_stats[a]['tokens'] += entry.get('tokens', 0)
+
+total = sum(v['tokens'] for v in agent_stats.values())
+if total > 0:
+    print(f"\n### Token Spend (completed): {total:,} est.\n")
+    print("| Agent | Tokens |")
+    print("|-------|--------|")
+    for a in sorted(agent_stats, key=lambda x: -agent_stats[x]['tokens']):
+        print(f"| {a} | {agent_stats[a]['tokens']:,} |")
+
+# --- Git commits ---
+git = subprocess.run(
+    ['git', 'log', '--oneline', '--since=7 days ago'],
+    capture_output=True, text=True
+)
+commits = [l for l in git.stdout.strip().split('\n') if l]
+if commits:
+    print(f"\n### Git Activity: {len(commits)} commits (last 7 days)")
+PY
+```
+
+To scope to a custom period (e.g. 14 days), adjust `--since=14 days ago` in the git subprocess call.
 
 ### `/squad project` — Current Project Context (AI Context Docking)
 

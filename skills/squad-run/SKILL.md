@@ -51,7 +51,8 @@ L2 Standard:
 
 L3 Full:
   todo → Plan Agent(planner) → plan_review
-  plan_review → Review Agent(critic) → [user confirm] → impl / reject → plan
+  plan_review → Review Agent(critic) → [user confirm: y/f/n] → impl / founder-review / reject → plan
+    └─ [f] Founder: product-angle check → revise plan → back to plan_review
   impl → Worker(builder) + TDD Tester(shield) → impl_review
   impl_review → Code Review(inspector) → [user confirm] → test / reject → impl
   test → Test Runner(ranger) → pass → commit → done / fail → impl
@@ -111,6 +112,7 @@ Each agent has a fixed **nickname** used consistently across all records. The ta
 |----------|------|-------|---------------------------|----------------|
 | `Planner` | Plan Agent | `planner` | `high` | `todo` |
 | `Critic` | Plan Review Agent | `critic` | `medium` | `plan_review` |
+| `Founder` | Product Review Gate | `founder` | `medium` | `plan_review` (optional, `[f]`) |
 | `Builder` | Worker Agent | `builder` | `high` | `impl` (step 1) |
 | `Shield` | TDD Tester | `shield` | `medium` | `impl` (step 2) |
 | `Inspector` | Code Review Agent | `inspector` | `medium` | `impl_review` |
@@ -330,8 +332,24 @@ curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
   -d '{"status": "impl_review", "current_agent": null}'
 ```
 
-**Default mode**: after `plan_review` and `impl_review` agents complete, ask user with AskUserQuestion to accept/reject before advancing.
-**Auto mode (`--auto`)**: auto-accept the agent's decision.
+**Default mode**: after `plan_review` and `impl_review` agents complete, pause and ask the user via AskUserQuestion before advancing.
+- At **L3 `plan_review`**: offer three choices — `[y]` approve → `impl`, `[f]` Founder review (see below), `[n]` reject → back to `plan`. This three-way prompt is what triggers `Founder`; if it isn't presented, `Founder` never runs.
+- At `impl_review`: accept / reject.
+
+**Auto mode (`--auto`)**: auto-accept the agent's decision. The `[f]` Founder gate is human-only, so it is **skipped in `--auto`**.
+
+**Founder review (L3 `plan_review` only)**
+
+When the user selects `[f]` at the `plan_review` confirmation prompt, dispatch the `Founder` agent before proceeding to `impl` — the product/strategic lens that complements `Critic`'s *technical* plan review. Dispatch it like any other agent:
+
+- **Template**: `../squad/templates/founder-agent.md`
+- **Model**: resolve with `read_model founder` / `read_effort founder` (see `shared.md`)
+- **Context**: load the project's purpose/brief via `GET /api/projects/$PROJECT` to ground the alignment check
+- **Output**: `Founder` signs `agent_log` like every agent (see `schema.md`). It does **not** post a formal `plan-review` verdict — it doesn't drive state.
+
+The template asks: (1) is this actually necessary, or can the need be met more simply? (2) does it align with the project's stated purpose? (3) is there a 10x simpler implementation that solves 80%? (4) what might we regret in 6 months?
+
+After the `Founder` output, present: `[y] proceed to impl / [r] revise plan / [n] reject`. On `[r]`, fold the concerns into the plan and re-run `plan_review`.
 
 #### → Done Transition (all levels)
 

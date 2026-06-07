@@ -19,7 +19,7 @@ npx skills add steloit/squad-skills -a codex -g   # one agent, global (user-wide
 npx skills update                            # update installed skills later
 ```
 
-You get the **5 core skills**: `squad` (board), `squad-init` (register a project), `squad-run` (run the pipeline), `squad-refine` (refine requirements), `squad-explore` (scope work).
+You get the **core skills**: `squad` (board), `squad-init` (register a project), `squad-run` (run the pipeline), `squad-spec` (scope a new idea into a spec), `squad-refine` (refine requirements), `squad-explore` (scope work).
 
 ### Maintainers — internal skills
 
@@ -53,6 +53,7 @@ mkdir -p ~/.squad && printf 'SQUAD_AUTH_TOKEN=%s\n' '<your-shared-token>' > ~/.s
 |---------|--------------|
 | `/squad` | View / manage the board |
 | `/squad-init` | Register the current project |
+| `/squad-spec` | Scope a vague idea into a spec, then create a task |
 | `/squad-refine` | Turn a rough task into a concrete spec |
 | `/squad-run` | Run the AI-team pipeline on a task |
 | `/squad-batch-run` | Rolling-wave batch execution across tasks |

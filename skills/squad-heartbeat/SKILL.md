@@ -8,6 +8,7 @@ metadata:
 
 > Shared context: read `../squad/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
 > Schema: read `../squad/schema.md` for full DB schema, column descriptions, and JSON field formats.
+> Safety principles: read `../squad/principles.md` — **mandatory, not optional.**
 
 ## `/squad-heartbeat [--project X] [--days N] [--dry-run]` -- Stagnant Task Detection
 
