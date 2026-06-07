@@ -147,22 +147,27 @@ in strict order:
    its verdict (approved/reject | pass/fail + comment) by POSTing the matching verdict endpoint
    (Critic → `/plan-review`, Inspector → `/review`, Ranger → `/test-result`). The agent does NOT
    change status.
-2. **Read** — the orchestrator reads the recorded verdict from the card (`plan_review_comments[-1]`,
-   `review_comments[-1]`, or `test_results[-1]`). The next status is computed locally from the
-   verdict (table below) — never from a `newStatus` in the POST response.
+2. **Read** — the orchestrator reads the server-derived `last_plan_review_status` /
+   `last_review_status` / `last_test_status` field for the current stage. The next status is computed
+   locally from the verdict (table below) — never from a `newStatus` in the POST response.
 3. **Gate** (default mode) — `AskUserQuestion` accept/reject runs BEFORE the move. `--auto` skips
    the human prompt but still issues the move.
 4. **Commit** — the orchestrator issues the single validated generic `PATCH /api/task/:id` to the
    next status with `current_agent:null`.
 5. **Side-effects** — git commit + commit note, only AFTER a `done` move is committed.
 
-**Read the verdict** — the latest entry the agent recorded:
+**Read the verdict** — the server-derived status for the current review stage:
 
 ```bash
-# Critic @ plan_review → plan_review_comments[-1].status ; Inspector @ impl_review → review_comments[-1].status
-# Ranger @ test → test_results[-1].status
-VERDICT=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=review_comments" \
-  | python3 -c "import sys,json; a=json.loads(json.load(sys.stdin).get('review_comments') or '[]'); print(a[-1]['status'] if a else '')")
+# The orchestrator reads the server-derived verdict for the current review stage:
+#   plan_review → last_plan_review_status · impl_review → last_review_status · test → last_test_status
+case "$STATUS" in
+  plan_review) VFIELD=last_plan_review_status ;;
+  impl_review) VFIELD=last_review_status ;;
+  test)        VFIELD=last_test_status ;;
+esac
+VERDICT=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=$VFIELD" \
+  | VFIELD="$VFIELD" python3 -c "import sys,json,os; print(json.load(sys.stdin).get(os.environ['VFIELD']) or '')")
 ```
 
 **Verdict → next status** (computed locally; mirrors `getTransitions`). Every row is issued via the
