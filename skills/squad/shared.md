@@ -112,9 +112,9 @@ PY
 }
 ```
 
-### Move Protocol (required before any move)
+### Move Protocol (orchestrator-owned)
 
-Always follow this sequence before moving a card.
+This protocol belongs to the orchestrator (`squad-run`). **Only the orchestrator moves cards.** Individual agents never run it — they record verdicts (via the record-only endpoints) and the orchestrator reads those verdicts and issues the move. Always follow this sequence before moving a card.
 
 **Step 1 — Check current state**
 
@@ -134,7 +134,9 @@ LEVEL=$(echo "$TASK" | jq -r '.level')
 | `impl`      | `done`   | `impl_review`     | `impl_review`          |
 | `impl_review` | —      | `done` / `impl`   | `test` / `impl`        |
 | `test`      | —        | —                 | `done` / `impl`        |
-| `done`      | (terminal) | (terminal)      | (terminal)             |
+| `done`      | (reopen → todo) | (reopen → todo) | (reopen → todo)    |
+
+> `done` has no forward transition — it is reached only by normal moves and left only by the explicit `POST /api/task/:id/reopen` action (done → todo). It is reopenable, not strictly terminal.
 
 **Step 3 — Execute the move**
 
@@ -194,20 +196,29 @@ curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
   -H 'Content-Type: application/json' \
   -d "{\"title\": \"...\", \"project\": \"$PROJECT\", \"priority\": \"medium\", \"level\": 3, \"description\": \"...\"}"
 
-# Plan review result
+# The next three endpoints are RECORD-ONLY: each appends its verdict object to the
+# matching comments/results array (and /plan-review, /review also bump their review
+# count), bumps `version`, and returns the recorded verdict. They do NOT change
+# `status`. The orchestrator reads the recorded verdict and issues any status move
+# separately via the generic PATCH above.
+
+# Plan review result (record-only)
 curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/plan-review?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"reviewer": "Critic", "model": "<MODEL_CRITIC>", "status": "approved", "comment": "..."}'
+# → {"success":true,"comment":{...},"version":<int>} — verdict recorded; status unchanged.
 
-# Impl review result
+# Impl review result (record-only)
 curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/review?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"reviewer": "Inspector", "model": "<MODEL_INSPECTOR>", "status": "approved", "comment": "..."}'
+# → {"success":true,"comment":{...},"version":<int>} — verdict recorded; status unchanged.
 
-# Test result
+# Test result (record-only)
 curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/test-result?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"tester": "test-runner", "status": "pass", "lint": "...", "build": "...", "tests": "...", "comment": "..."}'
+# → {"success":true,"result":{...},"version":<int>} — verdict recorded; status unchanged.
 
 # Add note
 curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/note?project=$PROJECT" \
@@ -221,6 +232,12 @@ curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID/reorder?project=$PR
 
 # Delete
 curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/task/$ID?project=$PROJECT"
+
+# Reopen a completed task (done → todo). Optional reason is recorded in agent_log.
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/reopen?project=$PROJECT" \
+  -H 'Content-Type: application/json' \
+  -d '{"reason": "regression found in prod"}'
+# → {"success":true,"status":"todo","version":<int>}
 
 # Upload an image attachment (base64 over JSON; stored in R2, served from a public URL)
 DATA=$(base64 < "$IMG_PATH" | tr -d '\n')
@@ -248,6 +265,40 @@ The `attachments` field on a task read is a JSON array of `{filename, storedName
 Don't assume an agent auto-sees an attachment — surface the `url`/local path and use the host's image tool where available.
 
 If `AUTH_TOKEN` is set, keep using the shared `AUTH_HEADER` array so every request can target the same protected board deployment without repeating conditional header logic.
+
+Only a `done` task can be reopened; reopening clears its lifecycle timestamps and `current_agent`, preserves prior work (plan, notes, comments, counts, results), and records the action in `agent_log`. Reopening any non-`done` task returns `409 {"error":"only a done task can be reopened","status":"<current>"}` and changes nothing.
+
+### Optimistic Concurrency (version / ETag / If-Match)
+
+Every task row carries an integer `version` that increases by 1 on every write. A single-task GET returns it both as the `version` field and as a strong `ETag: "<version>"` header.
+
+To make a conditional (compare-and-set) write, echo that version back on the generic `PATCH`:
+
+- `If-Match: "<version>"` header (preferred), or
+- `"expected_version": <version>` in the JSON body (curl-friendly fallback; the header wins if both are present).
+
+If the supplied version no longer matches the row, the PATCH is rejected with **412** `{"error":"Precondition failed: version mismatch","currentVersion":<int>}` and nothing is written — re-read the task and retry. Omit the precondition for an unconditional write (back-compatible default). A successful PATCH returns `{"success":true,"version":<new version>}`.
+
+```bash
+# Conditional update: only applies if the row is still at version 7
+curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
+  -H 'Content-Type: application/json' \
+  -H 'If-Match: "7"' \
+  -d '{"status": "plan_review"}'
+# → {"success":true,"version":8}   (or 412 {"error":"Precondition failed: version mismatch","currentVersion":<int>})
+```
+
+### Derived Verdict Fields (read-only)
+
+A single-task GET exposes three read-only derived fields — the status of the latest verdict at each stage, or `null` if that stage has no verdict yet:
+
+| Field | Latest verdict from | Values |
+|-------|---------------------|--------|
+| `last_plan_review_status` | plan reviews | `approved` / `changes_requested` / `null` |
+| `last_review_status` | impl reviews | `approved` / `changes_requested` / `null` |
+| `last_test_status` | test results | `pass` / `fail` / `null` |
+
+The orchestrator reads these to get each stage's verdict directly, instead of parsing the comment/result JSON arrays. They are computed fields, not columns — you cannot write them. A full read returns all three; a projected `fields=` read returns only those you name. (The board summary view computes only `last_review_status` and `last_plan_review_status`, not `last_test_status` — read the single task for the test verdict.)
 
 ### Projects API Endpoints
 
@@ -326,16 +377,18 @@ The `agent_log` accumulates the full chronological history of all agents who tou
 
 The `model` value should be the resolved provider model from `models.json` (not a hardcoded provider name in the template).
 
-| Nickname | Reads | Writes (signed) | Moves to |
-|----------|-------|-----------------|----------|
-| `Refiner` | `title`, `description` | `description` (rewrite) | stays `todo` |
-| `Planner` | `description` | `plan`, `decision_log`, `done_when` | `plan_review` (L3) / `impl` (L2) |
-| `Critic` | `description`, `plan`, `decision_log`, `done_when` | `plan_review_comments` | `impl` or `plan` |
-| `Builder` | `description`, `plan`, `done_when`, `plan_review_comments` | `implementation_notes` | (none) |
-| `Shield` | `description`, `implementation_notes` | `implementation_notes` (append) | `impl_review` |
-| `Inspector` | `description`, `plan`, `done_when`, `implementation_notes` | `review_comments` | `test` or `impl` |
-| `Ranger` | `title`, `implementation_notes` | `test_results` | `done` or `impl` |
-| All agents | — | append signed entry to `agent_log` | — |
+| Nickname | Reads | Writes (signed) |
+|----------|-------|-----------------|
+| `Refiner` | `title`, `description` | `description` (rewrite) |
+| `Planner` | `description` | `plan`, `decision_log`, `done_when` |
+| `Critic` | `description`, `plan`, `decision_log`, `done_when` | `plan_review_comments` (records verdict) |
+| `Builder` | `description`, `plan`, `done_when`, `plan_review_comments` | `implementation_notes` |
+| `Shield` | `description`, `implementation_notes` | `implementation_notes` (append) |
+| `Inspector` | `description`, `plan`, `done_when`, `implementation_notes` | `review_comments` (records verdict) |
+| `Ranger` | `title`, `implementation_notes` | `test_results` (records verdict) |
+| All agents | — | append signed entry to `agent_log` |
+
+Agents record their work in the fields above; the orchestrator reads them and performs every status move (see Move Protocol).
 
 > **Planner entry move**: the orchestrator (squad-run) performs the `todo → plan` move and sets `current_agent:"Planner"` in one PATCH *before* the Planner runs — the Planner does not move `todo → plan` itself. The Planner runs at `plan` and exits with a single level-aware move (`plan → plan_review` for L3, `plan → impl` for L2). A Critic reject (`plan_review → plan`, server-side) re-dispatches the Planner at `plan`.
 
