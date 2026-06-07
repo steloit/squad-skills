@@ -41,22 +41,45 @@ Execute only the next pipeline step then exit. Same logic as `/squad-run` but no
 #### Orchestration Loop (Level-Aware)
 
 ```
+Per-step contract (every agent step): decide → record → gate → commit → side-effects.
+The agent RETURNS a verdict (approved/reject | pass/fail + comment); it does NOT move
+status and does NOT post its own verdict. The orchestrator: (1) records the verdict via
+the record-only endpoint (#223: POST /plan-review|/review|/test-result — appends comment +
+bumps the circuit-breaker count, NO status move), (2) gates (default mode: card SITS in its
+review state until the user signal; --auto skips the human gate only), (3) commits the move
+via the generic PATCH to the verdict-correct next status with current_agent:null (idempotent,
+#216), (4) does side-effects (git commit + note) AFTER the move.
+
+> ⚠️ Release unit: ship #217 ONLY with #218 (templates) + #223 (record-only endpoints).
+> Until #223 deploys, the verdict endpoints still auto-advance status; #216 idempotency keeps
+> the orchestrator's move a safe no-op during the window. Do NOT deploy #217's orchestrator
+> changes alone.
+
 L1 Quick:
-  todo → Worker(builder) implements → commit → done
+  todo → orchestrator PATCH {status:impl, current_agent:Builder} → Worker(builder) implements
+       → orchestrator PATCH {status:done, current_agent:null} → side-effects (commit + note)
 
 L2 Standard:
-  todo → [orchestrator: todo→plan, current_agent=Planner] → Plan Agent(planner) @plan → impl (skip plan_review)
-  impl → Worker(builder) + TDD Tester(shield) → impl_review
-  impl_review → Code Review → [user confirm] → commit → done / reject → impl
+  todo → [orchestrator: todo→plan, current_agent=Planner] → Plan Agent(planner) @plan
+       → orchestrator PATCH {status:impl, current_agent:null} (skip plan_review)
+  impl → Worker(builder) + TDD Tester(shield) → orchestrator PATCH {status:impl_review, current_agent:null}
+  impl_review → Inspector returns verdict → orchestrator records → [user confirm] →
+                orchestrator PATCH {status: done | impl, current_agent:null} → side-effects after done
 
 L3 Full:
-  todo → [orchestrator: todo→plan, current_agent=Planner] → Plan Agent(planner) @plan → plan_review
-  plan_review → Review Agent(critic) → [user confirm] → impl / reject → plan (re-dispatches Planner with <critic_feedback>)
-  impl → Worker(builder) + TDD Tester(shield) → impl_review
-  impl_review → Code Review(inspector) → [user confirm] → test / reject → impl
-  test → Test Runner(ranger) → pass → commit → done / fail → impl
+  todo → [orchestrator: todo→plan, current_agent=Planner] → Plan Agent(planner) @plan
+       → orchestrator PATCH {status:plan_review, current_agent:null}
+  plan_review → Critic returns verdict → orchestrator records → [user confirm] →
+                orchestrator PATCH {status: impl (approve) | plan (reject), current_agent:null}
+                (reject re-dispatches Planner with <critic_feedback>; plan→plan re-entry is idempotent)
+  impl → Worker(builder) + TDD Tester(shield) → orchestrator PATCH {status:impl_review, current_agent:null}
+  impl_review → Inspector returns verdict → orchestrator records → [user confirm] →
+                orchestrator PATCH {status: test (approve) | impl (reject), current_agent:null}
+  test → Ranger returns verdict → orchestrator records → [gate] →
+         orchestrator PATCH {status: done (pass) | impl (fail), current_agent:null} → side-effects after done
 
 Circuit breaker: plan_review_count > 3 OR impl_review_count > 3 → stop, ask user
+  (counts incremented by the record-only verdict endpoints, NOT by the move PATCH)
 ```
 
 Read the task's `level` field first to determine which steps to execute.
@@ -95,6 +118,7 @@ EFFORT_RANGER=$(read_effort ranger)
 
 ```bash
 # 1. Read current task state (status + level only)
+# Stateless: re-read (status, level) every loop; NEVER cache status across a gate.
 TASK=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=status,level")
 STATUS=$(echo "$TASK" | jq -r '.status')
 LEVEL=$(echo "$TASK" | jq -r '.level')
@@ -114,8 +138,82 @@ if [ "$LEVEL" = "3" ]; then PLAN_NEXT=plan_review; else PLAN_NEXT=impl; fi
 #      and MUST NOT be attempted (idempotent re-entry). Set current_agent:"Planner" only.
 #    All other statuses: dispatch the column's agent (see Agent Dispatch table).
 # 3. After agent: append to agent_log (see schema.md for format)
-# 4. Re-read state, loop until done or circuit breaker
+# 4. RECORD verdict (record-only endpoint) → GATE (default) → COMMIT move (generic PATCH,
+#    current_agent:null) → SIDE-EFFECTS (git commit + note, only after a done commit).
+#    See "Per-Step Transition Contract" below for the full ordering + mapping.
+# 5. Re-read state, loop until done or circuit breaker
 ```
+
+#### Per-Step Transition Contract (orchestrator owns every move)
+
+The orchestrator — never the agent — issues every status transition. Each agent step runs
+in strict order:
+
+1. **Decide** — dispatch the agent; it RETURNS a verdict (approved/reject | pass/fail +
+   comment) and writes its own output fields. It does NOT move status and does NOT post its
+   own verdict.
+2. **Record** — the orchestrator persists the verdict via the matching record-only endpoint.
+3. **Gate** (default mode) — the card SITS in its review state until the user signal.
+4. **Commit** — the orchestrator issues the single validated generic PATCH to the next status
+   with `current_agent:null`.
+5. **Side-effects** — git commit + commit note, only AFTER the move is committed.
+
+> ⚠️ Release unit: ship #217 ONLY with #218 (templates) + #223 (record-only endpoints).
+> Until #223 deploys, the verdict endpoints still auto-advance status; #216 idempotency keeps
+> the orchestrator's move a safe no-op during the window. Do NOT deploy #217's orchestrator
+> changes alone.
+
+**Record step** — the orchestrator POSTs the agent's returned verdict to the matching endpoint
+(shapes from `../squad/shared.md`):
+
+```bash
+# Critic verdict @ plan_review
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/plan-review?project=$PROJECT" \
+  -H 'Content-Type: application/json' \
+  -d '{"reviewer": "Critic", "model": "<MODEL_CRITIC>", "status": "approved", "comment": "..."}'
+# Inspector verdict @ impl_review
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/review?project=$PROJECT" \
+  -H 'Content-Type: application/json' \
+  -d '{"reviewer": "Inspector", "model": "<MODEL_INSPECTOR>", "status": "approved", "comment": "..."}'
+# Ranger verdict @ test
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/test-result?project=$PROJECT" \
+  -H 'Content-Type: application/json' \
+  -d '{"tester": "Ranger", "status": "pass", "lint": "...", "build": "...", "tests": "...", "comment": "..."}'
+```
+
+> Record-only under #223 — this POST appends the comment and bumps `plan_review_count` /
+> `impl_review_count` but does NOT move status; the orchestrator must NOT read or rely on any
+> `newStatus` in the response. The next status is computed locally from the verdict (table below).
+
+**Gate step** — default mode: `AskUserQuestion` accept/reject runs BEFORE the move PATCH.
+`--auto`: skip the human prompt but still issue the move. The move PATCH MUST come after the gate.
+
+**Verdict → next status** (the orchestrator computes this; mirrors `getTransitions`). Every row
+is issued via the single validated generic PATCH `{status:<next>, current_agent:null}`:
+
+| Agent @ status | Verdict | Generic PATCH move |
+|---|---|---|
+| Planner @ plan | (done) | L3 → plan_review · L2 → impl |
+| Critic @ plan_review | approve / reject | impl / plan |
+| Builder+Shield @ impl | (both done) | impl_review |
+| Inspector @ impl_review | approve / reject | (L2 → done · L3 → test) / impl |
+| Ranger @ test | pass / fail | done / impl |
+| done finalize | — | done (idempotent no-op if already done) |
+
+> Every move is the single validated generic PATCH `{status:<next>, current_agent:null}`;
+> #216 makes a same-state move a harmless 200 no-op (the rollout safety net). Reject loops
+> (plan_review→plan, impl_review→impl, test→impl) re-dispatch the column's agent; plan→plan
+> re-entry sets `current_agent` only (no illegal status move).
+
+**Release unit & deploy order**: gate-before-move only fully holds once #223 (record-only
+endpoints) + #218 (agents return verdict, stop self-moving) ship in the SAME release. #216
+(idempotent generic PATCH, already deployed) is the safety net during rollout — a double-move
+is a harmless 200 no-op. Deploy order (Fowler ParallelChange): Expand (#216, shipped) →
+Migrate+Contract cutover (#217+#218+#223).
+
+**Verification reality**: #217 standalone verification is STATIC (grep/consistency, see
+`done_when`). The live gate-before-move test requires #223 in the same release and is exercised
+in the cutover, not here.
 
 #### Agent Nicknames & Identity
 
@@ -349,30 +447,35 @@ Template files are at `../squad/templates/`.
     set agent=<Nickname>, model=<model>, message=<summary>)
 ```
 
-After Builder + Shield both complete, move to `impl_review`:
+Builder and Shield each RETURN their output (no self-move). Once both complete, the orchestrator
+issues the impl→impl_review **commit** move:
 ```bash
 curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"status": "impl_review", "current_agent": null}'
 ```
 
-**Default mode**: after `plan_review` and `impl_review` agents complete, ask user with AskUserQuestion to accept/reject before advancing.
-**Auto mode (`--auto`)**: auto-accept the agent's decision.
+**Default mode**: at `plan_review`, `impl_review`, and `test` (the L3 Ranger gate), the contract order is explicit — the agent
+RETURNS a verdict → the orchestrator RECORDS it via the record-only endpoint (no status move) →
+**gate** (`AskUserQuestion` accept/reject) → the orchestrator COMMITS the move via the generic
+PATCH with `current_agent:null`. The gate PRECEDES the move PATCH; the move is never the verdict endpoint.
+**Auto mode (`--auto`)**: same order, but auto-accept at the gate (orchestrator still issues the move PATCH).
 
 #### → Done Transition (all levels)
 
 ```bash
-# 1. Commit pending changes
+# 1. Move to done (single validated generic PATCH, idempotent) — clears current_agent.
+#    #216 makes done→done a no-op, so re-running is safe.
+curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
+  -H 'Content-Type: application/json' \
+  -d '{"status": "done", "current_agent": null}'
+
+# 2. Side-effects AFTER the state commit — commit pending changes.
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
   git add -A
   git commit -m "feat: <TITLE> [squad #<ID>]"
 fi
 COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "no-git")
-
-# 2. Move to done
-curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"status": "done"}'
 
 # 3. Record commit hash in notes
 curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/note?project=$PROJECT" \
