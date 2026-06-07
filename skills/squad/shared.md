@@ -329,13 +329,15 @@ The `model` value should be the resolved provider model from `models.json` (not 
 | Nickname | Reads | Writes (signed) | Moves to |
 |----------|-------|-----------------|----------|
 | `Refiner` | `title`, `description` | `description` (rewrite) | stays `todo` |
-| `Planner` | `description` | `plan`, `decision_log`, `done_when` | `plan_review` |
+| `Planner` | `description` | `plan`, `decision_log`, `done_when` | `plan_review` (L3) / `impl` (L2) |
 | `Critic` | `description`, `plan`, `decision_log`, `done_when` | `plan_review_comments` | `impl` or `plan` |
 | `Builder` | `description`, `plan`, `done_when`, `plan_review_comments` | `implementation_notes` | (none) |
 | `Shield` | `description`, `implementation_notes` | `implementation_notes` (append) | `impl_review` |
 | `Inspector` | `description`, `plan`, `done_when`, `implementation_notes` | `review_comments` | `test` or `impl` |
 | `Ranger` | `title`, `implementation_notes` | `test_results` | `done` or `impl` |
 | All agents | — | append signed entry to `agent_log` | — |
+
+> **Planner entry move**: the orchestrator (squad-run) performs the `todo → plan` move and sets `current_agent:"Planner"` in one PATCH *before* the Planner runs — the Planner does not move `todo → plan` itself. The Planner runs at `plan` and exits with a single level-aware move (`plan → plan_review` for L3, `plan → impl` for L2). A Critic reject (`plan_review → plan`, server-side) re-dispatches the Planner at `plan`.
 
 ## Task Dependencies
 
