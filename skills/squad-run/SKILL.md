@@ -455,6 +455,43 @@ curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/note?project=$PROJEC
 
 If no commits yet, skip note or record `"Commit: (none)"`.
 
+#### → Coach (friction review of this run)
+
+Once the card is `done` and committed, dispatch the **Coach** ONCE for this run — an independent (fresh-context) judge of
+the run trajectory (not the worked project). It scans for friction with **Squad itself** and files a
+friction report only when friction clears a strict materiality bar (default ZERO). `MODEL_PROVIDER`
+and the `read_model` / `read_effort` helpers are already resolved above.
+
+```bash
+# --- Coach: friction review of THIS run (default-zero; files only material friction) ---
+MODEL_COACH=$(read_model coach)
+EFFORT_COACH=$(read_effort coach)   # "" under claude (no reasoning_effort.claude) — used only on the codex branch
+TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+SOURCE_PROJECT="$PROJECT"
+SOURCE_TASK="$ID"
+RUN_SUMMARY="squad-run pipeline completed task $ID to done."
+TRAJECTORY="<the task's agent_log (all 6 agents, in order) + implementation_notes + review verdicts>"
+FRICTION_SIGNALS="<reject loops / circuit-breaker trips / agent retries recorded this pass; 'none' if clean>"
+COACH_PROMPT=$(python3 ../squad/scripts/render_agent_prompt.py \
+  --template ../squad/templates/coach.md \
+  --models ../squad/models.json \
+  --provider "$MODEL_PROVIDER" \
+  --set PROJECT="$PROJECT" \
+  --set skill_name="squad-run" \
+  --set source_project="$SOURCE_PROJECT" \
+  --set source_task="$SOURCE_TASK" \
+  --set run_summary="$RUN_SUMMARY" \
+  --set trajectory="$TRAJECTORY" \
+  --set friction_signals="$FRICTION_SIGNALS" \
+  --set TIMESTAMP="$TIMESTAMP")
+# <MODEL_COACH> / <EFFORT_COACH> are resolved by the script from models.json (no --set needed for them).
+```
+Launch via the Task tool (same pattern as step ⑤):
+- codex: `Task(subagent_type="general-purpose", model="$MODEL_COACH", model_reasoning_effort="$EFFORT_COACH", prompt=$COACH_PROMPT)`
+- claude: `Task(subagent_type="general-purpose", model="$MODEL_COACH", prompt=$COACH_PROMPT)`
+
+**One invocation per run** — the orchestrator owns the N=3 report budget across all 6 agents (per shared.md).
+
 ### `/squad-run review <ID>` — Code Review
 
 Trigger Code Review agent for a task in `impl_review` status (same as impl_review step).
