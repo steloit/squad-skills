@@ -457,7 +457,7 @@ If no commits yet, skip note or record `"Commit: (none)"`.
 
 #### → Coach (friction review of this run)
 
-Once the card is `done` and committed, dispatch the **Coach** ONCE for this run — a cheap cross-model judge of
+Once the card is `done` and committed, dispatch the **Coach** ONCE for this run — an independent (fresh-context) judge of
 the run trajectory (not the worked project). It scans for friction with **Squad itself** and files a
 friction report only when friction clears a strict materiality bar (default ZERO). `MODEL_PROVIDER`
 and the `read_model` / `read_effort` helpers are already resolved above.

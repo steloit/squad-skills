@@ -121,7 +121,7 @@ MODEL_REFINER=$(read_model refiner)
 
 ### Coach (friction review of this run)
 
-After step ⑦ Save completes (an approved refine), dispatch the **Coach** ONCE — a cheap cross-model judge of the
+After step ⑦ Save completes (an approved refine), dispatch the **Coach** ONCE — an independent (fresh-context) judge of the
 refine run trajectory. It scans for friction with **Squad itself** and files a friction report only when
 friction clears a strict materiality bar (default ZERO). Reuse the Model Routing resolution above (same
 `MODEL_PROVIDER` + `read_model` / `read_effort`).

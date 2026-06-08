@@ -191,7 +191,7 @@ After each task or group: re-read task status from API before continuing.
 
 ### 10. Coach (batch-level friction review)
 
-After the completion summary, dispatch the **Coach** ONCE at the **batch level** — a cheap cross-model judge of
+After the completion summary, dispatch the **Coach** ONCE at the **batch level** — an independent (fresh-context) judge of
 the batch loop itself (the per-task Coach already fired inside each `squad-run`). It scans for friction with
 **Squad itself** (ordering reworks, stale-assumption refines, stop-condition trips) and files a friction
 report only when friction clears a strict materiality bar (default ZERO). batch-run has no model block today, so

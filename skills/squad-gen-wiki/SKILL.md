@@ -322,8 +322,8 @@ sources: {source count}
 
 ### Coach dispatch (friction review of this run)
 
-After `④ Completion output` (BOTH procedures — initial and update) close, dispatch the **Coach** ONCE — a cheap
-cross-model judge of the wiki-generation run trajectory. It scans for friction with **Squad itself** and files a
+After `④ Completion output` (BOTH procedures — initial and update) close, dispatch the **Coach** ONCE — an independent (fresh-context)
+judge of the wiki-generation run trajectory. It scans for friction with **Squad itself** and files a
 friction report only when friction clears a strict materiality bar (default ZERO). gen-wiki is fully
 inline (no provider resolution today), so the dispatch resolves `MODEL_PROVIDER` + the helpers first.
 

@@ -15,9 +15,9 @@ def _coach_smoke_path(repo_root):
 
 def test_coach_key_in_models(repo_root):
     cfg = json.loads((repo_root / "skills" / "squad" / "models.json").read_text())
-    assert cfg["providers"]["claude"]["coach"] == "haiku"
-    assert cfg["providers"]["codex"]["coach"] == "gpt-5.2"
-    assert cfg["reasoning_effort"]["codex"]["coach"] == "low"
+    assert cfg["providers"]["claude"]["coach"] == "sonnet"
+    assert cfg["providers"]["codex"]["coach"] == "gpt-5.4"
+    assert cfg["reasoning_effort"]["codex"]["coach"] == "medium"
 
 
 def test_render_resolves_coach_tokens(repo_root, tmp_path):
@@ -38,7 +38,7 @@ def test_render_resolves_coach_tokens(repo_root, tmp_path):
     assert res.returncode == 0, res.stderr
     assert "<MODEL_COACH>" not in res.stdout
     assert "<EFFORT_COACH>" not in res.stdout
-    assert "resolved to `haiku`" in res.stdout
+    assert "resolved to `sonnet`" in res.stdout
 
 
 def test_smoke_A_renders_clean_with_evidence(repo_root):

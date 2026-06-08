@@ -9,7 +9,7 @@
       "shield": "sonnet",
       "inspector": "sonnet",
       "ranger": "sonnet",
-      "coach": "haiku"
+      "coach": "sonnet"
     },
     "codex": {
       "refiner": "gpt-5.2",
@@ -19,7 +19,7 @@
       "shield": "gpt-5.3-codex",
       "inspector": "gpt-5.4",
       "ranger": "gpt-5.3-codex",
-      "coach": "gpt-5.2"
+      "coach": "gpt-5.4"
     }
   },
   "reasoning_effort": {
@@ -31,7 +31,7 @@
       "shield": "medium",
       "inspector": "medium",
       "ranger": "medium",
-      "coach": "low"
+      "coach": "medium"
     }
   }
 }

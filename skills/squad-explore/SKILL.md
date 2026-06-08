@@ -263,7 +263,7 @@ This skill explores first, reports direction, then seeds the squad board with ph
 
 #### → Coach (friction review of this run)
 
-After the final summary (⑥ or ⑥-Cancel), dispatch the **Coach** ONCE — a cheap cross-model judge of the
+After the final summary (⑥ or ⑥-Cancel), dispatch the **Coach** ONCE — an independent (fresh-context) judge of the
 explore run trajectory. It scans for friction with **Squad itself** and files a friction report only
 when friction clears a strict materiality bar (default ZERO). This skill does not resolve a provider during its
 own work, so the dispatch resolves `MODEL_PROVIDER` + the helpers first.
