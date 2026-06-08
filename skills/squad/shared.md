@@ -277,7 +277,7 @@ To make a conditional (compare-and-set) write, echo that version back on the gen
 - `If-Match: "<version>"` header (preferred), or
 - `"expected_version": <version>` in the JSON body (curl-friendly fallback; the header wins if both are present).
 
-If the supplied version no longer matches the row, the PATCH is rejected with **412** `{"error":"Precondition failed: version mismatch","currentVersion":<int>}` and nothing is written — re-read the task and retry. Omit the precondition for an unconditional write (back-compatible default). A successful PATCH returns `{"success":true,"version":<new version>}`.
+If the supplied version no longer matches the row, the PATCH is rejected with **412** `{"error":"Precondition failed: version mismatch","currentVersion":<int>}` and nothing is written — re-read the task and retry. Omit the precondition for an unconditional write (back-compatible default). A successful PATCH returns `{"success":true,"version":<new version>}` — except a bare same-status no-op PATCH (no field actually changes), which returns the **full task row** instead of `{success, version}`.
 
 ```bash
 # Conditional update: only applies if the row is still at version 7
@@ -287,6 +287,8 @@ curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
   -d '{"status": "plan_review"}'
 # → {"success":true,"version":8}   (or 412 {"error":"Precondition failed: version mismatch","currentVersion":<int>})
 ```
+
+> The pipeline orchestrator is the **sole** writer of status transitions, so by default it issues moves without a precondition — correctness rests on that single-ownership, not on the conditional write. The machinery above guards against *other* concurrent writers (a second orchestrator, a batch run, or a manual board edit).
 
 ### Derived Verdict Fields (read-only)
 

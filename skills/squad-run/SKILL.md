@@ -171,14 +171,15 @@ VERDICT=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&f
 ```
 
 **Verdict → next status** (computed locally; mirrors `getTransitions`). Every row is issued via the
-single validated generic PATCH `{status:<next>, current_agent:null}`:
+single validated generic PATCH `{status:<next>, current_agent:null}`. The verdict is the literal value
+read from the derived field — reviews are `approved` / `changes_requested`, the test stage is `pass` / `fail`:
 
 | Agent @ status | Verdict | Generic PATCH move |
 |---|---|---|
 | Planner @ plan | (done) | L3 → plan_review · L2 → impl |
-| Critic @ plan_review | approve / reject | impl / plan |
+| Critic @ plan_review | approved / changes_requested | impl / plan |
 | Builder+Shield @ impl | (both done) | impl_review |
-| Inspector @ impl_review | approve / reject | (L2 → done · L3 → test) / impl |
+| Inspector @ impl_review | approved / changes_requested | (L2 → done · L3 → test) / impl |
 | Ranger @ test | pass / fail | done / impl |
 | done finalize | — | done |
 
