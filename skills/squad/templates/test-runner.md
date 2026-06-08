@@ -46,3 +46,5 @@ curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/<ID>/test-result?project
 ```
 
 `status` must be exactly `"pass"` or `"fail"`.
+
+Submit your verdict with this POST — it records your assessment for the orchestrator. You do not move the card to another column yourself; the orchestrator reads your verdict and decides the next step.

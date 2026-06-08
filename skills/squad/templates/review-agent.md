@@ -70,3 +70,5 @@ curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/<ID>/plan-review?project
 ```
 
 `status` must be exactly `"approved"` or `"changes_requested"`.
+
+Submit your verdict with this POST — it records your assessment for the orchestrator. You do not move the card to another column yourself; the orchestrator reads your verdict and decides the next step.

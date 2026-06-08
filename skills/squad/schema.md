@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   current_agent TEXT,
   plan_review_count INTEGER NOT NULL DEFAULT 0,
   impl_review_count INTEGER NOT NULL DEFAULT 0,
+  version INTEGER NOT NULL DEFAULT 1,
   level INTEGER NOT NULL DEFAULT 3,
   attachments TEXT,
   notes TEXT,
@@ -51,6 +52,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 | `current_agent` | TEXT | Currently active agent name |
 | `plan_review_count` | INTEGER | Plan review iteration count |
 | `impl_review_count` | INTEGER | Impl review iteration count |
+| `version` | INTEGER | Optimistic-concurrency row version; bumped on every write. Returned as the `ETag` and accepted as `If-Match` / `expected_version` on conditional PATCH |
 | `level` | INTEGER | Pipeline level: 1 (Quick), 2 (Standard), 3 (Full) |
 | `attachments` | TEXT | JSON array of attachment objects: `{filename, storedName, url, size, uploaded_at}` |
 | `notes` | TEXT | JSON array of note objects |
