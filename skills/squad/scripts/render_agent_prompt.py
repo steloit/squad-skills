@@ -15,6 +15,7 @@ MODEL_KEYS = {
     "MODEL_SHIELD": "shield",
     "MODEL_INSPECTOR": "inspector",
     "MODEL_RANGER": "ranger",
+    "MODEL_COACH": "coach",
 }
 
 EFFORT_KEYS = {
@@ -25,6 +26,7 @@ EFFORT_KEYS = {
     "EFFORT_SHIELD": "shield",
     "EFFORT_INSPECTOR": "inspector",
     "EFFORT_RANGER": "ranger",
+    "EFFORT_COACH": "coach",
 }
 
 

@@ -373,7 +373,7 @@ The card description is this structured body (Markdown is fine; keep the field l
   pass counts as **one** invocation across all 6 agents (not 3 per agent) — the orchestrator owns the
   budget for a run; standalone runs (one refine, one explore) own their own.
 - **Dedup against the board.** Before filing, read open squad-improvement cards and skip (or append your
-  evidence to) a card that already covers the same friction — match on `area` + the **normalized title**
+  evidence to a **`squad-improvement`-tagged** card) that already covers the same friction — match on `area` + the **normalized title**
   (lowercase, collapse whitespace, drop punctuation). Don't re-file a duplicate.
 
 ### Dedup check (before filing)
