@@ -6,7 +6,6 @@ license: MIT
 
 > Shared context: read `../squad/shared.md` for project config & auth, pipeline levels, status transitions, API endpoints, and error handling.
 > Safety principles: read `../squad/principles.md` — **mandatory, not optional.**
-> Squad self-improvement: if **Squad itself** (the skills/board/orchestrator you work *with* — not the project you're working *on*) causes friction, follow `../squad/shared.md` → **Squad Improvement Reports** (report, don't fix).
 
 ## `/squad-explore [topic]` — Explore & Plan
 
@@ -262,15 +261,15 @@ This skill explores first, reports direction, then seeds the squad board with ph
    > Run `/squad-explore <topic>` again to generate tasks when you're ready.
 ```
 
-#### → Coach (squad-improvement review of this run)
+#### → Coach (friction review of this run)
 
 After the final summary (⑥ or ⑥-Cancel), dispatch the **Coach** ONCE — a cheap cross-model judge of the
-explore run trajectory. It scans for friction with **Squad itself** and files a squad-improvement report only
+explore run trajectory. It scans for friction with **Squad itself** and files a friction report only
 when friction clears a strict materiality bar (default ZERO). This skill does not resolve a provider during its
 own work, so the dispatch resolves `MODEL_PROVIDER` + the helpers first.
 
 ```bash
-# --- Coach: squad-improvement review of THIS run (default-zero; files only material friction) ---
+# --- Coach: friction review of THIS run (default-zero; files only material friction) ---
 # Resolve MODEL_PROVIDER + read_model/read_effort per ../squad/shared.md → Model Resolution:
 MODEL_PROVIDER=${SQUAD_MODEL_PROVIDER:-}
 if [ -z "$MODEL_PROVIDER" ] && [ -n "${CODEX_THREAD_ID:-}${CODEX_CI:-}" ]; then MODEL_PROVIDER=codex; fi

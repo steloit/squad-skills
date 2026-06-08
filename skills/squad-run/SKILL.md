@@ -23,7 +23,6 @@ license: MIT
 
 > Shared context: read `../squad/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
 > Safety principles: read `../squad/principles.md` — **mandatory, not optional.**
-> Squad self-improvement: if **Squad itself** (the skills/board/orchestrator you work *with* — not the project you're working *on*) causes friction, follow `../squad/shared.md` → **Squad Improvement Reports** (report, don't fix).
 > Schema: read `../squad/schema.md` for full DB schema, column descriptions, and JSON field formats.
 
 ## Commands
@@ -456,15 +455,15 @@ curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/note?project=$PROJEC
 
 If no commits yet, skip note or record `"Commit: (none)"`.
 
-#### → Coach (squad-improvement review of this run)
+#### → Coach (friction review of this run)
 
 Once the card is `done` and committed, dispatch the **Coach** ONCE for this run — a cheap cross-model judge of
 the run trajectory (not the worked project). It scans for friction with **Squad itself** and files a
-squad-improvement report only when friction clears a strict materiality bar (default ZERO). `MODEL_PROVIDER`
+friction report only when friction clears a strict materiality bar (default ZERO). `MODEL_PROVIDER`
 and the `read_model` / `read_effort` helpers are already resolved above.
 
 ```bash
-# --- Coach: squad-improvement review of THIS run (default-zero; files only material friction) ---
+# --- Coach: friction review of THIS run (default-zero; files only material friction) ---
 MODEL_COACH=$(read_model coach)
 EFFORT_COACH=$(read_effort coach)   # "" under claude (no reasoning_effort.claude) — used only on the codex branch
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")

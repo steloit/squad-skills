@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Coach smoke harness — seeded synthetic trajectories for the squad-improvement judge.
+"""Coach smoke harness — seeded synthetic trajectories for the friction judge.
 
 Two hard-coded smokes from the approved plan:
   A (recall):    one unambiguous Squad-itself friction (board note endpoint at shared.md:351
                  returns HTTP 400 for a missing 'agent' field, then a retry) → expect EXACTLY 1
-                 squad-improvement report (area board-api).
+                 friction report (area board-api).
   B (precision): a deliberately friction-free trajectory (only a worked-project bug at
                  demo/src/app.js:42) → expect 0 reports.
 

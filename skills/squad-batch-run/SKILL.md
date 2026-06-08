@@ -9,7 +9,6 @@ metadata:
 # Squad Batch Run
 
 > Safety principles: read `../squad/principles.md` — **mandatory, not optional.**
-> Squad self-improvement: if **Squad itself** (the skills/board/orchestrator you work *with* — not the project you're working *on*) causes friction, follow `../squad/shared.md` → **Squad Improvement Reports** (report, don't fix).
 
 Execute several squad tasks as one orchestrated batch using **Rolling Wave Planning** by default.
 
@@ -190,16 +189,16 @@ After each task or group: re-read task status from API before continuing.
 - Key interfaces/schemas confirmed during verify steps (useful for next epic)
 - Resulting commits
 
-### 10. Coach (batch-level squad-improvement review)
+### 10. Coach (batch-level friction review)
 
 After the completion summary, dispatch the **Coach** ONCE at the **batch level** — a cheap cross-model judge of
 the batch loop itself (the per-task Coach already fired inside each `squad-run`). It scans for friction with
-**Squad itself** (ordering reworks, stale-assumption refines, stop-condition trips) and files a squad-improvement
+**Squad itself** (ordering reworks, stale-assumption refines, stop-condition trips) and files a friction
 report only when friction clears a strict materiality bar (default ZERO). batch-run has no model block today, so
 the dispatch resolves `MODEL_PROVIDER` + the helpers first.
 
 ```bash
-# --- Coach: batch-level squad-improvement review of THIS run (default-zero; files only material friction) ---
+# --- Coach: batch-level friction review of THIS run (default-zero; files only material friction) ---
 # Resolve MODEL_PROVIDER + read_model/read_effort per ../squad/shared.md → Model Resolution:
 MODEL_PROVIDER=${SQUAD_MODEL_PROVIDER:-}
 if [ -z "$MODEL_PROVIDER" ] && [ -n "${CODEX_THREAD_ID:-}${CODEX_CI:-}" ]; then MODEL_PROVIDER=codex; fi

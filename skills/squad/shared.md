@@ -340,15 +340,15 @@ curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/projects/$PROJECT/links" \
 
 > For full schema, column descriptions, and JSON field formats, read `schema.md`.
 
-## Squad Improvement Reports
+## Squad Friction Reports
 
 Any squad skill or pipeline agent that hits friction **with Squad itself** (the skills/board/orchestrator you work *with*, not the project you work *on*) — an ambiguous
 skill instruction, an awkward board API, a clunky orchestrator step, a weak or missing template, an
-agent-ergonomics annoyance, or a bug — files a structured **squad-improvement** report so Squad improves
+agent-ergonomics annoyance, or a bug — files a structured **friction** report so Squad improves
 from its own use. This is **report, not fix**: never leave your actual task to chase it, and never file
 the worked project's own bugs here (those go to that project's board). See `principles.md` → Forbidden.
 
-A report is a low-priority card on **project `squad`**, tagged `squad-improvement, triage`. It lands as
+A report is a low-priority card on **project `squad`**, tagged `friction, triage`. It lands as
 a `todo` card carrying both tags (not promoted into the active backlog); a human triages it later —
 promoting it into a real card (removing `triage`) or deleting it.
 
@@ -372,20 +372,20 @@ The card description is this structured body (Markdown is fine; keep the field l
 - **Per-invocation cap N=3.** A single skill run files at most **3** reports. One squad-run pipeline
   pass counts as **one** invocation across all 6 agents (not 3 per agent) — the orchestrator owns the
   budget for a run; standalone runs (one refine, one explore) own their own.
-- **Dedup against the board.** Before filing, read open squad-improvement cards and skip (or append your
-  evidence to a **`squad-improvement`-tagged** card) that already covers the same friction — match on `area` + the **normalized title**
+- **Dedup against the board.** Before filing, read open friction cards and skip (or append your
+  evidence to a **`friction`-tagged** card) that already covers the same friction — match on `area` + the **normalized title**
   (lowercase, collapse whitespace, drop punctuation). Don't re-file a duplicate.
 
 ### Dedup check (before filing)
 
 ```bash
-# Open squad-improvement cards (not done), id+title from the summary.
+# Open friction cards (not done), id+title from the summary.
 # The summary is an object keyed by status (todo/plan/plan_review/impl/impl_review/test/done),
 # each an array of cards; flatten the non-done buckets so `done` cards are excluded by construction.
 curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=squad&summary=true" \
   | jq -r '[ .todo, .plan, .plan_review, .impl, .impl_review, .test ] | add // []
            | .[]
-           | select((.tags // "") | test("squad-improvement"))
+           | select((.tags // "") | test("friction"))
            | "\(.id)\t\(.title)"'
 # If a returned title (normalized) matches your report's area+title, skip or append — do not re-file.
 ```
@@ -407,7 +407,7 @@ BODY=$(jq -n \
   --arg source_project "<project you were working on>" \
   --arg source_task "<task id on that project>" \
   '{title: $title, project: "squad", priority: "low", level: 1,
-    tags: "squad-improvement, triage",
+    tags: "friction, triage",
     description: ("**area:** " + $area + "\n**severity:** " + $severity
       + "\n**evidence:** " + $evidence
       + "\n**suggestion:** " + $suggestion
@@ -415,11 +415,42 @@ BODY=$(jq -n \
       + "\n**source_task:** " + $source_task)}')
 curl -s "${AUTH_HEADER[@]}" -X POST "$SQUAD_BASE_URL_FOR_REPORTS/api/task" \
   -H 'Content-Type: application/json' -d "$BODY"
-# → {"success":true,"id":<NNN>} — a todo card tagged `squad-improvement, triage` on project squad.
+# → {"success":true,"id":<NNN>} — a todo card tagged `friction, triage` on project squad.
 ```
 
 > Reports always target **project `squad`**, even when you are working on a different project. The board
 > URL is the same `$BASE_URL` you already resolved; only the `project` field changes to `squad`.
+
+## Run Audit
+
+Every squad run records its full Coach audit to an append-only run-audits store on project `squad`,
+so triage and eval both derive from one lossless log. The Coach POSTs this **every run** (clean and
+friction); material rows are ALSO surfaced as `friction, triage` cards (see Squad Friction Reports).
+
+### POST /api/run-audit?project=squad  (append-only, Bearer-gated → `{ "id": <int> }`)
+
+Body (JSON). `rubric`, `signals`, `filed_card_ids` MUST be valid JSON values — the endpoint returns
+**400** (`"<field> must be valid JSON"`) on bare text. `overall_status` must be `clean` or `friction`.
+
+| Field | Required | Type | Notes |
+|-------|----------|------|-------|
+| `source_project` | **yes** | string | project the run worked on |
+| `skill` | **yes** | string | skill that ran (e.g. `squad-run`) |
+| `source_task` | no | string | task id on that project |
+| `level` | no | int \| null | pipeline level if known; else null/omit |
+| `provider` | no | string \| null | resolved model provider (claude/codex); else null/omit |
+| `overall_status` | yes | enum | `clean` (no material rows) \| `friction` (≥1 material row) |
+| `rubric` | yes | JSON array | the 6 scored rows (ALL material rows, regardless of the N=3 card cap) — MUST be valid JSON |
+| `signals` | yes | JSON array/object | friction signals as a JSON array or object (never a bare string scalar) — MUST be valid JSON |
+| `filed_card_ids` | yes | JSON array | ids of the `friction, triage` cards filed this run (`[]` on a clean run) — MUST be valid JSON |
+
+### GET /api/run-audits?project=&since=&status=&skill=  →  `{ "audits": [ … ] }`
+
+Read-back / verification. Optional filters: `since` (ISO), `status` (clean|friction), `skill`.
+Each row echoes the POST fields plus `id` and `created_at`.
+
+> Best-effort: the Coach POSTs the audit but a failed POST (endpoint unreachable / network) is logged
+> and the run continues — the audit is observability and must NOT break the run or block triage.
 
 ## JSON Safety in curl
 

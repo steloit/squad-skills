@@ -6,7 +6,6 @@ license: MIT
 
 > Shared context: read `../squad/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
 > Safety principles: read `../squad/principles.md` — **mandatory, not optional.**
-> Squad self-improvement: if **Squad itself** (the skills/board/orchestrator you work *with* — not the project you're working *on*) causes friction, follow `../squad/shared.md` → **Squad Improvement Reports** (report, don't fix).
 
 ## `/squad-refine <ID>` — Refine Backlog Requirements
 
@@ -120,15 +119,15 @@ Resolve `MODEL_PROVIDER` + the `read_model` helper per `../squad/shared.md` → 
 MODEL_REFINER=$(read_model refiner)
 ```
 
-### Coach (squad-improvement review of this run)
+### Coach (friction review of this run)
 
 After step ⑦ Save completes (an approved refine), dispatch the **Coach** ONCE — a cheap cross-model judge of the
-refine run trajectory. It scans for friction with **Squad itself** and files a squad-improvement report only when
+refine run trajectory. It scans for friction with **Squad itself** and files a friction report only when
 friction clears a strict materiality bar (default ZERO). Reuse the Model Routing resolution above (same
 `MODEL_PROVIDER` + `read_model` / `read_effort`).
 
 ```bash
-# --- Coach: squad-improvement review of THIS run (default-zero; files only material friction) ---
+# --- Coach: friction review of THIS run (default-zero; files only material friction) ---
 MODEL_COACH=$(read_model coach)
 EFFORT_COACH=$(read_effort coach)   # "" under claude — used only on the codex branch
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")

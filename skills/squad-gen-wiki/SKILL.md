@@ -7,7 +7,6 @@ metadata:
 ---
 
 > Shared context: read `../squad/shared.md` for project config, API endpoints, auth, and error handling.
-> Squad self-improvement: if **Squad itself** (the skills/board/orchestrator you work *with* — not the project you're working *on*) causes friction, follow `../squad/shared.md` → **Squad Improvement Reports** (report, don't fix).
 
 ## `/squad-gen-wiki` — Initial project wiki generation
 
@@ -239,7 +238,7 @@ sources: {source count}
    > Wiki generated: N files in `wiki/`.
    > Run `/squad-gen-wiki update` after significant changes to refresh.
 
-⑤ Coach — run the shared **Coach dispatch** below (squad-improvement review of this run).
+⑤ Coach — run the shared **Coach dispatch** below (friction review of this run).
 ```
 
 ---
@@ -316,20 +315,20 @@ sources: {source count}
 
    > Wiki updated: N files changed, M unchanged.
 
-⑤ Coach — run the shared **Coach dispatch** below (squad-improvement review of this run).
+⑤ Coach — run the shared **Coach dispatch** below (friction review of this run).
 ```
 
 ---
 
-### Coach dispatch (squad-improvement review of this run)
+### Coach dispatch (friction review of this run)
 
 After `④ Completion output` (BOTH procedures — initial and update) close, dispatch the **Coach** ONCE — a cheap
 cross-model judge of the wiki-generation run trajectory. It scans for friction with **Squad itself** and files a
-squad-improvement report only when friction clears a strict materiality bar (default ZERO). gen-wiki is fully
+friction report only when friction clears a strict materiality bar (default ZERO). gen-wiki is fully
 inline (no provider resolution today), so the dispatch resolves `MODEL_PROVIDER` + the helpers first.
 
 ```bash
-# --- Coach: squad-improvement review of THIS run (default-zero; files only material friction) ---
+# --- Coach: friction review of THIS run (default-zero; files only material friction) ---
 # Resolve MODEL_PROVIDER + read_model/read_effort per ../squad/shared.md → Model Resolution:
 MODEL_PROVIDER=${SQUAD_MODEL_PROVIDER:-}
 if [ -z "$MODEL_PROVIDER" ] && [ -n "${CODEX_THREAD_ID:-}${CODEX_CI:-}" ]; then MODEL_PROVIDER=codex; fi
