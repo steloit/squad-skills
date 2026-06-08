@@ -6,7 +6,7 @@ license: MIT
 
 > Shared context: read `../squad/shared.md` for project config & auth, pipeline levels, status transitions, API endpoints, and error handling.
 > Safety principles: read `../squad/principles.md` — **mandatory, not optional.**
-> Squad self-improvement: if you hit friction with the squad system, follow `../squad/shared.md` → **Squad Improvement Reports** (report, don't fix).
+> Squad self-improvement: if **Squad itself** (the skills/board/orchestrator you work *with* — not the project you're working *on*) causes friction, follow `../squad/shared.md` → **Squad Improvement Reports** (report, don't fix).
 
 ## `/squad-explore [topic]` — Explore & Plan
 

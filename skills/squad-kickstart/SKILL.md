@@ -11,7 +11,7 @@ metadata:
 Runs the complete project lifecycle from idea to rolling implementation.
 
 > Shared context: read `../squad/shared.md` for auth resolution (`SQUAD_AUTH_TOKEN` → `~/.squad/auth`, `Authorization: Bearer` header), `$BASE_URL`, API endpoints, pipeline levels, and the JSON-safety rule. Resolve `PROJECT` / `BASE_URL` / `AUTH_HEADER` from there before any API call.
-> Squad self-improvement: if you hit friction with the squad system, follow `../squad/shared.md` → **Squad Improvement Reports** (report, don't fix).
+> Squad self-improvement: if **Squad itself** (the skills/board/orchestrator you work *with* — not the project you're working *on*) causes friction, follow `../squad/shared.md` → **Squad Improvement Reports** (report, don't fix).
 
 **Default mode: Rolling Wave Planning**
 ```

@@ -7,7 +7,7 @@ metadata:
 ---
 
 > Shared context: read `../squad/shared.md` for project config, API endpoints, auth, and error handling.
-> Squad self-improvement: if you hit friction with the squad system, follow `../squad/shared.md` → **Squad Improvement Reports** (report, don't fix).
+> Squad self-improvement: if **Squad itself** (the skills/board/orchestrator you work *with* — not the project you're working *on*) causes friction, follow `../squad/shared.md` → **Squad Improvement Reports** (report, don't fix).
 
 ## `/squad-gen-wiki` — Initial project wiki generation
 

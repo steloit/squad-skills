@@ -7,7 +7,7 @@ metadata:
 ---
 
 > Shared context: read `../squad/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
-> Squad self-improvement: if you hit friction with the squad system, follow `../squad/shared.md` → **Squad Improvement Reports** (report, don't fix).
+> Squad self-improvement: if **Squad itself** (the skills/board/orchestrator you work *with* — not the project you're working *on*) causes friction, follow `../squad/shared.md` → **Squad Improvement Reports** (report, don't fix).
 > Schema: read `../squad/schema.md` for full DB schema, column descriptions, and JSON field formats.
 
 ## `/squad-heartbeat [--project X] [--days N] [--dry-run]` -- Stagnant Task Detection

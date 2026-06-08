@@ -342,7 +342,7 @@ curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/projects/$PROJECT/links" \
 
 ## Squad Improvement Reports
 
-Any squad skill or pipeline agent that hits friction **with the squad system itself** — an ambiguous
+Any squad skill or pipeline agent that hits friction **with Squad itself** (the skills/board/orchestrator you work *with*, not the project you work *on*) — an ambiguous
 skill instruction, an awkward board API, a clunky orchestrator step, a weak or missing template, an
 agent-ergonomics annoyance, or a bug — files a structured **squad-improvement** report so Squad improves
 from its own use. This is **report, not fix**: never leave your actual task to chase it, and never file
