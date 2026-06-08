@@ -340,6 +340,87 @@ curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/projects/$PROJECT/links" \
 
 > For full schema, column descriptions, and JSON field formats, read `schema.md`.
 
+## Squad Improvement Reports
+
+Any squad skill or pipeline agent that hits friction **with the squad system itself** — an ambiguous
+skill instruction, an awkward board API, a clunky orchestrator step, a weak or missing template, an
+agent-ergonomics annoyance, or a bug — files a structured **squad-improvement** report so Squad improves
+from its own use. This is **report, not fix**: never leave your actual task to chase it, and never file
+the worked project's own bugs here (those go to that project's board). See `principles.md` → Forbidden.
+
+A report is a low-priority card on **project `squad`**, tagged `squad-improvement, triage`. It lands as
+a `todo` card carrying both tags (not promoted into the active backlog); a human triages it later —
+promoting it into a real card (removing `triage`) or deleting it.
+
+### Report schema
+
+The card description is this structured body (Markdown is fine; keep the field labels):
+
+| Field | Required | Values / notes |
+|-------|----------|----------------|
+| `area` | yes | one of: `skill` \| `template` \| `orchestrator` \| `board-api` \| `board-ui` \| `agent-ergonomics` \| `other` |
+| `severity` | yes | `low` \| `med` \| `high` |
+| `title` | yes | one concise line naming the friction (becomes the card title) |
+| `evidence` | **yes** | what you were doing + the concrete friction, with a `file:line` reference or a reproduction. **No concrete evidence → not a report.** |
+| `suggestion` | no | a possible fix or direction, if you have one |
+| `source_project` | yes | the project you were actually working on when you hit the friction |
+| `source_task` | yes | the task id on that project you were working on |
+
+### Anti-flood guardrails
+
+- **Evidence bar.** No `file:line` or repro → do not file. Vague "this felt awkward" is not a report.
+- **Per-invocation cap N=3.** A single skill run files at most **3** reports. One squad-run pipeline
+  pass counts as **one** invocation across all 6 agents (not 3 per agent) — the orchestrator owns the
+  budget for a run; standalone runs (one refine, one explore) own their own.
+- **Dedup against the board.** Before filing, read open squad-improvement cards and skip (or append your
+  evidence to) a card that already covers the same friction — match on `area` + the **normalized title**
+  (lowercase, collapse whitespace, drop punctuation). Don't re-file a duplicate.
+
+### Dedup check (before filing)
+
+```bash
+# Open squad-improvement cards (not done), id+title from the summary.
+# The summary is an object keyed by status (todo/plan/plan_review/impl/impl_review/test/done),
+# each an array of cards; flatten the non-done buckets so `done` cards are excluded by construction.
+curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=squad&summary=true" \
+  | jq -r '[ .todo, .plan, .plan_review, .impl, .impl_review, .test ] | add // []
+           | .[]
+           | select((.tags // "") | test("squad-improvement"))
+           | "\(.id)\t\(.title)"'
+# If a returned title (normalized) matches your report's area+title, skip or append — do not re-file.
+```
+
+### Filing a report (reuses the Create-task endpoint)
+
+A report is created with the **same `POST /api/task`** documented above (API Access → API Endpoints),
+forced to `project=squad`, `priority=low`, with the two tags as a comma-separated string. Build the body
+with jq or Python (see JSON Safety) so newlines/quotes in `evidence` can't break the JSON:
+
+```bash
+SQUAD_BASE_URL_FOR_REPORTS="${SQUAD_BASE_URL:-https://steloit-squad.vercel.app}"
+BODY=$(jq -n \
+  --arg area "board-api" \
+  --arg severity "med" \
+  --arg title "<one-line friction>" \
+  --arg evidence "<what you did + concrete friction + file:line or repro>" \
+  --arg suggestion "<optional fix/direction>" \
+  --arg source_project "<project you were working on>" \
+  --arg source_task "<task id on that project>" \
+  '{title: $title, project: "squad", priority: "low", level: 1,
+    tags: "squad-improvement, triage",
+    description: ("**area:** " + $area + "\n**severity:** " + $severity
+      + "\n**evidence:** " + $evidence
+      + "\n**suggestion:** " + $suggestion
+      + "\n**source_project:** " + $source_project
+      + "\n**source_task:** " + $source_task)}')
+curl -s "${AUTH_HEADER[@]}" -X POST "$SQUAD_BASE_URL_FOR_REPORTS/api/task" \
+  -H 'Content-Type: application/json' -d "$BODY"
+# → {"success":true,"id":<NNN>} — a todo card tagged `squad-improvement, triage` on project squad.
+```
+
+> Reports always target **project `squad`**, even when you are working on a different project. The board
+> URL is the same `$BASE_URL` you already resolved; only the `project` field changes to `squad`.
+
 ## JSON Safety in curl
 
 When passing user-supplied text (titles, descriptions) to curl, use `jq` or Python to build the JSON — never embed raw text in shell strings, as literal newlines and quotes break JSON:

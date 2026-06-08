@@ -4,6 +4,8 @@ description: "Register the current project on the Squad board so /squad commands
 license: MIT
 ---
 
+> Squad self-improvement: if you hit friction with the squad system, follow `../squad/shared.md` → **Squad Improvement Reports** (report, don't fix).
+
 Registers the current project in **PostgreSQL** (shared central DB) and creates a local config so `/squad` knows which project to use.
 No per-project DB file is created — the central PostgreSQL server handles storage for all projects automatically.
 

@@ -6,6 +6,7 @@ license: MIT
 
 > Shared context: read `shared.md` for project config & auth, pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
 > Safety principles: read `principles.md` — **mandatory, not optional.**
+> Squad self-improvement: if you hit friction with the squad system, follow `shared.md` → **Squad Improvement Reports** (report, don't fix).
 
 ## Commands
 
