@@ -176,7 +176,7 @@ This skill explores first, reports direction, then seeds the squad board with ph
    - phase: sequential number (1, 2, 3…) — used as a tag
    - priority: high (phase 1–2), medium (phase 3–4), low (phase 5+)
    - level: L2 or L3 based on complexity from Plan output
-   - tags: "explore-<topic-slug>, phase:<N>, <module-tag>"
+   - tags: ["explore-<topic-slug>", "phase:<N>", "<module-tag>"]  (JSON array — the canonical stored format)
 
    **The LAST task must always be an E2E test task.**
    Title format: "Add E2E tests for <topic>"
@@ -190,7 +190,7 @@ This skill explores first, reports direction, then seeds the squad board with ph
    title: "[Explore] <topic>"
    priority: low
    level: 1
-   tags: "explore-<topic-slug>, explore-report"
+   tags: ["explore-<topic-slug>", "explore-report"]
    description:
      <full Exploration Report from ③>
 
@@ -229,7 +229,7 @@ This skill explores first, reports direction, then seeds the squad board with ph
    curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
      -H 'Content-Type: application/json' \
      -d "{\"title\": \"...\", \"project\": \"$PROJECT\", \"priority\": \"high\",
-          \"level\": 3, \"description\": \"...\", \"tags\": \"...\"}"
+          \"level\": 3, \"description\": \"...\", \"tags\": [\"explore-<topic-slug>\", \"phase:<N>\"]}"
 
    # Patch report anchor
    curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$REPORT_ID?project=$PROJECT" \

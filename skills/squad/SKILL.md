@@ -29,7 +29,10 @@ BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summar
 ### `/squad add <title>` — Add Task
 
 1. Ask user for priority, level (L1/L2/L3), description, tags (use AskUserQuestion)
-2. Build JSON safely with `jq` (see shared.md → JSON Safety), POST to API, capture the new task ID
+2. Build JSON safely with `jq` (see shared.md → JSON Safety), POST to API, capture the new task ID.
+   `tags` MUST be a **JSON array** — the canonical stored format the board renders. Split the user's
+   comma-separated input into an array, e.g. `--arg tags "$TAGS"` then `tags: ($tags | split(",") | map(gsub("^ +| +$";"")))`
+   in the jq body (no tags → omit the field or pass `[]`, never `""`).
 3. **Images**: if the user gave image **file path(s)** (e.g. `/squad add "Login bug" --image ./bug.png`, or "attach ./shot.png"), upload each to the new task via the attachment API (see shared.md → "Upload an image attachment"). Output the task ID + the returned attachment `url`(s). A pasted image with no path → ask the user to save it to a file first (the upload reads a local file).
 
 ### `/squad move <ID> <status>` — Move Task

@@ -393,7 +393,7 @@ curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=squad&summary=true" \
 ### Filing a report (reuses the Create-task endpoint)
 
 A report is created with the **same `POST /api/task`** documented above (API Access → API Endpoints),
-forced to `project=squad`, `priority=low`, with the two tags as a comma-separated string. Build the body
+forced to `project=squad`, `priority=low`, with the two tags as a JSON array. Build the body
 with jq or Python (see JSON Safety) so newlines/quotes in `evidence` can't break the JSON:
 
 ```bash
@@ -407,7 +407,7 @@ BODY=$(jq -n \
   --arg source_project "<project you were working on>" \
   --arg source_task "<task id on that project>" \
   '{title: $title, project: "squad", priority: "low", level: 1,
-    tags: "friction, triage",
+    tags: ["friction", "triage"],
     description: ("**area:** " + $area + "\n**severity:** " + $severity
       + "\n**evidence:** " + $evidence
       + "\n**suggestion:** " + $suggestion

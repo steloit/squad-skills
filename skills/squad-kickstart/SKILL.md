@@ -112,7 +112,7 @@ Minimum fields per task:
 PAYLOAD=$(jq -n --arg title "<task title>" --arg project "$PROJECT" \
   --arg description "$(printf '## Goal\nOne-line goal\n\n## Scope\n- In: ...\n- Out: ...')" \
   --arg tags "phase:1,epic:auth" \
-  '{title:$title, project:$project, priority:"high", level:2, description:$description, tags:$tags}')
+  '{title:$title, project:$project, priority:"high", level:2, description:$description, tags: ($tags | split(",") | map(gsub("^ +| +$";"")))}')
 curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
   -H 'Content-Type: application/json' -d "$PAYLOAD"
 ```
