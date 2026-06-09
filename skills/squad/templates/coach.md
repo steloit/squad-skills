@@ -77,7 +77,7 @@ For each rubric row that cleared the materiality bar (Step 2), file a card follo
 - Dedup ONLY against `friction`-tagged cards from the documented summary query; match `area` +
   normalized title. On a duplicate: SKIP by default; you MAY append evidence ONLY to a card that is
   itself tagged `friction`. NEVER write to / append to / modify any card NOT tagged `friction`.
-- POST per the documented jq snippet: `project:"squad"`, `priority:"low"`, `tags:"friction, triage"`,
+- POST per the documented jq snippet: `project:"squad"`, `priority:"low"`, `tags:["friction","triage"]`,
   description carrying `area`/`severity`/`evidence`/`suggestion`/`source_project`/`source_task`.
 - **Hard cap: at most 3 cards for this run.** If more than 3 cleared the bar, push the 3 highest-
   severity/most-material; the audit `rubric` (3b) STILL records ALL material rows — the cap limits
