@@ -243,6 +243,8 @@ Launch via the Task tool (one batch-level invocation):
 - codex: `Task(subagent_type="general-purpose", model="$MODEL_COACH", model_reasoning_effort="$EFFORT_COACH", prompt=$COACH_PROMPT)`
 - claude: `Task(subagent_type="general-purpose", model="$MODEL_COACH", prompt=$COACH_PROMPT)`
 
+> **The batch-level Coach runs in the background.** Surface it to the user only when it filed friction — a single line: `🔍 N friction report(s) filed for triage`.
+
 ---
 
 ## Execution Notes
