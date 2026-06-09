@@ -502,7 +502,11 @@ Launch via the Task tool (same pattern as the pipeline agents):
 
 ## Markdown Authoring
 
-When you quote file/template contents (or any block that itself contains ``` fences), wrap it in a `~~~` tilde outer fence (no backtick counting; backticks can't collide). A 4+-backtick outer fence is equivalent.
+Authored markdown (plans, notes, descriptions, friction reports) frequently quotes code and fences. Two rules keep it valid CommonMark so it renders correctly in the card modal — both are the same mechanical idea: **pick a delimiter that can't collide with the content inside.**
+
+**Block — a block that quotes content containing ``` fences:** wrap it in a `~~~` tilde outer fence (no backtick counting; tildes can't collide with backticks). A 4+-backtick outer fence is equivalent.
+
+**Inline — a literal backtick run mentioned in prose:** delimit the inline-code span with a run one longer than the longest run inside it (to show N backticks, use N+1). **Never type a bare ``` mid-sentence** — it opens a phantom code block. To show a literal triple-backtick inline, use a four-backtick span.
 
 **Before** (flat ``` inside ``` — the inner fence closes the block early and the rest leaks as headings/text):
 
@@ -523,6 +527,12 @@ echo hi
 ```
 ~~~
 ````
+
+**Inline escape** (mentioning a literal triple-backtick in a sentence — shown raw inside a `~~~` block so the backticks are literal):
+
+~~~
+to display   ```   in prose, type a 4-backtick span around it:   ```` ``` ````
+~~~
 
 ## JSON Safety in curl
 
