@@ -452,6 +452,54 @@ Each row echoes the POST fields plus `id` and `created_at`.
 > Best-effort: the Coach POSTs the audit but a failed POST (endpoint unreachable / network) is logged
 > and the run continues — the audit is observability and must NOT break the run or block triage.
 
+## Coach Dispatch
+
+> **Invoked by the agent-run skills at their close — `squad-run`, `squad-explore`, `squad-batch-run`, `squad-refine`, `squad-gen-wiki`.** The CRUD/setup skills (`squad`, `squad-init`, `squad-kickstart`, `squad-heartbeat`) do NOT dispatch the Coach — like Move Protocol and Run Audit, they load this file but never invoke this procedure.
+
+After a run is done, dispatch the **Coach** ONCE — an independent (fresh-context) judge of the run trajectory (not the worked project). It scans for friction with **Squad itself** and files a friction report only when friction clears a strict materiality bar (default ZERO). **One invocation per run** — the orchestrator owns the N=3 report budget across the run (see Squad Friction Reports), and the Coach POSTs its full audit every run (see Run Audit).
+
+**Prerequisite:** `MODEL_PROVIDER` + the `read_model` / `read_effort` helpers are resolved per **Model Resolution** above. If the calling skill has not already resolved them during its own work, resolve them first.
+
+**The caller supplies these per-run inputs** (everything else below is identical for every skill):
+- `skill_name` — the calling skill (e.g. `squad-run`).
+- `source_task` — the task id this run worked (or `(wiki)` for gen-wiki / the first batch id for batch-run).
+- `run_summary` — one line describing what the run did.
+- `trajectory` — this run's agent_log / notes / outputs (what the Coach judges).
+- `friction_signals` — reject loops / retries / stop-condition trips observed this run; `none` if clean.
+
+```bash
+# --- Coach: friction review of THIS run (default-zero; files only material friction) ---
+# Prereq: MODEL_PROVIDER + read_model/read_effort resolved per Model Resolution (above).
+MODEL_COACH=$(read_model coach)
+EFFORT_COACH=$(read_effort coach)   # "" under claude (no reasoning_effort.claude) — used only on the codex branch
+TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+SOURCE_PROJECT="$PROJECT"
+# Caller sets these four per-run inputs (see table above):
+SOURCE_TASK="<source_task>"
+RUN_SUMMARY="<run_summary>"
+TRAJECTORY="<trajectory>"
+FRICTION_SIGNALS="<friction_signals>"
+COACH_PROMPT=$(python3 ../squad/scripts/render_agent_prompt.py \
+  --template ../squad/templates/coach.md \
+  --models ../squad/models.json \
+  --provider "$MODEL_PROVIDER" \
+  --set PROJECT="$PROJECT" \
+  --set skill_name="<skill_name>" \
+  --set source_project="$SOURCE_PROJECT" \
+  --set source_task="$SOURCE_TASK" \
+  --set run_summary="$RUN_SUMMARY" \
+  --set trajectory="$TRAJECTORY" \
+  --set friction_signals="$FRICTION_SIGNALS" \
+  --set TIMESTAMP="$TIMESTAMP")
+# <MODEL_COACH> / <EFFORT_COACH> are resolved by the script from models.json (no --set needed for them).
+```
+
+Launch via the Task tool (same pattern as the pipeline agents):
+- codex: `Task(subagent_type="general-purpose", model="$MODEL_COACH", model_reasoning_effort="$EFFORT_COACH", prompt=$COACH_PROMPT)`
+- claude: `Task(subagent_type="general-purpose", model="$MODEL_COACH", prompt=$COACH_PROMPT)`
+
+> **The Coach runs in the background.** Surface it to the user only when it filed friction — a single line: `🔍 N friction report(s) filed for triage`.
+
 ## JSON Safety in curl
 
 When passing user-supplied text (titles, descriptions) to curl, use `jq` or Python to build the JSON — never embed raw text in shell strings, as literal newlines and quotes break JSON:

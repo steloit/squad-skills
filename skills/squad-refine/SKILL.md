@@ -121,38 +121,12 @@ MODEL_REFINER=$(read_model refiner)
 
 ### Coach (friction review of this run)
 
-After step ⑦ Save completes (an approved refine), dispatch the **Coach** ONCE — an independent (fresh-context) judge of the
-refine run trajectory. It scans for friction with **Squad itself** and files a friction report only when
-friction clears a strict materiality bar (default ZERO). Reuse the Model Routing resolution above (same
-`MODEL_PROVIDER` + `read_model` / `read_effort`).
-
-```bash
-# --- Coach: friction review of THIS run (default-zero; files only material friction) ---
-MODEL_COACH=$(read_model coach)
-EFFORT_COACH=$(read_effort coach)   # "" under claude — used only on the codex branch
-TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-SOURCE_PROJECT="$PROJECT"
-SOURCE_TASK="$ID"
-RUN_SUMMARY="squad-refine refined the requirements for task $ID."
-TRAJECTORY="<the interview Q/A rounds + the refined description>"
-FRICTION_SIGNALS="<any board-API friction during the PATCH; 'none' if clean>"
-COACH_PROMPT=$(python3 ../squad/scripts/render_agent_prompt.py \
-  --template ../squad/templates/coach.md \
-  --models ../squad/models.json \
-  --provider "$MODEL_PROVIDER" \
-  --set PROJECT="$PROJECT" \
-  --set skill_name="squad-refine" \
-  --set source_project="$SOURCE_PROJECT" \
-  --set source_task="$SOURCE_TASK" \
-  --set run_summary="$RUN_SUMMARY" \
-  --set trajectory="$TRAJECTORY" \
-  --set friction_signals="$FRICTION_SIGNALS" \
-  --set TIMESTAMP="$TIMESTAMP")
-# <MODEL_COACH> / <EFFORT_COACH> are resolved by the script from models.json (no --set needed for them).
-```
-Launch via the Task tool:
-- codex: `Task(subagent_type="general-purpose", model="$MODEL_COACH", model_reasoning_effort="$EFFORT_COACH", prompt=$COACH_PROMPT)`
-- claude: `Task(subagent_type="general-purpose", model="$MODEL_COACH", prompt=$COACH_PROMPT)`
+After step ⑦ Save completes (an approved refine), dispatch the **Coach** per `../squad/shared.md` → **Coach Dispatch** (reuse the Model Routing resolution above — `MODEL_PROVIDER` + helpers). Pass:
+- `skill_name` = `squad-refine`
+- `source_task` = `$ID`
+- `run_summary` = `"squad-refine refined the requirements for task $ID."`
+- `trajectory` = the interview Q/A rounds + the refined description
+- `friction_signals` = any board-API friction during the PATCH; `none` if clean
 
 ### Interview Tips
 

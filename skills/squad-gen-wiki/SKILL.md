@@ -322,56 +322,12 @@ sources: {source count}
 
 ### Coach dispatch (friction review of this run)
 
-After `④ Completion output` (BOTH procedures — initial and update) close, dispatch the **Coach** ONCE — an independent (fresh-context)
-judge of the wiki-generation run trajectory. It scans for friction with **Squad itself** and files a
-friction report only when friction clears a strict materiality bar (default ZERO). gen-wiki is fully
-inline (no provider resolution today), so the dispatch resolves `MODEL_PROVIDER` + the helpers first.
-
-```bash
-# --- Coach: friction review of THIS run (default-zero; files only material friction) ---
-# Resolve MODEL_PROVIDER + read_model/read_effort per ../squad/shared.md → Model Resolution:
-MODEL_PROVIDER=${SQUAD_MODEL_PROVIDER:-}
-if [ -z "$MODEL_PROVIDER" ] && [ -n "${CODEX_THREAD_ID:-}${CODEX_CI:-}" ]; then MODEL_PROVIDER=codex; fi
-if [ -z "$MODEL_PROVIDER" ] && [ -n "${CLAUDE_PROJECT_DIR:-}${CLAUDECODE:-}" ]; then MODEL_PROVIDER=claude; fi
-if [ -z "$MODEL_PROVIDER" ] && [ -d .claude ]; then MODEL_PROVIDER=claude; fi
-if [ -z "$MODEL_PROVIDER" ] && [ -d .codex ]; then MODEL_PROVIDER=codex; fi
-read_model()  { python3 - "$MODEL_PROVIDER" "$1" <<'PY'
-import json, pathlib, sys
-d = json.loads(pathlib.Path("../squad/models.json").read_text())
-print(d["providers"][sys.argv[1] or d["default_provider"]][sys.argv[2]])
-PY
-}
-read_effort() { python3 - "$MODEL_PROVIDER" "$1" <<'PY'
-import json, pathlib, sys
-d = json.loads(pathlib.Path("../squad/models.json").read_text())
-print(d.get("reasoning_effort", {}).get(sys.argv[1] or d["default_provider"], {}).get(sys.argv[2], ""))
-PY
-}
-MODEL_COACH=$(read_model coach)
-EFFORT_COACH=$(read_effort coach)   # "" under claude — used only on the codex branch
-TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-SOURCE_PROJECT="$PROJECT"
-SOURCE_TASK="(wiki)"
-RUN_SUMMARY="squad-gen-wiki generated/updated the project wiki."
-TRAJECTORY="<the synthesis steps + the generated/updated file list>"
-FRICTION_SIGNALS="<any board-read / source friction; 'none' if clean>"
-COACH_PROMPT=$(python3 ../squad/scripts/render_agent_prompt.py \
-  --template ../squad/templates/coach.md \
-  --models ../squad/models.json \
-  --provider "$MODEL_PROVIDER" \
-  --set PROJECT="$PROJECT" \
-  --set skill_name="squad-gen-wiki" \
-  --set source_project="$SOURCE_PROJECT" \
-  --set source_task="$SOURCE_TASK" \
-  --set run_summary="$RUN_SUMMARY" \
-  --set trajectory="$TRAJECTORY" \
-  --set friction_signals="$FRICTION_SIGNALS" \
-  --set TIMESTAMP="$TIMESTAMP")
-# <MODEL_COACH> / <EFFORT_COACH> are resolved by the script from models.json (no --set needed for them).
-```
-Launch via the Task tool:
-- codex: `Task(subagent_type="general-purpose", model="$MODEL_COACH", model_reasoning_effort="$EFFORT_COACH", prompt=$COACH_PROMPT)`
-- claude: `Task(subagent_type="general-purpose", model="$MODEL_COACH", prompt=$COACH_PROMPT)`
+After `④ Completion output` (BOTH procedures — initial and update) close, dispatch the **Coach** per `../squad/shared.md` → **Coach Dispatch**. gen-wiki is fully inline (no provider resolution today), so resolve `MODEL_PROVIDER` + the `read_model` / `read_effort` helpers per `../squad/shared.md` → **Model Resolution** first, then pass:
+- `skill_name` = `squad-gen-wiki`
+- `source_task` = `(wiki)`
+- `run_summary` = `"squad-gen-wiki generated/updated the project wiki."`
+- `trajectory` = the synthesis steps + the generated/updated file list
+- `friction_signals` = any board-read / source friction; `none` if clean
 
 ---
 
