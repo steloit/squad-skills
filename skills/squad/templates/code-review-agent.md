@@ -45,6 +45,8 @@ Score the implementation on **6 dimensions (1–5 each)**:
 
 **Output format:**
 
+> Markdown authoring — when quoting fenced content, wrap it in a `~~~` outer fence: see `../squad/shared.md` → **Markdown Authoring**.
+
 ```markdown
 > **Inspector** `<MODEL_INSPECTOR>` · <TIMESTAMP>
 

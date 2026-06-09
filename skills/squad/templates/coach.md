@@ -139,6 +139,8 @@ fi
 
 ## Output format
 
+> Markdown authoring — when quoting fenced content, wrap it in a `~~~` outer fence: see `../squad/shared.md` → **Markdown Authoring**.
+
 Always print a short audit, even (especially) when you file nothing:
 
 ```markdown
