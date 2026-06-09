@@ -500,6 +500,30 @@ Launch via the Task tool (same pattern as the pipeline agents):
 
 > **The Coach runs in the background.** Surface it to the user only when it filed friction — a single line: `🔍 N friction report(s) filed for triage`.
 
+## Markdown Authoring
+
+When you quote file/template contents (or any block that itself contains ``` fences), wrap it in a `~~~` tilde outer fence (no backtick counting; backticks can't collide). A 4+-backtick outer fence is equivalent.
+
+**Before** (flat ``` inside ``` — the inner fence closes the block early and the rest leaks as headings/text):
+
+````
+```
+```bash
+echo hi
+```
+```
+````
+
+**After** (`~~~` outer fence — the whole quoted block, backticks and all, renders as one code block):
+
+````
+~~~
+```bash
+echo hi
+```
+~~~
+````
+
 ## JSON Safety in curl
 
 When passing user-supplied text (titles, descriptions) to curl, use `jq` or Python to build the JSON — never embed raw text in shell strings, as literal newlines and quotes break JSON:

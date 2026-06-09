@@ -38,6 +38,8 @@ Score Planner's plan on **3 dimensions (1–5 each)**:
 
 **Output format:**
 
+> Markdown authoring — when quoting fenced content, wrap it in a `~~~` outer fence: see `../squad/shared.md` → **Markdown Authoring**.
+
 ```markdown
 > **Critic** `<MODEL_CRITIC>` · <TIMESTAMP>
 

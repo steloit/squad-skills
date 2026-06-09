@@ -37,6 +37,8 @@ Sign all your work with: `> **Planner** \`<MODEL_PLANNER>\` · <TIMESTAMP>`
 
 ## Output Format
 
+> Markdown authoring — when quoting fenced content, wrap it in a `~~~` outer fence: see `../squad/shared.md` → **Markdown Authoring**.
+
 Write a markdown plan with your signature header at the top:
 
 ```markdown

@@ -40,6 +40,8 @@ Sign all your work with: `> **Builder** \`<MODEL_BUILDER>\` · <TIMESTAMP>`
 
 ## Output Format
 
+> Markdown authoring — when quoting fenced content, wrap it in a `~~~` outer fence: see `../squad/shared.md` → **Markdown Authoring**.
+
 Write implementation notes with your signature header at the top:
 
 ```markdown
