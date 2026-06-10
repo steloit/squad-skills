@@ -131,7 +131,7 @@ if [ "$LEVEL" = "3" ]; then PLAN_NEXT=plan_review; else PLAN_NEXT=impl; fi
 #      dispatch the Planner WITHOUT re-moving status. plan→plan is not a legal transition
 #      and MUST NOT be attempted (idempotent re-entry). Set current_agent:"Planner" only.
 #    All other statuses: dispatch the column's agent (see Agent Dispatch table).
-# 3. After agent: append to agent_log (see schema.md for format)
+# 3. After agent: append one activity event via POST /activity (see schema.md for format)
 # 4. The agent records its verdict; orchestrator READS it → GATE (default) → COMMIT move
 #    (generic PATCH, current_agent:null) → SIDE-EFFECTS (git commit + note, only after a done commit).
 #    See "Per-Step Transition Contract" below for the full ordering + mapping.
@@ -143,7 +143,7 @@ if [ "$LEVEL" = "3" ]; then PLAN_NEXT=plan_review; else PLAN_NEXT=impl; fi
 The orchestrator — never the agent — issues every status transition. Each agent step runs
 in strict order:
 
-1. **Record** — the agent does its work, writes its output fields, signs `agent_log`, and records
+1. **Record** — the agent does its work, writes its output fields, and records
    its verdict (approved/reject | pass/fail + comment) by POSTing the matching verdict endpoint
    (Critic → `/plan-review`, Inspector → `/review`, Ranger → `/test-result`). The agent does NOT
    change status.
@@ -412,9 +412,9 @@ Template files are at `../squad/templates/`.
      prompt        = <filled template content>
    )
 
-⑥ After Task completes — append signed entry to agent_log
-   (use schema.md › "Appending to agent_log" snippet,
-    set agent=<Nickname>, model=<model>, message=<summary>)
+⑥ After Task completes — append one signed activity event
+   POST /api/task/$ID/activity {actor:<Nickname>, model:<model>, message:<summary>, tokens?:<est>}
+   (use schema.md › "Appending an event (orchestrator)" snippet — single atomic POST, no read-modify-write)
 ```
 
 Builder and Shield each RETURN their output (no self-move). Once both complete, the orchestrator
@@ -447,13 +447,16 @@ if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
 fi
 COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "no-git")
 
-# 3. Record commit hash in notes
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/note?project=$PROJECT" \
+# 3. Record commit hash as an activity event (machine event, actor=Orchestrator/system)
+SUBJECT=$(git log -1 --format=%s 2>/dev/null || echo "no-git")
+BODY=$(jq -n --arg msg "Committed $COMMIT_HASH: $SUBJECT [squad #$ID]" \
+  '{actor: "Orchestrator", model: "system", message: $msg}')
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/activity?project=$PROJECT" \
   -H 'Content-Type: application/json' \
-  -d "{\"content\": \"Commit: $COMMIT_HASH\"}"
+  -d "$BODY"
 ```
 
-If no commits yet, skip note or record `"Commit: (none)"`.
+If no commits yet, skip the event or record `message:"Committed (none) [squad #$ID]"`.
 
 #### → Coach (friction review of this run)
 
@@ -461,7 +464,7 @@ Once the card is `done` and committed, dispatch the **Coach** per `../squad/shar
 - `skill_name` = `squad-run`
 - `source_task` = `$ID`
 - `run_summary` = `"squad-run pipeline completed task $ID to done."`
-- `trajectory` = the task's agent_log (all 6 agents, in order) + implementation_notes + review verdicts
+- `trajectory` = the task's activity events (all 6 agents, in order) + implementation_notes + review verdicts
 - `friction_signals` = reject loops / circuit-breaker trips / agent retries recorded this pass; `none` if clean
 
 ### `/squad-run review <ID>` — Code Review

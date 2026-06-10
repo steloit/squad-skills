@@ -137,7 +137,7 @@ B. Implement(N)
 
 C. Verify(N)
    - Check actual implementation: git diff, created/modified files, test results
-   - Add squad note: curl POST /api/task/$ID/note → "Verified: [confirmed interface/schema]"
+   - Record an activity event: curl POST /api/task/$ID/activity {actor:"Orchestrator", model:"system", message:"Verified: [confirmed interface/schema]"}
    - Note anything that will affect N+1's refinement scope
 
 → Move to N+1

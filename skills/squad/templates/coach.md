@@ -22,7 +22,7 @@ Sign anything you write with: `> **Coach** \`<MODEL_COACH>\` · <TIMESTAMP>`
 - **Run summary (what happened):**
 <run_summary>
 
-- **Trajectory (agent_log + agent outputs, in order):**
+- **Trajectory (activity events + agent outputs, in order):**
 <trajectory>
 
 - **Friction signals captured during the run** (errors, reject loops, circuit-breaker trips, retries, API failures):

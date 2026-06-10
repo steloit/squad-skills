@@ -2,9 +2,9 @@
 """Coach smoke harness — seeded synthetic trajectories for the friction judge.
 
 Two hard-coded smokes from the approved plan:
-  A (recall):    one unambiguous Squad-itself friction (board note endpoint at shared.md:351
-                 returns HTTP 400 for a missing 'agent' field, then a retry) → expect EXACTLY 1
-                 friction report (area board-api).
+  A (recall):    one unambiguous Squad-itself friction (squad-heartbeat scans last activity
+                 with one GET /api/task/:id/activity per task at squad-heartbeat/SKILL.md:250,
+                 an N+1 read against the board) → expect EXACTLY 1 friction report (area board-api).
   B (precision): a deliberately friction-free trajectory (only a worked-project bug at
                  demo/src/app.js:42) → expect 0 reports.
 
@@ -36,20 +36,21 @@ TRAJ_SET_KEYS = [
 
 # ── Seeded synthetic trajectories (hard-coded; from the approved plan) ──────────
 SMOKE_A = {
-    "skill_name": "squad-run",
+    "skill_name": "squad-heartbeat",
     "source_project": "demo",
     "source_task": "1",
-    "run_summary": "squad-run pipeline completed demo task 1 to done.",
+    "run_summary": "squad-heartbeat scanned demo for stagnant tasks.",
     "trajectory": (
-        "[agent_log] Builder POST skills/squad/shared.md:351 -> POST /api/task/1/note?project=demo\n"
-        "    -> HTTP 400 {\"error\":\"missing required field 'agent'\"}; the documented jq snippet at\n"
-        "    shared.md:351 omits the 'agent' field that the endpoint requires.\n"
-        "[agent_log] Builder retried with agent=\"builder\" added -> HTTP 200. (1 retry caused by the doc gap.)"
+        "[activity] Heartbeat scanned 40 active tasks on demo. To find each task's last-activity\n"
+        "    timestamp it issued one GET /api/task/:id/activity per task (squad-heartbeat/SKILL.md:250),\n"
+        "    because the board list does not embed the activity stream -> 40 round-trips for one scan\n"
+        "    (an N+1 read against the board). A single project-scoped batch reader would collapse this.\n"
+        "[activity] Scan completed but was visibly slow on the larger boards due to the per-task fan-out."
     ),
-    "friction_signals": "1 board-API 400 + 1 retry, both traced to shared.md:351.",
+    "friction_signals": "N+1 activity reads (one GET per task) in the heartbeat scan, traced to squad-heartbeat/SKILL.md:250.",
     "expect_reports": 1,
     "expect_area": "board-api",
-    "evidence_marker": "shared.md:351",
+    "evidence_marker": "squad-heartbeat/SKILL.md:250",
 }
 
 SMOKE_B = {
@@ -58,7 +59,7 @@ SMOKE_B = {
     "source_task": "2",
     "run_summary": "squad-run pipeline completed demo task 2 to done.",
     "trajectory": (
-        "[agent_log] All 6 agents ran clean: each board call returned 200 first try; no reject loops,\n"
+        "[activity] All 6 agents ran clean: each board call returned 200 first try; no reject loops,\n"
         "    no retries, no circuit-breaker trips. The only issue found was a NullPointerException in\n"
         "    demo/src/app.js:42 - a bug in the WORKED PROJECT, which the Builder fixed."
     ),
