@@ -178,7 +178,7 @@ for each task N in execution order:
   C. Verify(N)
      - Inspect actual output: git diff, created files, test results
      - Note any changes that affect subsequent task refinements
-     - Add squad note: "Impact on next tasks: ..."
+     - Record an activity event: POST /api/task/$ID/activity {actor:"Orchestrator", model:"system", message:"Impact on next tasks: ..."}
 
   → Move to N+1
 ```

@@ -1,6 +1,6 @@
 ---
 name: squad-heartbeat
-description: Scan squad boards for stagnant tasks and optionally mark them. Detects tasks with no agent activity for N days (default 3), outputs a markdown report table, and appends Heartbeat entries to agent_log unless --dry-run.
+description: Scan squad boards for stagnant tasks and optionally mark them. Detects tasks with no agent activity for N days (default 3), outputs a markdown report table, and appends Heartbeat activity events unless --dry-run.
 license: MIT
 metadata:
   internal: true
@@ -11,10 +11,10 @@ metadata:
 
 ## `/squad-heartbeat [--project X] [--days N] [--dry-run]` -- Stagnant Task Detection
 
-Scan all active projects (or a single project) for tasks that have had no agent activity for N days. Output a markdown table of stagnant tasks and optionally append a Heartbeat warning entry to each task's `agent_log`.
+Scan all active projects (or a single project) for tasks that have had no agent activity for N days. Output a markdown table of stagnant tasks and optionally append a Heartbeat warning event to each task's `activity` stream.
 
-**Defaults**: `--days 3`, all active projects, writes to `agent_log`.
-**`--dry-run`**: report only, no `agent_log` modifications.
+**Defaults**: `--days 3`, all active projects, writes a Heartbeat `activity` event per stagnant task.
+**`--dry-run`**: report only, no `activity` writes.
 
 ### Procedure
 
@@ -33,7 +33,7 @@ Scan all active projects (or a single project) for tasks that have had no agent 
    Parse CLI arguments:
    - --project X  → scan only project X (default: all active projects)
    - --days N     → stagnation threshold in days (default: 3)
-   - --dry-run    → report only, do not write agent_log entries
+   - --dry-run    → report only, do not write activity events
 
 ② Fetch Projects
 
@@ -60,30 +60,26 @@ Scan all active projects (or a single project) for tasks that have had no agent 
 
 ④ Extract Last Activity Timestamp per Task
 
-   For each task in collected tasks:
+   The board list does NOT carry the activity stream, so read each task's events from the
+   dedicated activity reader (newest event's `created_at`), falling back to `created_at`:
 
-     Use Python for safe JSON parsing:
+     # Newest event's created_at (events come back chronological ASC → take the last one).
+     curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID/activity?project=$P"
 
      python3 -c "
      import json, sys
-     task = json.loads(sys.stdin.read())
-     agent_log_raw = task.get('agent_log') or '[]'
-     try:
-         log = json.loads(agent_log_raw)
-         if isinstance(log, list) and len(log) > 0:
-             timestamps = [e.get('timestamp', '') for e in log if isinstance(e, dict)]
-             timestamps = [t for t in timestamps if t]
-             if timestamps:
-                 print(max(timestamps))
-                 sys.exit(0)
-     except (json.JSONDecodeError, TypeError):
-         print('PARSE_ERROR', file=sys.stderr)
-     # Fallback to created_at
-     print(task.get('created_at', ''))
+     resp = json.loads(sys.stdin.read())
+     events = resp.get('activity') or []
+     stamps = [e.get('created_at', '') for e in events if isinstance(e, dict)]
+     stamps = [t for t in stamps if t]
+     if stamps:
+         print(max(stamps))
+     else:
+         # No events → caller falls back to created_at from the board row.
+         print('')
      "
 
-     If PARSE_ERROR was emitted to stderr:
-       Print warning: "Warning: task #$ID has malformed agent_log, falling back to created_at"
+     If the activity read fails or returns no events, fall back to the task's `created_at`.
 
      Store: task ID, project, status, title, last_activity_ts
 
@@ -114,16 +110,14 @@ Scan all active projects (or a single project) for tasks that have had no agent 
 
    Print summary line:
    "**Heartbeat: X stagnant tasks found across Y projects.**"
-   If --dry-run: append " (dry-run, no agent_log entries written)"
+   If --dry-run: append " (dry-run, no activity events written)"
 
-⑦ Write agent_log Entries (skip if --dry-run)
+⑦ Write Heartbeat activity events (skip if --dry-run)
 
-   For each stagnant task:
-
-     Use Python for safe JSON construction and API calls:
+   For each stagnant task, append ONE activity event — a single atomic POST, no read-modify-write:
 
      python3 -c "
-     import subprocess, json, datetime, sys
+     import subprocess, json, sys
 
      task_id = sys.argv[1]
      project = sys.argv[2]
@@ -134,41 +128,22 @@ Scan all active projects (or a single project) for tasks that have had no agent 
      auth_token = sys.argv[7]
 
      auth_header = ['-H', f'Authorization: Bearer {auth_token}'] if auth_token else []
-     now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-
-     # Fetch current agent_log
-     result = subprocess.run(
-         ['curl', '-s', f'{base_url}/api/task/{task_id}?project={project}&fields=agent_log']
-         + auth_header,
-         capture_output=True, text=True
-     )
-     data = json.loads(result.stdout)
-     try:
-         log = json.loads(data.get('agent_log') or '[]')
-     except (json.JSONDecodeError, TypeError):
-         log = []
-
-     # Append heartbeat entry
-     log.append({
-         'agent': 'Heartbeat',
+     body = json.dumps({
+         'actor': 'Heartbeat',
          'model': 'system',
          'message': f'⚠️ Stagnant {days} days in {status}. Last activity: {last_ts}',
-         'timestamp': now
      })
-
-     # Write back
-     payload = json.dumps({'agent_log': json.dumps(log)})
      subprocess.run(
-         ['curl', '-s', *auth_header, '-X', 'PATCH',
-          f'{base_url}/api/task/{task_id}?project={project}',
+         ['curl', '-s', *auth_header, '-X', 'POST',
+          f'{base_url}/api/task/{task_id}/activity?project={project}',
           '-H', 'Content-Type: application/json',
-          '-d', payload],
+          '-d', body],
          capture_output=True
      )
      print(f'  Heartbeat written to task #{task_id}')
      " "$TASK_ID" "$PROJECT" "$DAYS" "$STATUS" "$LAST_TS" "$BASE_URL" "$AUTH_TOKEN"
 
-   Print: "agent_log entries written for X tasks."
+   Print: "Heartbeat activity events written for X tasks."
 ```
 
 ### Full Implementation (Copy-Paste Script)
@@ -220,8 +195,8 @@ def curl_get(url):
     r = subprocess.run(cmd, capture_output=True, text=True)
     return json.loads(r.stdout)
 
-def curl_patch(url, payload):
-    cmd = ["curl", "-s", "-X", "PATCH", url, "-H", "Content-Type: application/json", "-d", json.dumps(payload)]
+def curl_post(url, payload):
+    cmd = ["curl", "-s", "-X", "POST", url, "-H", "Content-Type: application/json", "-d", json.dumps(payload)]
     if auth_token:
         cmd += ["-H", f"Authorization: Bearer {auth_token}"]
     subprocess.run(cmd, capture_output=True)
@@ -266,26 +241,26 @@ for proj in projects:
             title = task.get("title", "(untitled)")
             status = task.get("status", col)
             created_at = task.get("created_at", "")
-            agent_log_raw = task.get("agent_log")
 
-            # Extract last activity timestamp
+            # Extract last activity timestamp from the dedicated activity reader
+            # (the board list does not carry the activity stream). Newest event's created_at.
             last_ts = None
-            parse_error = False
-            if agent_log_raw:
-                try:
-                    log = json.loads(agent_log_raw) if isinstance(agent_log_raw, str) else agent_log_raw
-                    if isinstance(log, list) and len(log) > 0:
-                        timestamps = [e.get("timestamp", "") for e in log if isinstance(e, dict)]
-                        timestamps = [t for t in timestamps if t]
-                        if timestamps:
-                            last_ts = max(timestamps)
-                except (json.JSONDecodeError, TypeError):
-                    parse_error = True
+            read_error = False
+            try:
+                resp = curl_get(f"{base_url}/api/task/{task_id}/activity?project={proj}")
+                events = resp.get("activity") if isinstance(resp, dict) else None
+                if isinstance(events, list) and events:
+                    stamps = [e.get("created_at", "") for e in events if isinstance(e, dict)]
+                    stamps = [t for t in stamps if t]
+                    if stamps:
+                        last_ts = max(stamps)
+            except (json.JSONDecodeError, TypeError, OSError):
+                read_error = True
 
             if last_ts is None:
                 last_ts = created_at
-                if parse_error:
-                    print(f"Warning: task #{task_id} has malformed agent_log, falling back to created_at", file=sys.stderr)
+                if read_error:
+                    print(f"Warning: task #{task_id} activity read failed, falling back to created_at", file=sys.stderr)
 
             if not last_ts:
                 print(f"Warning: task #{task_id} has no timestamp at all, skipping", file=sys.stderr)
@@ -333,10 +308,10 @@ print("")
 project_set = set(t["project"] for t in stagnant_tasks)
 summary = f"**Heartbeat: {len(stagnant_tasks)} stagnant tasks found across {len(project_set)} projects.**"
 if dry_run:
-    summary += " (dry-run, no agent_log entries written)"
+    summary += " (dry-run, no activity events written)"
 print(summary)
 
-# ── Write agent_log entries ──────────────────────────────────────
+# ── Write Heartbeat activity events ───────────────────────────────
 if dry_run:
     sys.exit(0)
 
@@ -344,28 +319,20 @@ print("")
 written = 0
 for t in stagnant_tasks:
     try:
-        task_data = curl_get(f"{base_url}/api/task/{t['id']}?project={t['project']}&fields=agent_log")
-        try:
-            log = json.loads(task_data.get("agent_log") or "[]")
-        except (json.JSONDecodeError, TypeError):
-            log = []
-
-        log.append({
-            "agent": "Heartbeat",
-            "model": "system",
-            "message": f"\u26a0\ufe0f Stagnant {t['days']} days in {t['status']}. Last activity: {t['last_ts']}",
-            "timestamp": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        })
-
-        curl_patch(
-            f"{base_url}/api/task/{t['id']}?project={t['project']}",
-            {"agent_log": json.dumps(log)},
+        # One atomic POST per task \u2014 no read-modify-write.
+        curl_post(
+            f"{base_url}/api/task/{t['id']}/activity?project={t['project']}",
+            {
+                "actor": "Heartbeat",
+                "model": "system",
+                "message": f"\u26a0\ufe0f Stagnant {t['days']} days in {t['status']}. Last activity: {t['last_ts']}",
+            },
         )
         print(f"  Heartbeat written to task #{t['id']}")
         written += 1
     except Exception as e:
         print(f"  Error writing to task #{t['id']}: {e}", file=sys.stderr)
 
-print(f"\nagent_log entries written for {written} tasks.")
+print(f"\nHeartbeat activity events written for {written} tasks.")
 PYEOF
 ```

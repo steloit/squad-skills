@@ -53,16 +53,20 @@ curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/task/$ID?project=$PROJECT"
 
 ### `/squad stats` — Statistics
 
-```bash
-BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT")
-python3 << 'PY' <<< "$BOARD"
-import json, sys
-from collections import defaultdict
+Column counts come from the board summary; per-actor token/event totals come from a **single**
+`GET /api/activity/stats` call (server-side `GROUP BY actor` — no per-task loop, no board fetch for tokens).
 
-board = json.load(sys.stdin)
+```bash
+export BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true")
+export STATS=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/activity/stats?project=$PROJECT")
+python3 << 'PY'
+import json, os
+
+board = json.loads(os.environ['BOARD'])
+stats = json.loads(os.environ['STATS'])
 columns = ['todo', 'plan', 'plan_review', 'impl', 'impl_review', 'test', 'done']
 
-# Column counts
+# Column counts (summary is keyed by status, each an array of cards)
 counts = {col: len(board.get(col, [])) for col in columns}
 counts['total'] = sum(counts.values())
 print("## Column Counts\n")
@@ -72,35 +76,18 @@ for col in columns:
     print(f"| {col} | {counts[col]} |")
 print(f"| **total** | **{counts['total']}** |")
 
-# Token stats per agent
-agent_stats = defaultdict(lambda: {'entries': 0, 'tokens': 0})
-for col in columns:
-    for task in board.get(col, []):
-        raw = task.get('agent_log')
-        if not raw:
-            continue
-        try:
-            logs = json.loads(raw) if isinstance(raw, str) else raw
-        except (json.JSONDecodeError, TypeError):
-            continue
-        for entry in logs:
-            agent = entry.get('agent', 'unknown')
-            agent_stats[agent]['entries'] += 1
-            agent_stats[agent]['tokens'] += entry.get('tokens', 0)
-
-total_tokens = sum(v['tokens'] for v in agent_stats.values())
-total_entries = sum(v['entries'] for v in agent_stats.values())
-
+# Per-actor token/event stats — straight from the aggregate endpoint
+rows = stats.get('stats', [])
+totals = stats.get('totals', {})
 print("\n## Agent Token Usage\n")
-if total_tokens == 0:
+if not rows or totals.get('tokens', 0) == 0 and totals.get('events', 0) == 0:
     print("No token data")
 else:
-    print("| Agent | Entries | Tokens (est.) |")
-    print("|-------|---------|---------------|")
-    for agent in sorted(agent_stats):
-        s = agent_stats[agent]
-        print(f"| {agent} | {s['entries']} | {s['tokens']:,} |")
-    print(f"| **Total** | **{total_entries}** | **{total_tokens:,}** |")
+    print("| Actor | Events | Tokens (est.) |")
+    print("|-------|--------|---------------|")
+    for r in sorted(rows, key=lambda r: r.get('actor', '')):
+        print(f"| {r.get('actor', 'unknown')} | {r.get('events', 0)} | {r.get('tokens', 0):,} |")
+    print(f"| **Total** | **{totals.get('events', 0)}** | **{totals.get('tokens', 0):,}** |")
 PY
 ```
 

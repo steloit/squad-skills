@@ -47,7 +47,7 @@ def test_smoke_A_renders_clean_with_evidence(repo_root):
         capture_output=True, text=True,
     )
     assert res.returncode == 0, res.stderr
-    assert "shared.md:351" in res.stdout        # seeded Squad-itself friction evidence
+    assert "squad-heartbeat/SKILL.md:250" in res.stdout   # seeded Squad-itself friction evidence
     assert "<MODEL_COACH>" not in res.stdout
 
 

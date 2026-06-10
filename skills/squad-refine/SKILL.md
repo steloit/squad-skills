@@ -107,8 +107,8 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
    - PATCH description via API
    - Also update title if it was clarified during interview
    - Update level/priority/tags if discussed
-   - Append to agent_log:
-     { "agent": "Refiner", "model": "<MODEL_REFINER>", "message": "Requirements refined. N questions across M rounds.", "timestamp": "..." }
+   - Append an activity event (POST /api/task/$ID/activity):
+     { "actor": "Refiner", "model": "<MODEL_REFINER>", "message": "Requirements refined. N questions across M rounds." }
 ```
 
 ### Model Routing

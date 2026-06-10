@@ -159,13 +159,13 @@ if [ "$HTTP_CODE" = "400" ]; then
       -H 'Content-Type: application/json' \
       -d "{\"status\": \"$ALLOWED\"}"
   else
-    # If allowed is also empty: keep status, log to agent_log, notify the user
+    # If allowed is also empty: keep status, record the failure via POST /activity, notify the user
     echo "ERROR: cannot move task $ID from $STATUS — API returned: $BODY"
   fi
 fi
 ```
 
-On 2 consecutive failures: keep status, record the failure in `agent_log`, notify the user.
+On 2 consecutive failures: keep status, record the failure via `POST /api/task/:id/activity` (actor=`Orchestrator`), notify the user.
 
 ## API Access
 
@@ -220,10 +220,19 @@ curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/test-result?project=
   -d '{"tester": "test-runner", "status": "pass", "lint": "...", "build": "...", "tests": "...", "comment": "..."}'
 # → {"success":true,"result":{...},"version":<int>} — verdict recorded; status unchanged.
 
-# Add note
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/note?project=$PROJECT" \
+# Append an activity event (machine event stream — see "Activity vs Comments" below)
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/activity?project=$PROJECT" \
   -H 'Content-Type: application/json' \
-  -d '{"content": "Commit: abc1234"}'
+  -d '{"actor": "Orchestrator", "model": "system", "message": "Committed abc1234: <subject> [squad #'$ID']"}'
+# → {"success":true,"event":{...}}
+
+# Read a task's activity events (chronological reader)
+curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID/activity?project=$PROJECT&limit=50"
+
+# Add a human comment (human-only channel — skills NEVER write this)
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/comment?project=$PROJECT" \
+  -H 'Content-Type: application/json' \
+  -d '{"content": "Looks good to ship."}'
 
 # Reorder
 curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID/reorder?project=$PROJECT" \
@@ -233,7 +242,7 @@ curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID/reorder?project=$PR
 # Delete
 curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/task/$ID?project=$PROJECT"
 
-# Reopen a completed task (done → todo). Optional reason is recorded in agent_log.
+# Reopen a completed task (done → todo). Optional reason is recorded as an activity event.
 curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/reopen?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"reason": "regression found in prod"}'
@@ -266,7 +275,7 @@ Don't assume an agent auto-sees an attachment — surface the `url`/local path a
 
 If `AUTH_TOKEN` is set, keep using the shared `AUTH_HEADER` array so every request can target the same protected board deployment without repeating conditional header logic.
 
-Only a `done` task can be reopened; reopening clears its lifecycle timestamps and `current_agent`, preserves prior work (plan, notes, comments, counts, results), and records the action in `agent_log`. Reopening any non-`done` task returns `409 {"error":"only a done task can be reopened","status":"<current>"}` and changes nothing.
+Only a `done` task can be reopened; reopening clears its lifecycle timestamps and `current_agent`, preserves prior work (plan, comments, counts, results), and records the action as an activity event (server-side). Reopening any non-`done` task returns `409 {"error":"only a done task can be reopened","status":"<current>"}` and changes nothing.
 
 ### Optimistic Concurrency (version / ETag / If-Match)
 
@@ -339,6 +348,56 @@ curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/projects/$PROJECT/links" \
 ```
 
 > For full schema, column descriptions, and JSON field formats, read `schema.md`.
+
+### Activity vs Comments
+
+A task has two distinct append-only channels, backed by the `task_activities` and `task_comments` child tables (see `schema.md`):
+
+- **`activity` (machine event stream).** Every event is produced by a squad **actor** as a side-effect of work — agent steps, the commit record, batch "Verified", kickstart "Impact", heartbeat warnings, reopen. Skills append events here; events are **immutable** (no edit/delete route). This replaces the old `agent_log` JSON column.
+- **`comments` (human channel).** Free-form human comments only. **Skills NEVER write the human channel** (`/comment`). Machine records are events, not comments.
+
+**The differentiation rule:** machine work → `activity`; humans → `comments`. A skill that wants to record anything it did writes an **event**, never a comment.
+
+#### Append an event — `POST /api/task/:id/activity?project=`
+
+The single atomic append path (no read-modify-write). Body `{actor, model, message, tokens?}`:
+
+```json
+{"actor": "Builder", "model": "<MODEL_BUILDER>", "message": "Implementation complete.", "tokens": 25000}
+```
+
+- `actor`, `model`, `message` — required, must be **non-empty strings**.
+- `tokens` — optional; if present must be a **finite number** (omit the key when unknown — never send `tokens: null`).
+- **No client timestamp** — the server sets `created_at`.
+- On success → `{"success": true, "event": {id, project, task_id, actor, model, message, tokens, created_at}}` and the task `version` is bumped.
+- Invalid body → **400** and nothing is written.
+
+#### Actor vocabulary (the `actor` field)
+
+| Actor | When | `model` |
+|-------|------|---------|
+| `Planner` / `Critic` / `Builder` / `Shield` / `Inspector` / `Ranger` | the orchestrator records one event per pipeline agent step | resolved LLM from `models.json` |
+| `Refiner` | squad-refine records the refine summary | resolved LLM (e.g. `opus`) |
+| `Orchestrator` | skill-level events from squad-run / squad-batch-run / squad-kickstart: the commit record, batch "Verified", kickstart "Impact", move failures | `system` |
+| `Heartbeat` | squad-heartbeat stagnation warnings | `system` |
+
+Pipeline **agents do NOT self-append** — the orchestrating skill (`squad-run`) appends one event per agent step; each agent writes only its own domain field (plan, implementation_notes, the verdict endpoints, …). See **Agent Context Flow**.
+
+#### Read events — `GET /api/task/:id/activity?project=`
+
+The purpose-built reader: chronological (`ORDER BY id ASC`), supports `?limit` (≤500) and `?before=<id>` for pagination. Returns `{"activity": [<event>, …]}`.
+
+#### Full-read-only embedding
+
+A **single-task GET with no `?fields=` param** embeds the full `activity` + `comments` arrays directly on the task. A **projected** read (`?fields=...`) does NOT embed them, and the **board summary/list does NOT carry activity at all**. So to read a task's activity, use a full task GET (embedded `activity`) or the dedicated `GET /api/task/:id/activity` — **never** `?fields=activity` (not embedded) and never the board summary.
+
+#### Per-actor stats — `GET /api/activity/stats?project=[&task_id=]`
+
+Server-side per-actor aggregate (one `GROUP BY actor`) → `{"success": true, "stats": [{"actor", "events", "tokens"}, …], "totals": {"events", "tokens"}}`. The scalable source for cross-task token stats — one call, no per-task loop (the board summary no longer carries activity).
+
+#### Human comments — `POST /api/task/:id/comment` · `DELETE /api/task/:id/comment/:commentId`
+
+The human-only channel (`{content}`, optional `author`). Documented for completeness; **skills must not write it.**
 
 ## Squad Friction Reports
 
@@ -464,7 +523,7 @@ After a run is done, dispatch the **Coach** ONCE — an independent (fresh-conte
 - `skill_name` — the calling skill (e.g. `squad-run`).
 - `source_task` — the task id this run worked (or `(wiki)` for gen-wiki / the first batch id for batch-run).
 - `run_summary` — one line describing what the run did.
-- `trajectory` — this run's agent_log / notes / outputs (what the Coach judges).
+- `trajectory` — this run's activity events + agent outputs (what the Coach judges).
 - `friction_signals` — reject loops / retries / stop-condition trips observed this run; `none` if clean.
 
 ```bash
@@ -560,16 +619,16 @@ Or use Python `json.dumps()` to serialize the body safely.
 
 - **Board unreachable**: Check `BASE_URL`, network reachability to `https://steloit-squad.vercel.app`, and whether `AUTH_TOKEN` is configured
 - **API error**: Debug the request (check JSON validity, `PROJECT`, `BASE_URL`, and whether `AUTH_TOKEN` is configured) — do NOT bypass the API
-- **Agent failure**: 1 retry on first failure; 2nd failure → keep status, log to `agent_log`, notify user
+- **Agent failure**: 1 retry on first failure; 2nd failure → keep status, record via `POST /activity` (actor=`Orchestrator`), notify user
 - **Plan review loop**: `plan_review_count > 3` → circuit breaker, ask user
 - **Impl review loop**: `impl_review_count > 3` → circuit breaker, ask user
-- **Mid-pipeline crash**: preserve current status, log to `agent_log`, notify user
+- **Mid-pipeline crash**: preserve current status, record via `POST /activity` (actor=`Orchestrator`), notify user
 - In `--auto` mode: circuit breaker still fires, requires user intervention
 
 ## Agent Context Flow (Card = Work Record)
 
 Each agent **signs their output** with a header: `> **Nickname** \`model\` · timestamp`
-The `agent_log` accumulates the full chronological history of all agents who touched the task.
+The task's **`activity`** event stream accumulates the full chronological history of all agents who touched the task — the orchestrator appends one event per agent step (see **Activity vs Comments**).
 
 The `model` value should be the resolved provider model from `models.json` (not a hardcoded provider name in the template).
 
@@ -582,9 +641,8 @@ The `model` value should be the resolved provider model from `models.json` (not 
 | `Shield` | `description`, `implementation_notes` | `implementation_notes` (append) |
 | `Inspector` | `description`, `plan`, `done_when`, `implementation_notes` | `review_comments` (records verdict) |
 | `Ranger` | `title`, `implementation_notes` | `test_results` (records verdict) |
-| All agents | — | append signed entry to `agent_log` |
 
-Agents record their work in the fields above; the orchestrator reads them and performs every status move (see Move Protocol).
+Agents write only their own domain field above; they do **not** append to the activity stream themselves. The orchestrating skill (`squad-run`) appends one signed `POST /api/task/:id/activity` event per agent step (actor=the agent's nickname, model=its resolved model, optional `tokens`), reads the domain fields, and performs every status move (see Move Protocol).
 
 > **Planner entry move**: the orchestrator (squad-run) performs the `todo → plan` move and sets `current_agent:"Planner"` in one PATCH *before* the Planner runs — the Planner does not move `todo → plan` itself. The Planner runs at `plan` and exits with a single level-aware move (`plan → plan_review` for L3, `plan → impl` for L2). A Critic reject (`plan_review → plan`, server-side) re-dispatches the Planner at `plan`.
 
