@@ -17,6 +17,8 @@ BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summar
 
 Output: markdown table with ID, Status, Priority, Title.
 
+**Epics**: the board response carries an `epics` aggregate (each with `children_progress` and a derived `epic_status`). Group children under their epic from this aggregate + the embedded `parent`/`children` edges — never from tag parsing (see `shared.md` → **Task Relationships & Epics**). Show each epic's `children_progress` (e.g. `2/5 done`).
+
 ### `/squad context` — Session Handoff
 
 **Run first when starting a new session.** Fetch board and output pipeline state:

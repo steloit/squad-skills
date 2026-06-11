@@ -101,25 +101,56 @@ Save: `docs/implementation-plan-{project-slug}.md`
 **Do not write detailed descriptions upfront in Rolling Wave.**
 Create skeleton tasks: title + 1-2 line goal only. Acceptance Criteria left blank — filled during Refine.
 
-Minimum fields per task:
+Hierarchy is **structured**, not tag-encoded: create a first-class **epic card** (`card_type:'epic'`)
+per epic and attach each child via a structured `parent` edge. **Do not write `epic:<name>` tags** —
+that convention is retired (see `../squad/shared.md` → **Task Relationships & Epics**). `phase:` tags
+remain valid free labels.
+
+**Create the epic card first** (one per epic; capture its id):
+```bash
+# Build JSON safely with jq (see ../squad/shared.md → JSON Safety).
+EPIC_PAYLOAD=$(jq -n --arg title "<epic title>" --arg project "$PROJECT" \
+  --arg description "$(printf '## Epic\nContainer for the <name> epic.')" \
+  --arg tags "phase:1" \
+  '{title:$title, project:$project, card_type:"epic", priority:"high", description:$description, tags: ($tags | split(",") | map(gsub("^ +| +$";"")))}')
+EPIC_ID=$(curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
+  -H 'Content-Type: application/json' -d "$EPIC_PAYLOAD" | jq -r '.id')
+```
+
+Minimum fields per child task:
 - `title`: clear unit of work
 - `description`: Goal (1-2 lines) + Scope keywords only
-- `tags`: epic and phase tags
+- `tags`: `phase:` tags only (no `epic:` tags)
 - `level`: L1/L2/L3 based on implementation plan
 
 ```bash
 # Build JSON safely with jq (see ../squad/shared.md → JSON Safety); $PROJECT and text expand correctly.
 PAYLOAD=$(jq -n --arg title "<task title>" --arg project "$PROJECT" \
   --arg description "$(printf '## Goal\nOne-line goal\n\n## Scope\n- In: ...\n- Out: ...')" \
-  --arg tags "phase:1,epic:auth" \
+  --arg tags "phase:1" \
   '{title:$title, project:$project, priority:"high", level:2, description:$description, tags: ($tags | split(",") | map(gsub("^ +| +$";"")))}')
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
-  -H 'Content-Type: application/json' -d "$PAYLOAD"
+CHILD_ID=$(curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
+  -H 'Content-Type: application/json' -d "$PAYLOAD" | jq -r '.id')
+
+# Attach the child to its epic via a structured parent edge (single-parent → 400 on a second parent).
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$CHILD_ID/relationships?project=$PROJECT" \
+  -H 'Content-Type: application/json' \
+  -d "$(jq -n --argjson to "$EPIC_ID" '{to:$to, type:"parent"}')"
+```
+
+**Cross-card dependencies** (a child blocks another) are declared via a structured `blocks` edge —
+NOT a `Depends on:` text line. The server enforces acyclicity and returns **409** on a cycle (surfaced,
+no client pre-check):
+```bash
+# #BLOCKER blocks #BLOCKED (BLOCKED is blocked_by BLOCKER):
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$BLOCKER_ID/relationships?project=$PROJECT" \
+  -H 'Content-Type: application/json' \
+  -d "$(jq -n --argjson to "$BLOCKED_ID" '{to:$to, type:"blocks"}')"
 ```
 
 **E2E test task**: add one E2E validation task at the end of each epic (required).
 
-Print full ID list and order after creation.
+Print full ID list (epic + children) and order after creation.
 
 ---
 

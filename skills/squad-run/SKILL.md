@@ -111,11 +111,36 @@ EFFORT_RANGER=$(read_effort ranger)
 #### Implementation
 
 ```bash
-# 1. Read current task state (status + level only)
+# 1. Read current task state (status + level + card_type).
 # Stateless: re-read (status, level) every loop; NEVER cache status across a gate.
-TASK=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=status,level")
+TASK=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=status,level,card_type")
 STATUS=$(echo "$TASK" | jq -r '.status')
 LEVEL=$(echo "$TASK" | jq -r '.level')
+CARD_TYPE=$(echo "$TASK" | jq -r '.card_type // "task"')
+
+# 1a. Pipeline-exclusion: an epic is a CONTAINER, not runnable. Refuse and list its children.
+#     (See ../squad/shared.md → Task Relationships & Epics.)
+if [ "$CARD_TYPE" = "epic" ]; then
+  REL=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID/relationships?project=$PROJECT")
+  KIDS=$(echo "$REL" | jq -r '(.children // []) | if length == 0 then "(no children yet)" else (.[] | "  #\(.id) \(.title) [\(.status)]") end')
+  PROG=$(echo "$REL" | jq -r '"\(.children_progress.done)/\(.children_progress.total)"')
+  echo "Epic #$ID is a container — run its children ($PROG done):"
+  echo "$KIDS"
+  exit 0   # abort before dispatch
+fi
+
+# 1b. Sub-task readiness nudge (SOFT — NOT a block; the dep hard-block in ⓪ʙ takes precedence).
+#     A `task` with incomplete .children → warn "usually run those first".
+#     Default mode: AskUserQuestion confirm/cancel. --auto: proceed + log an Orchestrator activity note.
+REL=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID/relationships?project=$PROJECT")
+OPEN_KIDS=$(echo "$REL" | jq -r '[(.children // [])[] | select(.status != "done")] | length')
+if [ "$OPEN_KIDS" -gt 0 ]; then
+  echo "Task #$ID has $OPEN_KIDS open sub-task(s) — usually run those first (nudge, not a block)."
+  # --auto: proceed and log:
+  #   POST /api/task/$ID/activity {actor:"Orchestrator", model:"system",
+  #     message:"--auto proceeded past $OPEN_KIDS open sub-task(s)"}
+  # default: AskUserQuestion confirm/cancel before dispatch.
+fi
 
 # The Planner's level-aware exit status — the orchestrator moves plan → $PLAN_NEXT after the
 # Planner finishes: L3 → plan_review, L2 → impl. (L1 never reaches the Planner.)
@@ -236,27 +261,41 @@ Template files are at `../squad/templates/`.
 
 ⓪ʙ Resolve dependencies & review feedback (once per pipeline run, cache for all agents)
 
-   **Parse dependencies from description:**
+   **Resolve dependencies via the relationships API** (see `../squad/shared.md` → **Task Relationships & Epics**).
+   The `blocks` dependency edges are read from `GET /api/task/:id/relationships` → `.blocked_by` — NOT
+   text-parsed from the description. (The `Depends on:` text convention and the old dependencies
+   endpoint are both retired — see `../squad/shared.md`.)
    ```bash
-   # Extract dependency IDs from description (case-insensitive)
-   DESCRIPTION=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=description" | jq -r '.description // ""')
-   DEP_IDS=$(echo "$DESCRIPTION" | grep -ioP 'Depends on:\s*\K#\d+(?:,\s*#\d+)*' | grep -oP '\d+' || true)
+   # Read structured blocks edges; .blocked_by = the deps this task is blocked by.
+   REL=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID/relationships?project=$PROJECT")
+   DEP_IDS=$(echo "$REL" | jq -r '.blocked_by[]?.id')
    ```
 
-   **Circular dependency check:**
-   If `$ID` (current task) appears in any dependency's own `Depends on:` line, emit error and abort:
+   **Readiness gate (HARD BLOCK):**
+   If any `.blocked_by[].status != "done"`, the task is not ready:
+   - **Default mode**: `AskUserQuestion` — surface the incomplete dep(s) and confirm before proceeding.
+   - **`--auto` mode**: refuse with `"blocked by incomplete dependency #N"` and abort the pipeline.
+   This is the **hard block** and takes precedence over the soft sub-task nudge (① below).
+   ```bash
+   BLOCKERS=$(echo "$REL" | jq -r '.blocked_by[]? | select(.status != "done") | "#\(.id) (\(.status))"')
+   if [ -n "$BLOCKERS" ]; then
+     # --auto: refuse + abort. default: AskUserQuestion confirm/cancel.
+     echo "blocked by incomplete dependency $BLOCKERS"
+   fi
+   ```
+
+   > No client-side circular-dependency check. The server enforces acyclicity at write time
+   > (in-transaction CTE) and returns **409** on a cycling `POST /relationships`; that 409 is surfaced
+   > from the write path (in declaration skills), never pre-validated here.
+
+   **Fetch per-dep context** (for cached injection): for each id in `DEP_IDS`, fetch the context fields.
+   A `404` warns + skips that dep and continues.
    ```bash
    for DEP_ID in $DEP_IDS; do
-     DEP_TASK=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$DEP_ID?project=$PROJECT&fields=title,status,description,decision_log,implementation_notes")
-     HTTP_CODE=$(echo "$DEP_TASK" | jq -r '.id // empty')
-     if [ -z "$HTTP_CODE" ]; then
+     DEP_TASK=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$DEP_ID?project=$PROJECT&fields=title,status,decision_log,implementation_notes")
+     if [ -z "$(echo "$DEP_TASK" | jq -r '.id // empty')" ]; then
        echo "WARNING: dependency #$DEP_ID not found (404), skipping"
        continue
-     fi
-     DEP_DESC=$(echo "$DEP_TASK" | jq -r '.description // ""')
-     if echo "$DEP_DESC" | grep -iqP "Depends on:.*#$ID\\b"; then
-       echo "ERROR: circular dependency detected — #$ID ↔ #$DEP_ID. Aborting."
-       exit 1
      fi
      # Cache: DEPS[$DEP_ID] = { title, status, decision_log, implementation_notes }
    done

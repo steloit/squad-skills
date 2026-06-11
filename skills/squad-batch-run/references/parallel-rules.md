@@ -7,7 +7,7 @@ Use these rules when deciding whether a batch can open more than one task at onc
 ### Always sequential
 
 - Different `phase:N` tags
-- `Depends on:` points to another task in the batch
+- A `blocks` relationship edge to another task in the batch (`.blocked_by` / `.blocking` from `GET /api/task/:id/relationships`)
 - `Parallel-safe: no`
 - Shared navigation, shared route, shared loader, shared schema, shared public type, shared API contract
 
