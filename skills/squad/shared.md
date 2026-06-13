@@ -646,34 +646,62 @@ Agents write only their own domain field above; they do **not** append to the ac
 
 > **Planner entry move**: the orchestrator (squad-run) performs the `todo → plan` move and sets `current_agent:"Planner"` in one PATCH *before* the Planner runs — the Planner does not move `todo → plan` itself. The Planner runs at `plan` and exits with a single level-aware move (`plan → plan_review` for L3, `plan → impl` for L2). A Critic reject (`plan_review → plan`, server-side) re-dispatches the Planner at `plan`.
 
-## Task Dependencies
+## Task Relationships & Epics
 
-### Convention
+Tasks relate through **two typed, structured edges** stored on the board (not encoded in text or tags):
 
-To declare dependencies, write `Depends on: #ID` (or `Depends on: #ID1, #ID2`) on the **first non-blank line** of the task description.
+- **`blocks`** — a dependency DAG. `A blocks B` ⟺ B is `blocked_by` A; B is not ready until A is `done`.
+- **`parent`** — a single-parent hierarchy tree. A child's `parent` is its containing **epic** card.
 
-Example:
+> **REMOVED — legacy conventions.** The `Depends on: #ID` description-text convention is **retired** (dependencies are `blocks` edges). The `epic:<name>` **tag-as-hierarchy** convention is **retired** (hierarchy is `card_type:'epic'` cards + `parent` edges). Skills must NOT parse `Depends on:` text or write `epic:` tags. `phase:` tags remain valid free labels.
+
+### Card types
+
+`card_type ∈ {task, epic}` (default `task`), settable on `POST /api/task` create AND generic `PATCH`, and embedded on a full task GET alongside an embedded `relationships` object.
+
+- A **`task`** is runnable through the pipeline.
+- An **`epic`** is a **container** — it groups child tasks, is **excluded from the agent pipeline** (`squad-run` refuses it, `squad-batch-run` skips it, `squad-refine` treats it as a container), and carries a **derived `epic_status`** + rolled-up `children_progress`.
+
+### Endpoints (deployed)
+
 ```
-Depends on: #2100, #2150
-Add task dependency context injection to squad-run...
+POST   /api/task/:id/relationships  {to, type}   type ∈ {blocks, parent}
+       → {success, relationship}
+       400 self-edge / second parent / bad input · 404 task · 409 cycle (blocks DAG or parent ancestor)
+GET    /api/task/:id/relationships
+       → {blocked_by:[{id,title,status}], blocking:[{id,title,status}],
+          parent:{id,title,status}|null, children:[{id,title,status}],
+          children_progress:{done,total}}   (no `success` wrapper)
+DELETE /api/task/:id/relationships/:relId    → {success:true} (200) / 404 no-match
 ```
 
-### Parsing
+The server **enforces acyclicity at write time** (in-transaction CTE) and single-parent. There is **no client-side circular-dependency check** — a cycling `POST` returns **409**, a second parent returns **400**, a DELETE of a missing edge returns **404**. Surface these from the write path; never pre-validate.
 
-Regex: `Depends on:\s*(#\d+(?:,\s*#\d+)*)`  (case-insensitive)
+`/api/board` emits an **`epics` aggregate** (each with `children_progress`); board/context summaries group by it (and the embedded `parent`/`children`), not by tag parsing.
 
-Extract each `#ID` number. If the line is absent or no IDs match, dependency list is empty.
+### Declaring edges
 
-### Fetching Dependency Data
+```bash
+# Declare a blocks dependency: #DEP blocks #ID (ID is blocked_by DEP)
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$DEP/relationships?project=$PROJECT" \
+  -H 'Content-Type: application/json' -d "$(jq -n --argjson to "$ID" '{to:$to, type:"blocks"}')"
 
-For each dependency ID, fetch:
+# Attach a child to its epic: #CHILD's parent is #EPIC
+curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$CHILD/relationships?project=$PROJECT" \
+  -H 'Content-Type: application/json' -d "$(jq -n --argjson to "$EPIC" '{to:$to, type:"parent"}')"
+```
+
+### Resolving dependencies (squad-run ⓪ʙ)
+
+Read `blocks` edges via `GET /api/task/:id/relationships` → `.blocked_by` (NOT description text).
+
+**Readiness gate (hard block)**: if any `.blocked_by[].status != "done"` → default mode `AskUserQuestion` confirm; `--auto` → refuse `"blocked by incomplete dependency #N"` and abort. This precedes (and overrides) the soft sub-task nudge.
+
+**Context injection**: take dep ids from `.blocked_by[].id`, then fetch each dep's context fields:
 ```bash
 curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$DEP_ID?project=$PROJECT&fields=title,status,decision_log,implementation_notes"
 ```
-
-All fields are fetched once and cached. Per-agent filtering happens at context assembly time, not at fetch time.
-
-### Per-Agent Injection Rules
+All fields are fetched once and cached. Per-agent filtering happens at context assembly time.
 
 | Agent | Fields Injected | Truncation |
 |-------|----------------|------------|
@@ -683,8 +711,7 @@ All fields are fetched once and cached. Per-agent filtering happens at context a
 
 Truncation format: first N chars + `...[truncated]` suffix when the field exceeds the limit.
 
-### Context Format (per dependency)
-
+Context format per dependency:
 ```
 ### #<DEP_ID>: <title> [<status>]
 [IN PROGRESS] ← only if status != done
@@ -695,15 +722,18 @@ Truncation format: first N chars + `...[truncated]` suffix when the field exceed
 **Implementation Notes:**
 <implementation_notes truncated per agent rule>
 ```
-
 Fields not applicable to the current agent are omitted entirely.
 
-### Error Handling
+### Sub-task readiness nudge (soft)
 
-- **404 response**: warn in orchestrator log, skip that dependency, continue pipeline
-- **Dep task in progress** (status != `done`): prepend `[IN PROGRESS]` warning to that dep's context block
-- **Circular dependency**: if current task ID appears in a dependency's `Depends on:` line, emit error and abort the pipeline
-- **No dependencies**: `<dependencies_context>` resolves to empty string; no behavioral change
+`squad-run` on a `task` with incomplete `.children` → warn `"Task #N has M open sub-task(s) — usually run those first"`; default `AskUserQuestion` confirm, `--auto` proceeds + logs an `Orchestrator` activity note. This is a **nudge, not a block** — the message distinguishes it from the dep hard-block. If a task is BOTH blocked by an incomplete dep AND has open sub-tasks, the **hard dep block wins** (abort); the nudge is never reached.
+
+### Error handling
+
+- **404 on a dep context fetch**: warn in orchestrator log, skip that dependency, continue pipeline
+- **Dep status != `done`**: prepend `[IN PROGRESS]` to that dep's context block (the readiness gate already handled the block decision)
+- **No dependencies / no children**: context resolves to empty string; no behavioral change
+- **Cycle / second parent / missing edge**: surfaced as 409 / 400 / 404 from the write path
 
 ### Review Feedback Injection
 

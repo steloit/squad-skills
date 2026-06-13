@@ -63,9 +63,13 @@ Resume a stopped batch from the given task ID. Skips all tasks before `<start-ID
 
 ## Metadata Hints
 
-Strong signals in task descriptions:
+**Dependencies are structural**, read from the relationships API — NOT text-parsed from descriptions
+(the `Depends on:` convention is retired; see `../squad/shared.md` → **Task Relationships & Epics**):
 
-- `Depends on: #500, #501`
+- `GET /api/task/:id/relationships` → `.blocked_by` (the deps that must be `done` first)
+
+Other strong signals still come from task descriptions:
+
 - `Parallel-safe: yes` / `Parallel-safe: no`
 - `Touches: browse-data, header-nav`
 
@@ -101,6 +105,7 @@ Read the returned task list and proposed groups.
 ### 4. Validate ordering
 
 - Respect `phase:N` tags when present; prefer phase order over user order if they conflict.
+- **Epics are containers, not runnable**: skip any `card_type:'epic'` card with a note (e.g. `⚠ #520 skipped — epic container, run its children`). Epics never enter the runnable set.
 - **Non-todo tasks**: skip with a warning line (e.g. `⚠ #502 skipped — status is impl`). If all tasks skipped, stop and report.
 - `resume <start-ID>`: skip tasks before that ID silently.
 
@@ -109,7 +114,7 @@ Read the returned task list and proposed groups.
 - Default: sequential.
 - Parallel only if **all** of these are true:
   - Same phase or no phase tag
-  - No `Depends on:` relationship between tasks in the group
+  - No `blocks` relationship edge between tasks in the group (`.blocked_by` / `.blocking` from the relationships API)
   - Titles/tags/descriptions point to distinct modules or surfaces
   - Failure in one would not invalidate another's work
 - If any doubt remains, stay sequential.
@@ -122,15 +127,16 @@ For each task N in order:
 ```
 A. Refine(N)
    - Skill(skill="squad-refine", args="<ID>")  [Codex: $squad-refine <ID>]
-   - squad-refine auto-detects the prior card (N-1) via "Depends on:" tags or asks one question.
+   - squad-refine auto-detects the prior card via the relationships API (`.blocked_by`) or asks one question.
    - Reads N-1's implementation_notes + actual codebase to ground N's description.
    - First task in the batch (no prior card): regular user interview.
 
    Card split check (before invoking squad-refine):
    - If scope exceeds limits (AC > 5, files > 5, multi-layer), split first:
      1. Create sub-cards via squad API
-     2. Replace N in execution order with N-a, N-b, N-c
-     3. Report split to user, continue automatically
+     2. Declare any blocks dependency between sub-cards via `POST /api/task/:id/relationships {to, type:"blocks"}` (NOT a `Depends on:` text line; 409 on a cycle is surfaced, no pre-check)
+     3. Replace N in execution order with N-a, N-b, N-c
+     4. Report split to user, continue automatically
 
 B. Implement(N)
    - Invoke squad-run (level-aware, see Inner Task Contract)

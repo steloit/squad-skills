@@ -32,11 +32,14 @@ def test_parse_phase(plan_batch):
     assert plan_batch.parse_phase(None) is None
 
 
-def test_parse_depends_on(plan_batch):
-    assert plan_batch.parse_depends_on("Depends on: #500, #501") == [500, 501]
-    assert plan_batch.parse_depends_on("intro\nDepends on: 499\nmore") == [499]
-    assert plan_batch.parse_depends_on("no deps here") == []
-    assert plan_batch.parse_depends_on(None) == []
+def test_extract_blocked_by(plan_batch):
+    # Dependencies come from the embedded relationships object (.blocked_by), not text.
+    assert plan_batch.extract_blocked_by(
+        {"relationships": {"blocked_by": [{"id": 500}, {"id": "501"}]}}
+    ) == [500, 501]
+    assert plan_batch.extract_blocked_by({"relationships": {"blocked_by": []}}) == []
+    assert plan_batch.extract_blocked_by({"relationships": {}}) == []
+    assert plan_batch.extract_blocked_by({}) == []
 
 
 def test_parse_parallel_safe(plan_batch):
@@ -69,11 +72,13 @@ def test_infer_task(plan_batch):
         "priority": "high",
         "level": 2,
         "tags": "phase:2,auth",
-        "description": "Depends on: #499\nTouches: auth, db\nParallel-safe: yes",
+        "description": "Touches: auth, db\nParallel-safe: yes",
+        "relationships": {"blocked_by": [{"id": 499}]},
     })
     assert out["id"] == 500 and isinstance(out["id"], int)
     assert out["phase"] == 2
     assert out["depends_on"] == [499]
+    assert out["card_type"] == "task"
     assert out["parallel_safe"] is True
     assert out["module_hints"] == ["auth", "db"]  # sorted, deduped
 

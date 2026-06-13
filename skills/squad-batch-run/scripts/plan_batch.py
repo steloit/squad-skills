@@ -19,7 +19,6 @@ except ImportError:  # pragma: no cover - optional dependency
 
 
 PHASE_RE = re.compile(r"(?:^|,)\s*phase:(\d+)\s*(?:,|$)")
-DEPENDS_RE = re.compile(r"(?im)^depends on:\s*(.+)$")
 PARALLEL_RE = re.compile(r"(?im)^parallel-safe:\s*(.+)$")
 TOUCHES_RE = re.compile(r"(?im)^touches:\s*(.+)$")
 
@@ -132,18 +131,12 @@ def parse_phase(tags: str | None) -> int | None:
     return int(match.group(1))
 
 
-def parse_depends_on(description: str | None) -> list[int]:
-    if not description:
-        return []
-
-    match = DEPENDS_RE.search(description)
-    if not match:
-        return []
-
-    ids = []
-    for raw_value in re.findall(r"#?(\d+)", match.group(1)):
-        ids.append(int(raw_value))
-    return ids
+def extract_blocked_by(task: dict) -> list[int]:
+    """Structured dependency ids from the embedded relationships object
+    (`.relationships.blocked_by`). The `Depends on:` text convention is retired —
+    dependencies are typed `blocks` edges, read from the relationships API."""
+    rel = task.get("relationships") or {}
+    return [int(dep["id"]) for dep in (rel.get("blocked_by") or []) if dep.get("id") is not None]
 
 
 def parse_parallel_safe(description: str | None) -> bool | None:
@@ -207,9 +200,10 @@ def infer_task(task: dict) -> dict:
         "status": task.get("status"),
         "priority": task.get("priority"),
         "level": task.get("level"),
+        "card_type": task.get("card_type") or "task",
         "phase": phase,
         "tags": task.get("tags"),
-        "depends_on": parse_depends_on(description),
+        "depends_on": extract_blocked_by(task),
         "parallel_safe": parse_parallel_safe(description),
         "module_hints": modules,
     }
@@ -365,13 +359,17 @@ def main() -> int:
         fetch_task(base_url, args.project, task_id, auth_token, ssl_context)
         for task_id in task_ids
     ]
-    tasks = [infer_task(task) for task in raw_tasks]
+    inferred = [infer_task(task) for task in raw_tasks]
+    # Epics are containers, not runnable — exclude them from the batch selection.
+    skipped_epics = [t["id"] for t in inferred if t.get("card_type") == "epic"]
+    tasks = [t for t in inferred if t.get("card_type") != "epic"]
     ordered = sorted(tasks, key=lambda task: task_sort_key(task, input_order))
 
     payload = {
         "project": args.project,
         "base_url": base_url,
         "task_ids": task_ids,
+        "skipped_epics": skipped_epics,
         "ordered_tasks": ordered,
         "candidate_groups": build_groups(ordered),
     }

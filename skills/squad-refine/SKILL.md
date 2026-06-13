@@ -18,15 +18,20 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
 ```
 ① Read the task
    TASK = curl GET /api/task/$ID?project=$PROJECT
-   Extract: title, description, priority, level, tags
+   Extract: title, description, priority, level, tags, card_type
+
+   **Epic targets are containers** (`card_type:'epic'`): they hold child tasks, they are not runnable
+   and have no acceptance-criteria/plan of their own. If the target is an epic, do NOT run the refine
+   interview — point the user at its children (`GET /api/task/$ID/relationships` → `.children`) and stop.
 
 ① ½. Look for prior implementation context (always run this before the interview)
 
-   a. Check description and tags for dependency hints:
-      - "Depends on: #NNN" lines in description
-      - Tags like "after:NNN", "follows:NNN"
+   a. Detect dependencies via the relationships API (NOT description text — the `Depends on:` convention
+      is retired; see `../squad/shared.md` → **Task Relationships & Epics**):
+      REL = curl GET /api/task/$ID/relationships?project=$PROJECT
+      Dependency ids = `.blocked_by[].id`. Also check `.parent` for the containing epic.
 
-   b. If dependency found → fetch that card's implementation output:
+   b. If a dependency found → fetch that card's implementation output:
       PRIOR = curl GET /api/task/$NNN?project=$PROJECT&fields=title,implementation_notes,plan
       Also inspect the actual codebase: read files, interfaces, schemas confirmed in that card.
 
@@ -107,6 +112,14 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
    - PATCH description via API
    - Also update title if it was clarified during interview
    - Update level/priority/tags if discussed
+   - **Declare dependencies structurally**: if the interview surfaced that this task is blocked by
+     another (#DEP), declare it via a `blocks` edge — NOT a `Depends on:` text line:
+     ```bash
+     # #DEP blocks #ID (ID is blocked_by DEP). Server returns 409 on a cycle (surfaced, no pre-check).
+     curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$DEP/relationships?project=$PROJECT" \
+       -H 'Content-Type: application/json' \
+       -d "$(jq -n --argjson to "$ID" '{to:$to, type:"blocks"}')"
+     ```
    - Append an activity event (POST /api/task/$ID/activity):
      { "actor": "Refiner", "model": "<MODEL_REFINER>", "message": "Requirements refined. N questions across M rounds." }
 ```

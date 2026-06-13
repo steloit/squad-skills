@@ -184,13 +184,16 @@ This skill explores first, reports direction, then seeds the squad board with ph
    which pages/endpoints to test, and acceptance criteria.
    Priority: medium, Level: L2, extra tag: "e2e-test"
 
-   ⑤-B Create the report anchor task FIRST.
-   This special task stores the full exploration report:
+   ⑤-B Create the epic anchor FIRST.
+   This special **epic card** (`card_type:'epic'`) anchors the topic and stores the full
+   exploration report. It is a structured container — implementation tasks are attached to it via
+   `parent` edges (below), NOT via an `epic:` tag (that convention is retired — see
+   `../squad/shared.md` → **Task Relationships & Epics**).
 
+   card_type: "epic"
    title: "[Explore] <topic>"
    priority: low
-   level: 1
-   tags: ["explore-<topic-slug>", "explore-report"]
+   tags: ["explore-<topic-slug>", "explore-report"]   (no `epic:` tag)
    description:
      <full Exploration Report from ③>
 
@@ -198,7 +201,7 @@ This skill explores first, reports direction, then seeds the squad board with ph
      ## Task Index
      *(populated after all tasks are created — see below)*
 
-   Save the returned ID as $REPORT_ID.
+   Save the returned ID as $REPORT_ID (this is the epic id).
 
    ⑤-C Create implementation tasks in phase order.
    For each task, include this block at the bottom of the description:
@@ -213,6 +216,14 @@ This skill explores first, reports direction, then seeds the squad board with ph
 
    Save each returned ID in order: $IDS = [id1, id2, ...]
 
+   After creating each implementation task, attach it to the epic via a structured parent edge
+   (single-parent → 400 on a second parent, surfaced not pre-checked):
+   ```bash
+   curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$CHILD_ID/relationships?project=$PROJECT" \
+     -H 'Content-Type: application/json' \
+     -d "$(jq -n --argjson to "$REPORT_ID" '{to:$to, type:"parent"}')"
+   ```
+
    ⑤-D Patch the report anchor task with the task index.
    After all tasks are created, PATCH $REPORT_ID description to append:
 
@@ -225,13 +236,24 @@ This skill explores first, reports direction, then seeds the squad board with ph
 
    Use API:
    ```bash
-   # Create task
+   # Create the epic anchor (⑤-B) — card_type:"epic"
+   curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
+     -H 'Content-Type: application/json' \
+     -d "{\"title\": \"[Explore] <topic>\", \"project\": \"$PROJECT\", \"card_type\": \"epic\",
+          \"priority\": \"low\", \"description\": \"...\", \"tags\": [\"explore-<topic-slug>\", \"explore-report\"]}"
+
+   # Create an implementation task (⑤-C) — no epic: tag
    curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
      -H 'Content-Type: application/json' \
      -d "{\"title\": \"...\", \"project\": \"$PROJECT\", \"priority\": \"high\",
           \"level\": 3, \"description\": \"...\", \"tags\": [\"explore-<topic-slug>\", \"phase:<N>\"]}"
 
-   # Patch report anchor
+   # Attach the implementation task to the epic via a structured parent edge
+   curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$CHILD_ID/relationships?project=$PROJECT" \
+     -H 'Content-Type: application/json' \
+     -d "$(jq -n --argjson to "$REPORT_ID" '{to:$to, type:"parent"}')"
+
+   # Patch report anchor (epic) description with the task index
    curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$REPORT_ID?project=$PROJECT" \
      -H 'Content-Type: application/json' \
      -d "{\"description\": \"<updated description with task index>\"}"
