@@ -50,26 +50,36 @@ Create **one** tool-agnostic file at the **current project root**, committed to 
 `.squadrc`
 ```
 SQUAD_PROJECT=<PROJECT_NAME>
+SQUAD_ORG=<ORG_LABEL>          # OPTIONAL — only when the user supplies an org label (multi-org machines)
 ```
 
-**`.squadrc` holds ONLY the project name** (non-secret → safe to commit). The token lives in `SQUAD_AUTH_TOKEN` / `~/.squad/auth`; the board URL defaults to the deployed board.
+**`.squadrc` holds the project name and an OPTIONAL org label** (both non-secret → safe to commit). Write the `SQUAD_ORG=<label>` line **only when the user supplies a label** — from the mint dialog's `SQUAD_ORG=<slug>` line or an explicit init arg. Single-org users supply nothing → no `SQUAD_ORG` line → the bare `SQUAD_AUTH_TOKEN=` default is used (zero friction). The label is **never** auto-derived from the board (the project API exposes no org slug today — a noted follow-up). The token never lives in `.squadrc`; it lives in `~/.squad/auth` as a per-org `SQUAD_AUTH_TOKEN_<label>=` line or the bare default.
 
-Use the Write tool to create `.squadrc`.
+Use the Write tool to create `.squadrc` (include the `SQUAD_ORG=` line only when a label was supplied).
 
-### 2b. Set up global auth (if not configured)
+### 2b. Detect auth (no token store here)
 
-The token is resolved from `SQUAD_AUTH_TOKEN` (env) or `~/.squad/auth`. If neither is set, tell the user how to configure it — never invent a token or write one into a project file:
+The token is resolved org-scoped via the shared.md chain (env > per-org line > bare default). squad-init **never** stores a token, **never** echoes/cats it, and **never** asks for a pasted one — the token-store command lives **only** at the web mint UI — Settings → API Keys (the single place the real token + org slug exist). On no token, squad-init just prints a one-line POINTER to that UI:
 
 ```bash
-# Resolve the token (env → ~/.squad/auth) and build the auth header used by 2c.
-AUTH_TOKEN="${SQUAD_AUTH_TOKEN:-}"
-[ -z "$AUTH_TOKEN" ] && [ -f "$HOME/.squad/auth" ] && AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$HOME/.squad/auth" | cut -d= -f2-)
+# Resolve the token (env > per-org line > bare default) straight into the header — never echo it.
+SQUAD_ORG="${SQUAD_ORG:-}"
+[ -z "$SQUAD_ORG" ] && [ -f .squadrc ] && SQUAD_ORG=$(grep '^SQUAD_ORG=' .squadrc | cut -d= -f2-)
+AUTH_TOKEN="${SQUAD_AUTH_TOKEN:-}"; AUTH_SOURCE=$([ -n "$AUTH_TOKEN" ] && echo env || echo none)
+if [ -z "$AUTH_TOKEN" ] && [ -f "$HOME/.squad/auth" ]; then
+  if [ -n "$SQUAD_ORG" ]; then
+    AUTH_TOKEN=$(grep "^SQUAD_AUTH_TOKEN_${SQUAD_ORG}=" "$HOME/.squad/auth" | cut -d= -f2-)
+    [ -n "$AUTH_TOKEN" ] && AUTH_SOURCE="org:$SQUAD_ORG"
+  fi
+  if [ -z "$AUTH_TOKEN" ]; then
+    AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$HOME/.squad/auth" | cut -d= -f2-)
+    [ -n "$AUTH_TOKEN" ] && AUTH_SOURCE=default
+  fi
+fi
 AUTH_HEADER=(); [ -n "$AUTH_TOKEN" ] && AUTH_HEADER=(-H "Authorization: Bearer $AUTH_TOKEN")
 
 if [ -z "$AUTH_TOKEN" ]; then
-  echo "No Squad token found. Set it once (shared across all projects):"
-  echo "  export SQUAD_AUTH_TOKEN='<token>'      # add to ~/.zshrc to persist"
-  echo "  …or: mkdir -p ~/.squad && printf 'SQUAD_AUTH_TOKEN=%s\\n' '<token>' > ~/.squad/auth && chmod 600 ~/.squad/auth"
+  echo "No Squad key for org '${SQUAD_ORG:-this board}' — mint one at $BASE_URL/api-keys and run the store command it shows."
 fi
 
 # Persist a custom (non-default) board URL only — to ~/.squad/config
@@ -120,9 +130,10 @@ Output:
 ✅ Project '<PROJECT_NAME>' registered in squad.
 
   Config:  .squadrc (committed)
+  Org:     <ORG_LABEL>   (or "(default key)" when no SQUAD_ORG label was supplied)
   DB:      PostgreSQL (shared central DB)
   Board:   <BASE_URL>/?project=<PROJECT_NAME>
-  Auth:    SQUAD_AUTH_TOKEN env / ~/.squad/auth (global secret)
+  Auth:    org-scoped API key — SQUAD_AUTH_TOKEN env / ~/.squad/auth (global secret; configured / empty, value-free)
 
 Add tasks with /squad add <title>
 ```
@@ -143,5 +154,7 @@ Options:
 ```
 
 - `/squad-init` defaults to `https://steloit-squad.vercel.app` unless you provide another deployment URL.
-- The token is stored globally (`SQUAD_AUTH_TOKEN` env or `~/.squad/auth`), NOT in `.squadrc`. This prevents token duplication across repos and keeps secrets out of git.
-- For remote private boards, set `SQUAD_AUTH_TOKEN` in the shell before running `/squad-init`, or write `~/.squad/auth` (mode 600).
+- Tokens are **org-scoped, scoped API keys** stored globally in `~/.squad/auth` (mode 600) — per-org `SQUAD_AUTH_TOKEN_<label>=` lines plus an optional bare `SQUAD_AUTH_TOKEN=` default — or the `SQUAD_AUTH_TOKEN` env var; NEVER in `.squadrc`. This keeps secrets out of git and lets one machine serve multiple orgs.
+- `.squadrc` carries only the project name + an optional non-secret `SQUAD_ORG=<label>` selector. squad-init writes `SQUAD_ORG` solely from a user-supplied label — it is **not** board-derived (the project API exposes no org slug; auto-derive + verify is a noted follow-up).
+- squad-init **never stores or prompts for a token**: minting + the store command live only at the web mint UI — Settings → API Keys (`$BASE_URL/api-keys`). On no token it prints a one-line pointer to that UI.
+- For remote private boards, mint an org-scoped key at `$BASE_URL/api-keys` and run the store command it prints (writes `~/.squad/auth`, mode 600), or set `SQUAD_AUTH_TOKEN` in the shell before running `/squad-init`.

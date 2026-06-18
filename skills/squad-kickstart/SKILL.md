@@ -10,7 +10,7 @@ metadata:
 
 Runs the complete project lifecycle from idea to rolling implementation.
 
-> Shared context: read `../squad/shared.md` for auth resolution (`SQUAD_AUTH_TOKEN` → `~/.squad/auth`, `Authorization: Bearer` header), `$BASE_URL`, API endpoints, pipeline levels, and the JSON-safety rule. Resolve `PROJECT` / `BASE_URL` / `AUTH_HEADER` from there before any API call.
+> Shared context: read `../squad/shared.md` for auth resolution (org-scoped API key: `SQUAD_AUTH_TOKEN` env > `SQUAD_AUTH_TOKEN_<SQUAD_ORG>` > bare `SQUAD_AUTH_TOKEN=` from `~/.squad/auth`; `SQUAD_ORG` = env > `.squadrc`; `Authorization: Bearer` header), `$BASE_URL`, API endpoints, pipeline levels, and the JSON-safety rule. Resolve `PROJECT` / `BASE_URL` / `AUTH_HEADER` from there before any API call.
 
 **Default mode: Rolling Wave Planning**
 ```

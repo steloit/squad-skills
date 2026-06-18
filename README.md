@@ -31,20 +31,47 @@ INSTALL_INTERNAL_SKILLS=1 npx skills add steloit/squad-skills
 
 ## Configure
 
-The skills default to the deployed board, so you only supply the shared token — read tool-agnostically, so set it whichever way suits you:
+The skills default to the deployed board and authenticate with an **org-scoped, scoped API key** (minted in the board UI — Settings → API Keys at `<board>/api-keys`: name + scopes + expiry → copy once → run the printed store command). The key is read tool-agnostically. The mint command is the **single source** for the token — skills never echo, cat, or store it.
+
+> **NOTE:** the mint UI requires the board running current code — redeploy the board first if Settings → API Keys is missing.
+
+**Single org (zero friction)** — one key on the machine, used as the bare default:
 
 ```bash
 # Option A — environment variable (works for every agent: Claude Code, Codex, Cursor)
-export SQUAD_AUTH_TOKEN='<your-shared-token>'        # add to ~/.zshrc or ~/.profile to persist
+export SQUAD_AUTH_TOKEN='<your-org-scoped-key>'      # add to ~/.zshrc or ~/.profile to persist
 
 # Option B — credential file (mode 600; keeps the secret out of your shell profile)
-mkdir -p ~/.squad && printf 'SQUAD_AUTH_TOKEN=%s\n' '<your-shared-token>' > ~/.squad/auth && chmod 600 ~/.squad/auth
+mkdir -p ~/.squad && printf 'SQUAD_AUTH_TOKEN=%s\n' '<your-org-scoped-key>' > ~/.squad/auth && chmod 600 ~/.squad/auth
 ```
+
+**Multiple orgs on one machine** — `~/.squad/auth` (mode 600) holds flat per-org lines plus an optional bare default:
+
+```
+SQUAD_AUTH_TOKEN_acme=<acme org-scoped key>
+SQUAD_AUTH_TOKEN_globex=<globex org-scoped key>
+SQUAD_AUTH_TOKEN=<optional bare default key>
+```
+
+Each repo picks its org via a non-secret `SQUAD_ORG=<label>` line in `.squadrc` (`<label>` = the org slug from the mint dialog, reused verbatim). Resolution: `SQUAD_AUTH_TOKEN` env > `SQUAD_AUTH_TOKEN_<SQUAD_ORG>` (file) > bare `SQUAD_AUTH_TOKEN=` (file); `SQUAD_ORG` = env > `.squadrc`. The mint dialog emits both the per-org store line and the `SQUAD_ORG=<slug>` line pre-labeled — copy, never invent.
+
+**Auth errors:** `401` = no/invalid/expired token → mint or refresh a key at `<board>/api-keys`. `403 FORBIDDEN` = valid token but missing scope → mint a key **with the needed scopes** at `<board>/api-keys`.
 
 `SQUAD_BASE_URL` is optional — it defaults to the deployed board; set it (env, or `~/.squad/config`) only to point at a self-hosted board. Then register a project from its directory:
 
 ```
 /squad-init
+```
+
+### Recommended: a secret-safe CLAUDE.md deny-rule
+
+The token must never enter an agent's context. Add this to your global `~/.claude/CLAUDE.md` (or your agent's equivalent) so the agent won't read or relay the credential store:
+
+```markdown
+## Squad secrets — never expose
+- Never Read, `cat`, `echo`, or relay the contents of `~/.squad/*` (auth/config files).
+- Never run `env` / `printenv` or otherwise print `SQUAD_AUTH_TOKEN*`.
+- Resolve the token straight into the `Authorization` header; never use `curl -v` / header logging.
 ```
 
 ## Commands

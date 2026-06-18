@@ -90,11 +90,14 @@ curl -sf "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true"
 
 ### 1. Resolve project
 
-Read the project name from `.squadrc` (`SQUAD_PROJECT=`) — see `squad/shared.md` for the full resolution.
+Read the project name from `.squadrc` (`SQUAD_PROJECT=`) — see `squad/shared.md` for the full resolution. The same resolution also reads `SQUAD_ORG` (env → `.squadrc`) and selects the org-scoped key (`AUTH_TOKEN`).
 
 ### 2. Plan
 
+**SQUAD_ORG export contract:** `plan_batch.py`'s `load_squad_auth` reads `SQUAD_ORG` from the **env only** (it does not parse `.squadrc`). Resolve `.squadrc` and `export SQUAD_ORG` before launching it (the shared.md resolution already sets `SQUAD_ORG`). Passing `--auth-token "$AUTH_TOKEN"` (already org-resolved via shared.md) makes the script use it directly; exporting `SQUAD_ORG` keeps the script's own fallback resolution correct too.
+
 ```bash
+export SQUAD_ORG   # exported from the shared.md resolution (env → .squadrc); selects the per-org key
 python3 scripts/plan_batch.py --project "$PROJECT" --tasks "<selector>" --base-url "$BASE_URL" --auth-token "$AUTH_TOKEN"
 ```
 
