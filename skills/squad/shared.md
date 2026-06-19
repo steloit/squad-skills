@@ -6,7 +6,7 @@ All projects share a single centralized DB on the deployed Squad board.
 ## Project Config & Auth
 
 Read the project name from `.squadrc` (`SQUAD_PROJECT=`, committed at the repo root, created by `/squad-init`).
-Auth is resolved tool-agnostically: the `SQUAD_AUTH_TOKEN` env var first, then the `~/.squad/auth` credential file (mode 600).
+Auth is resolved tool-agnostically and **org-scoped**: the `SQUAD_AUTH_TOKEN` env var first, then the per-org `SQUAD_AUTH_TOKEN_<SQUAD_ORG>` line in the `~/.squad/auth` credential file (mode 600), then the bare `SQUAD_AUTH_TOKEN=` default in that file. `SQUAD_ORG` is read from the env, else from `.squadrc`. The token is an **org-scoped, scoped API key** (carries its org + permission scopes server-side); it is never echoed, cat'd, or Read.
 
 ```bash
 # 1. Project name: .squadrc → directory name
@@ -14,9 +14,23 @@ PROJECT=""
 [ -f .squadrc ] && PROJECT=$(grep '^SQUAD_PROJECT=' .squadrc | cut -d= -f2-)
 [ -z "$PROJECT" ] && PROJECT=$(basename "$(pwd)")
 
-# 2. Auth token — env first (tool-agnostic), then the ~/.squad/auth secret file
-AUTH_TOKEN="${SQUAD_AUTH_TOKEN:-}"
-[ -z "$AUTH_TOKEN" ] && [ -f "$HOME/.squad/auth" ] && AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$HOME/.squad/auth" | cut -d= -f2-)
+# 2. Auth token — env > per-org line > bare default (all from ~/.squad/auth)
+SQUAD_ORG="${SQUAD_ORG:-}"
+[ -z "$SQUAD_ORG" ] && [ -f .squadrc ] && SQUAD_ORG=$(grep '^SQUAD_ORG=' .squadrc | cut -d= -f2-)
+AUTH_TOKEN="${SQUAD_AUTH_TOKEN:-}"; AUTH_SOURCE=$([ -n "$AUTH_TOKEN" ] && echo env || echo none)
+if [ -z "$AUTH_TOKEN" ] && [ -f "$HOME/.squad/auth" ]; then
+  if [ -n "$SQUAD_ORG" ]; then
+    AUTH_TOKEN=$(grep "^SQUAD_AUTH_TOKEN_${SQUAD_ORG}=" "$HOME/.squad/auth" | cut -d= -f2-)
+    [ -n "$AUTH_TOKEN" ] && AUTH_SOURCE="org:$SQUAD_ORG"
+  fi
+  if [ -z "$AUTH_TOKEN" ]; then
+    AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$HOME/.squad/auth" | cut -d= -f2-)
+    [ -n "$AUTH_TOKEN" ] && AUTH_SOURCE=default
+  fi
+fi
+# The per-org grep is anchored `^SQUAD_AUTH_TOKEN_${SQUAD_ORG}=` so the bare
+# `SQUAD_AUTH_TOKEN=` line can never match a per-org lookup, and vice-versa.
+# Hyphenated labels match literally (it is a grep string, not a shell var name).
 
 # 3. Board URL — env → ~/.squad/config → deployed default
 BASE_URL="${SQUAD_BASE_URL:-}"
@@ -30,25 +44,37 @@ fi
 
 If `.squadrc` is absent, `PROJECT` falls back to the directory name — prompt the user to run `/squad-init` to register it explicitly.
 
-**Resolution:** token = `SQUAD_AUTH_TOKEN` env > `~/.squad/auth`; URL = `SQUAD_BASE_URL` env > `~/.squad/config` > deployed default; project = `.squadrc` (`SQUAD_PROJECT=`) > directory name.
+**Resolution:** token = `SQUAD_AUTH_TOKEN` env > `SQUAD_AUTH_TOKEN_<SQUAD_ORG>` (`~/.squad/auth`) > bare `SQUAD_AUTH_TOKEN=` (`~/.squad/auth`); `SQUAD_ORG` = env > `.squadrc`; URL = `SQUAD_BASE_URL` env > `~/.squad/config` > deployed default; project = `.squadrc` (`SQUAD_PROJECT=`) > directory name.
 
-**If `AUTH_TOKEN` is empty** (no env var, no `~/.squad/auth`), the board returns `401` on write. Don't guess — tell the user to set the shared token tool-agnostically, then retry (no extra skill needed):
+### Multi-org store format
 
-```bash
-export SQUAD_AUTH_TOKEN='<token>'   # any agent's shell; add to ~/.zshrc to persist
-# …or a credential file:
-mkdir -p ~/.squad && printf 'SQUAD_AUTH_TOKEN=%s\n' '<token>' > ~/.squad/auth && chmod 600 ~/.squad/auth
+`~/.squad/auth` (mode 600) holds flat, per-org lines plus an optional bare default — no INI/sections:
+
+```
+SQUAD_AUTH_TOKEN_acme=<acme org-scoped key>
+SQUAD_AUTH_TOKEN_globex=<globex org-scoped key>
+SQUAD_AUTH_TOKEN=<optional bare default key>
 ```
 
-`SQUAD_BASE_URL` is optional (defaults to the deployed board; self-host only, via env or `~/.squad/config`). The token is also shown on the board's lock screen at `$BASE_URL`.
+`<label>` is a local nickname (the org slug from the mint dialog) reused verbatim in `.squadrc`'s `SQUAD_ORG=<label>`. **Single-org users set nothing** — just the bare `SQUAD_AUTH_TOKEN=` default, which is exactly today's behavior (back-compat). The store lines are emitted **only** by the mint UI (Settings → API Keys) — never by a skill, which never sees or writes the token.
 
-Quick debug check before a failing request:
+### Auth errors — 401 vs 403
+
+The token resolves straight into the `Authorization` header; **never** `echo`/`cat`/Read it or `~/.squad/auth`, and **never** use `curl -v`. Two distinct, scope-aware cases (plain text the agent relays — non-interactive):
+
+- **401 (no / invalid / expired token).** Board returned `401` — no valid token for `$SQUAD_ORG`/this board. The human mints or refreshes an org-scoped key in the board UI (Settings → API Keys at `$BASE_URL/api-keys`) and runs the store command it prints — per-org line `SQUAD_AUTH_TOKEN_<org>=…` (multi-org) or the bare `SQUAD_AUTH_TOKEN=…` default (single-org), mode 600. The token is **never pasted to the agent**.
+- **403 FORBIDDEN (valid token, missing scope).** Board returned `403 FORBIDDEN` — the API key is valid but **lacks the required scope** for this action. The human mints a key **with the needed scopes** at `$BASE_URL/api-keys`. Do not retry until a wider-scoped key is stored.
+
+`SQUAD_BASE_URL` is optional (defaults to the deployed board; self-host only, via env or `~/.squad/config`).
+
+Quick debug check before a failing request (value-free — never prints the token):
 
 ```bash
 echo "SQUAD_PROJECT=$PROJECT"
 echo "SQUAD_BASE_URL=$BASE_URL"
+echo "SQUAD_ORG=${SQUAD_ORG:-unset}"
 echo "SQUAD_AUTH_TOKEN=$([ -n "$AUTH_TOKEN" ] && echo configured || echo empty)"
-echo "SQUAD_AUTH_SOURCE=$([ -n "${SQUAD_AUTH_TOKEN:-}" ] && echo env || { [ -f "$HOME/.squad/auth" ] && echo squad-auth-file || echo none; })"
+echo "SQUAD_AUTH_SOURCE=$AUTH_SOURCE"   # env | org:<label> | default | none
 ```
 
 ## Pipeline Levels

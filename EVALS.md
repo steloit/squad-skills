@@ -31,7 +31,7 @@ self-contained **HTML trend dashboard** is written to `evals/results/report.html
 **No API key needed locally** — the agent run *and* the GEval judge both go through your
 **Claude Code login**. You only need the board token:
 ```bash
-export SQUAD_AUTH_TOKEN=…            # board (or use ~/.squad/auth)
+export SQUAD_AUTH_TOKEN=…            # org-scoped board API key (or use ~/.squad/auth)
 # one-time: ensure the test project exists →  /squad-init squad-eval
 pip install -r evals/requirements.txt
 
