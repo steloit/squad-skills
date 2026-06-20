@@ -16,7 +16,24 @@ import urllib.parse
 import urllib.request
 
 BASE_URL = (os.environ.get("SQUAD_BASE_URL")
-            or "https://steloit-squad.vercel.app").rstrip("/")
+            or "https://squad-api-285415501393.asia-south1.run.app").rstrip("/")
+
+
+def org() -> str:
+    """The org slug — every board call is org-scoped (/api/orgs/<org>/...). Resolved
+    from SQUAD_ORG (env); fails fast when unset, exactly like the skills do."""
+    o = os.environ.get("SQUAD_ORG", "").strip()
+    if not o:
+        raise SystemExit(
+            "SQUAD_ORG is not set. Every board call is org-scoped (/api/orgs/<org>/...). "
+            "Export SQUAD_ORG=<slug> (from the mint dialog) before running the evals."
+        )
+    return urllib.parse.quote(o)
+
+
+def _orgp(resource: str) -> str:
+    """Build an org-scoped API path: _orgp('board?project=x') → /api/orgs/<org>/board?project=x."""
+    return f"/api/orgs/{org()}/{resource}"
 
 
 def token() -> str:
@@ -104,25 +121,25 @@ def _api(method: str, path: str, body: dict | None = None) -> dict:
 
 
 def board_tasks(project: str) -> list[dict]:
-    board = _api("GET", f"/api/board?project={urllib.parse.quote(project)}&summary=true")
+    board = _api("GET", _orgp(f"board?project={urllib.parse.quote(project)}&summary=true"))
     cols = ["todo", "plan", "plan_review", "impl", "impl_review", "test", "done"]
     return [t for c in cols for t in (board.get(c) or [])]
 
 
 def get_task(project: str, task_id: int) -> dict:
-    return _api("GET", f"/api/task/{task_id}?project={urllib.parse.quote(project)}")
+    return _api("GET", _orgp(f"task/{task_id}?project={urllib.parse.quote(project)}"))
 
 
 def create_task(project: str, title: str, priority: str = "medium",
                 level: int = 1, description: str = "") -> dict:
-    res = _api("POST", "/api/task",
+    res = _api("POST", _orgp("task"),
                {"title": title, "project": project, "priority": priority,
                 "level": level, "description": description})
     return res.get("task", res)
 
 
 def delete_task(project: str, task_id: int) -> None:
-    _api("DELETE", f"/api/task/{task_id}?project={urllib.parse.quote(project)}")
+    _api("DELETE", _orgp(f"task/{task_id}?project={urllib.parse.quote(project)}"))
 
 
 def delete_tasks_by_title(project: str, marker: str) -> int:
@@ -136,15 +153,15 @@ def delete_tasks_by_title(project: str, marker: str) -> int:
 
 # ── Projects (squad-init creates one; need read/delete for cleanup) ────────────
 def list_projects() -> list[dict]:
-    res = _api("GET", "/api/projects")
+    res = _api("GET", _orgp("projects"))
     if isinstance(res, list):
         return res
     return res.get("projects", []) if isinstance(res, dict) else []
 
 
 def get_project(project: str) -> dict:
-    return _api("GET", f"/api/projects/{urllib.parse.quote(project)}")
+    return _api("GET", _orgp(f"projects/{urllib.parse.quote(project)}"))
 
 
 def delete_project(project: str) -> None:
-    _api("DELETE", f"/api/projects/{urllib.parse.quote(project)}")
+    _api("DELETE", _orgp(f"projects/{urllib.parse.quote(project)}"))

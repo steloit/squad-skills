@@ -82,7 +82,7 @@ Fall back to conservative inference from phase, tags, title, and description whe
 ### 0. Pre-flight checks
 
 ```bash
-curl -sf "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true" > /dev/null
+curl -sLf "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=$PROJECT&summary=true" > /dev/null
 ```
 
 - If the board is unreachable: report the error (check `base_url` / auth) and stop.
@@ -244,7 +244,7 @@ In default mode, L2/L3 tasks pause for user confirmation at review checkpoints.
 ### Result verification
 
 ```bash
-STATUS=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=status" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+STATUS=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT&fields=status" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
 ```
 
 | Status | Interpretation | Action |

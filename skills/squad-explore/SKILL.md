@@ -219,7 +219,7 @@ This skill explores first, reports direction, then seeds the squad board with ph
    After creating each implementation task, attach it to the epic via a structured parent edge
    (single-parent → 400 on a second parent, surfaced not pre-checked):
    ```bash
-   curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$CHILD_ID/relationships?project=$PROJECT" \
+   curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$CHILD_ID/relationships?project=$PROJECT" \
      -H 'Content-Type: application/json' \
      -d "$(jq -n --argjson to "$REPORT_ID" '{to:$to, type:"parent"}')"
    ```
@@ -237,24 +237,24 @@ This skill explores first, reports direction, then seeds the squad board with ph
    Use API:
    ```bash
    # Create the epic anchor (⑤-B) — card_type:"epic"
-   curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
+   curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task" \
      -H 'Content-Type: application/json' \
      -d "{\"title\": \"[Explore] <topic>\", \"project\": \"$PROJECT\", \"card_type\": \"epic\",
           \"priority\": \"low\", \"description\": \"...\", \"tags\": [\"explore-<topic-slug>\", \"explore-report\"]}"
 
    # Create an implementation task (⑤-C) — no epic: tag
-   curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
+   curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task" \
      -H 'Content-Type: application/json' \
      -d "{\"title\": \"...\", \"project\": \"$PROJECT\", \"priority\": \"high\",
           \"level\": 3, \"description\": \"...\", \"tags\": [\"explore-<topic-slug>\", \"phase:<N>\"]}"
 
    # Attach the implementation task to the epic via a structured parent edge
-   curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$CHILD_ID/relationships?project=$PROJECT" \
+   curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$CHILD_ID/relationships?project=$PROJECT" \
      -H 'Content-Type: application/json' \
      -d "$(jq -n --argjson to "$REPORT_ID" '{to:$to, type:"parent"}')"
 
    # Patch report anchor (epic) description with the task index
-   curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$REPORT_ID?project=$PROJECT" \
+   curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/$REPORT_ID?project=$PROJECT" \
      -H 'Content-Type: application/json' \
      -d "{\"description\": \"<updated description with task index>\"}"
    ```

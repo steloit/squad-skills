@@ -3,7 +3,7 @@
 
 Two hard-coded smokes from the approved plan:
   A (recall):    one unambiguous Squad-itself friction (squad-heartbeat scans last activity
-                 with one GET /api/task/:id/activity per task at squad-heartbeat/SKILL.md:250,
+                 with one GET /api/task/:id/activity per task at squad-heartbeat/SKILL.md:287,
                  an N+1 read against the board) → expect EXACTLY 1 friction report (area board-api).
   B (precision): a deliberately friction-free trajectory (only a worked-project bug at
                  demo/src/app.js:42) → expect 0 reports.
@@ -42,15 +42,15 @@ SMOKE_A = {
     "run_summary": "squad-heartbeat scanned demo for stagnant tasks.",
     "trajectory": (
         "[activity] Heartbeat scanned 40 active tasks on demo. To find each task's last-activity\n"
-        "    timestamp it issued one GET /api/task/:id/activity per task (squad-heartbeat/SKILL.md:250),\n"
+        "    timestamp it issued one GET /api/task/:id/activity per task (squad-heartbeat/SKILL.md:287),\n"
         "    because the board list does not embed the activity stream -> 40 round-trips for one scan\n"
         "    (an N+1 read against the board). A single project-scoped batch reader would collapse this.\n"
         "[activity] Scan completed but was visibly slow on the larger boards due to the per-task fan-out."
     ),
-    "friction_signals": "N+1 activity reads (one GET per task) in the heartbeat scan, traced to squad-heartbeat/SKILL.md:250.",
+    "friction_signals": "N+1 activity reads (one GET per task) in the heartbeat scan, traced to squad-heartbeat/SKILL.md:287.",
     "expect_reports": 1,
     "expect_area": "board-api",
-    "evidence_marker": "squad-heartbeat/SKILL.md:250",
+    "evidence_marker": "squad-heartbeat/SKILL.md:287",
 }
 
 SMOKE_B = {

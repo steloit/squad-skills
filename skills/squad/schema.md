@@ -189,7 +189,7 @@ import subprocess, json
 body = {'actor': 'NICKNAME', 'model': 'MODEL', 'message': 'MESSAGE'}
 # Optional: include 'tokens' (estimated input+output), omit when unknown.
 # body['tokens'] = TOKENS
-subprocess.run(['curl','-s',*auth_header,'-X','POST',f'{base_url}/api/task/{task_id}/activity?project={project}','-H','Content-Type: application/json','-d',json.dumps(body)], capture_output=True)
+subprocess.run(['curl','-sL',*auth_header,'-X','POST',f'{base_url}/api/orgs/{org}/task/{task_id}/activity?project={project}','-H','Content-Type: application/json','-d',json.dumps(body)], capture_output=True)
 "
 ```
 

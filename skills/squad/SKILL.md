@@ -12,7 +12,7 @@ license: MIT
 ### `/squad` or `/squad list` — View Board
 
 ```bash
-BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true")
+BOARD=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=$PROJECT&summary=true")
 ```
 
 Output: markdown table with ID, Status, Priority, Title.
@@ -25,7 +25,7 @@ Output: markdown table with ID, Status, Priority, Title.
 Implementing / Plan Review / Impl Review / Testing / Recently Done / Next Todo.
 
 ```bash
-BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true")
+BOARD=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=$PROJECT&summary=true")
 ```
 
 ### `/squad add <title>` — Add Task
@@ -50,7 +50,7 @@ Ask user which fields to modify, then PATCH via API. To attach an image to an ex
 ### `/squad remove <ID>` — Delete Task
 
 ```bash
-curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/task/$ID?project=$PROJECT"
+curl -sL "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT"
 ```
 
 ### `/squad stats` — Statistics
@@ -59,8 +59,8 @@ Column counts come from the board summary; per-actor token/event totals come fro
 `GET /api/activity/stats` call (server-side `GROUP BY actor` — no per-task loop, no board fetch for tokens).
 
 ```bash
-export BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true")
-export STATS=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/activity/stats?project=$PROJECT")
+export BOARD=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=$PROJECT&summary=true")
+export STATS=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/activity/stats?project=$PROJECT")
 python3 << 'PY'
 import json, os
 
@@ -98,7 +98,7 @@ PY
 Fetch the current project's context from the projects table. Use this at the start of a session to load project purpose, stack, brief, relationships, and task counts in one call.
 
 ```bash
-PROJECT_DATA=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects/$PROJECT")
+PROJECT_DATA=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT")
 ```
 
 Output: formatted project context including:
@@ -116,7 +116,7 @@ If the project is not registered, suggest running `/squad-init` to register it.
 Fetch all projects grouped by category. Useful for understanding the full project landscape.
 
 ```bash
-ALL_PROJECTS=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects")
+ALL_PROJECTS=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/projects")
 ```
 
 Output: projects grouped by category (e.g. personal, tools, skills) with names and purposes.
@@ -127,12 +127,12 @@ The **brief** is a compressed context summary (200–500 chars) that agents cons
 
 **View current brief:**
 ```bash
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects/$PROJECT" | jq -r '.brief // "No brief set"'
+curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT" | jq -r '.brief // "No brief set"'
 ```
 
 **Set brief directly:**
 ```bash
-curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/projects/$PROJECT" \
+curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"brief": "..."}'
 ```
@@ -149,12 +149,12 @@ Update any project field via PATCH:
 
 ```bash
 # Update purpose
-curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/projects/$PROJECT" \
+curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"purpose": "new purpose"}'
 
 # Archive project
-curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/projects/$PROJECT" \
+curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"status": "archived"}'
 ```
@@ -165,12 +165,12 @@ Supported fields: `name`, `purpose`, `stack`, `brief`, `status`, `category`, `re
 
 ```bash
 # Add relationship
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/projects/$PROJECT/links" \
+curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT/links" \
   -H 'Content-Type: application/json' \
   -d '{"target_id": "other-project", "relation": "depends_on"}'
 
 # Remove relationship
-curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/projects/$PROJECT/links" \
+curl -sL "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT/links" \
   -H 'Content-Type: application/json' \
   -d '{"target_id": "other-project", "relation": "depends_on"}'
 ```
@@ -181,5 +181,5 @@ Relations: `extends`, `serves`, `depends_on`, `shares_data`.
 
 Run `/squad-init` first to register this project — it writes `.squadrc` (`SQUAD_PROJECT=…`, plus an optional `SQUAD_ORG=<label>` org selector) at the repo root, committed so your whole team's agents target the same board project. The token never goes in a project file — it's an org-scoped API key resolved as `SQUAD_AUTH_TOKEN` env > `SQUAD_AUTH_TOKEN_<SQUAD_ORG>` > bare `SQUAD_AUTH_TOKEN=` from `~/.squad/auth` (see `shared.md`).
 
-Open the deployed board at `https://steloit-squad.vercel.app/?project=<PROJECT>` (or via the configured `SQUAD_BASE_URL`).
+Open the deployed board at `https://squad.steloit.com/?project=<PROJECT>` (or via the configured `SQUAD_BASE_URL`).
 Features: 7-column pipeline, drag-and-drop (valid transitions only), card lifecycle modal, agent log viewer, 10s auto-refresh.
