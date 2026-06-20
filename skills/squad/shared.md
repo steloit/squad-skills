@@ -68,8 +68,8 @@ SQUAD_AUTH_TOKEN=<optional bare default key>
 
 The token resolves straight into the `Authorization` header; **never** `echo`/`cat`/Read it or `~/.squad/auth`, and **never** use `curl -v`. Note: a missing `SQUAD_ORG` is a *pre-flight* failure — it stops before any request is even sent (no 401/403), with the actionable error above pointing to the mint dialog's `SQUAD_ORG=<slug>` line / `.squadrc`. Two distinct, scope-aware cases (plain text the agent relays — non-interactive):
 
-- **401 (no / invalid / expired token).** Board returned `401` — no valid token for `$SQUAD_ORG`/this board. The human mints or refreshes an org-scoped key in the board UI (Settings → API Keys at `$BASE_URL/api-keys`) and runs the store command it prints — per-org line `SQUAD_AUTH_TOKEN_<org>=…` (multi-org) or the bare `SQUAD_AUTH_TOKEN=…` default (single-org), mode 600. The token is **never pasted to the agent**.
-- **403 FORBIDDEN (valid token, missing scope).** Board returned `403 FORBIDDEN` — the API key is valid but **lacks the required scope** for this action. The human mints a key **with the needed scopes** at `$BASE_URL/api-keys`. Do not retry until a wider-scoped key is stored.
+- **401 (no / invalid / expired token).** Board returned `401` — no valid token for `$SQUAD_ORG`/this board. The human mints or refreshes an org-scoped key in the board's web UI (**Settings → API Keys**) and runs the store command it prints — per-org line `SQUAD_AUTH_TOKEN_<org>=…` (multi-org) or the bare `SQUAD_AUTH_TOKEN=…` default (single-org), mode 600. The token is **never pasted to the agent**. (Don't print a URL — the skill only knows the API `BASE_URL`, and the mint page lives in the web UI; just point at **Settings → API Keys**.)
+- **403 FORBIDDEN (valid token, missing scope).** Board returned `403 FORBIDDEN` — the API key is valid but **lacks the required scope** for this action. The human mints a key **with the needed scopes** in the web UI (**Settings → API Keys**). Do not retry until a wider-scoped key is stored.
 
 `SQUAD_BASE_URL` is optional (defaults to the deployed board; self-host only, via env or `~/.squad/config`).
 
