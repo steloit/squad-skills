@@ -115,10 +115,11 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
    - **Declare dependencies structurally**: if the interview surfaced that this task is blocked by
      another (#DEP), declare it via a `blocks` edge — NOT a `Depends on:` text line:
      ```bash
-     # #DEP blocks #ID (ID is blocked_by DEP). Server returns 409 on a cycle (surfaced, no pre-check).
+     # DEP blocks ID (ID is blocked_by DEP). `to` is an opaque <KEY>-<seq> id string — use --arg.
+     # Server returns 409 on a cycle (surfaced, no pre-check).
      curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$DEP/relationships?project=$PROJECT" \
        -H 'Content-Type: application/json' \
-       -d "$(jq -n --argjson to "$ID" '{to:$to, type:"blocks"}')"
+       -d "$(jq -n --arg to "$ID" '{to:$to, type:"blocks"}')"
      ```
    - Append an activity event (POST /api/task/$ID/activity):
      { "actor": "Refiner", "model": "<MODEL_REFINER>", "message": "Requirements refined. N questions across M rounds." }

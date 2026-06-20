@@ -221,7 +221,7 @@ This skill explores first, reports direction, then seeds the squad board with ph
    ```bash
    curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$CHILD_ID/relationships?project=$PROJECT" \
      -H 'Content-Type: application/json' \
-     -d "$(jq -n --argjson to "$REPORT_ID" '{to:$to, type:"parent"}')"
+     -d "$(jq -n --arg to "$REPORT_ID" '{to:$to, type:"parent"}')"
    ```
 
    ⑤-D Patch the report anchor task with the task index.
@@ -251,7 +251,7 @@ This skill explores first, reports direction, then seeds the squad board with ph
    # Attach the implementation task to the epic via a structured parent edge
    curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$CHILD_ID/relationships?project=$PROJECT" \
      -H 'Content-Type: application/json' \
-     -d "$(jq -n --argjson to "$REPORT_ID" '{to:$to, type:"parent"}')"
+     -d "$(jq -n --arg to "$REPORT_ID" '{to:$to, type:"parent"}')"
 
    # Patch report anchor (epic) description with the task index
    curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/$REPORT_ID?project=$PROJECT" \

@@ -135,17 +135,17 @@ CHILD_ID=$(curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/t
 # Attach the child to its epic via a structured parent edge (single-parent → 400 on a second parent).
 curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$CHILD_ID/relationships?project=$PROJECT" \
   -H 'Content-Type: application/json' \
-  -d "$(jq -n --argjson to "$EPIC_ID" '{to:$to, type:"parent"}')"
+  -d "$(jq -n --arg to "$EPIC_ID" '{to:$to, type:"parent"}')"
 ```
 
 **Cross-card dependencies** (a child blocks another) are declared via a structured `blocks` edge —
 NOT a `Depends on:` text line. The server enforces acyclicity and returns **409** on a cycle (surfaced,
 no client pre-check):
 ```bash
-# #BLOCKER blocks #BLOCKED (BLOCKED is blocked_by BLOCKER):
+# BLOCKER blocks BLOCKED (BLOCKED is blocked_by BLOCKER). `to` is an opaque <KEY>-<seq> id string — use --arg.
 curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$BLOCKER_ID/relationships?project=$PROJECT" \
   -H 'Content-Type: application/json' \
-  -d "$(jq -n --argjson to "$BLOCKED_ID" '{to:$to, type:"blocks"}')"
+  -d "$(jq -n --arg to "$BLOCKED_ID" '{to:$to, type:"blocks"}')"
 ```
 
 **E2E test task**: add one E2E validation task at the end of each epic (required).
