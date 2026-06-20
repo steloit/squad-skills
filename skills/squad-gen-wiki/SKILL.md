@@ -94,13 +94,13 @@ sources: {source count}
 
    ①-A Read Squad project metadata:
    ```bash
-   curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects/$PROJECT"
+   curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT"
    ```
    → extract purpose, brief, stack, status, category
 
    ①-B Read the board summary:
    ```bash
-   curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true"
+   curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=$PROJECT&summary=true"
    ```
    → determine card counts per state and overall progress
 
@@ -110,7 +110,7 @@ sources: {source count}
    From the board summary, extract the IDs of cards whose tags include "explore-report".
    Read the full description of each card:
    ```bash
-   curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=title,description,tags"
+   curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT&fields=title,description,tags"
    ```
 
    Find major decision cards:
@@ -118,7 +118,7 @@ sources: {source count}
    Since decision_log is omitted from the board summary, first extract the list of done card IDs,
    then read only the decision_log field for each:
    ```bash
-   curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=title,decision_log"
+   curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT&fields=title,decision_log"
    ```
    If decision_log is null or an empty string, skip it.
 
@@ -256,7 +256,7 @@ sources: {source count}
    Board changes:
    ```bash
    # Cards completed since the last generation
-   curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true"
+   curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=$PROJECT&summary=true"
    ```
    → done cards with completed_at > $LAST_GENERATED that have a decision_log
    → newly created exploration report cards

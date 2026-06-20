@@ -26,6 +26,11 @@ Scan all active projects (or a single project) for tasks that have had no agent 
    set `SQUAD_ORG` before running to target a specific org's key:
 
    SQUAD_ORG="${SQUAD_ORG:-}"
+   if [ -z "$SQUAD_ORG" ]; then
+     echo "ERROR: SQUAD_ORG is not set. Every board call is org-scoped (/api/orgs/<org>/...)." >&2
+     echo "Export SQUAD_ORG=<slug> (from the mint dialog) before running the heartbeat." >&2
+     exit 1
+   fi
    AUTH_TOKEN="${SQUAD_AUTH_TOKEN:-}"; AUTH_SOURCE=$([ -n "$AUTH_TOKEN" ] && echo env || echo none)
    if [ -z "$AUTH_TOKEN" ] && [ -f "$HOME/.squad/auth" ]; then
      if [ -n "$SQUAD_ORG" ]; then
@@ -51,19 +56,19 @@ Scan all active projects (or a single project) for tasks that have had no agent 
 
    If --project X specified:
      Validate project exists:
-     curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects/$X"
+     curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$X"
      If 404 → print error "Project '$X' not found." and exit.
      PROJECTS=("$X")
 
    Else (all projects):
-     ALL=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects")
+     ALL=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/projects")
      Extract active projects:
      PROJECTS = jq '.projects[] | select(.status == "active") | .id' from ALL
 
 ③ Fetch Board per Project (full view)
 
    For each project P in PROJECTS:
-     BOARD=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$P")
+     BOARD=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=$P")
 
      Collect tasks from columns: todo, plan, plan_review, impl, impl_review, test
      SKIP the done column entirely.
@@ -76,7 +81,7 @@ Scan all active projects (or a single project) for tasks that have had no agent 
    dedicated activity reader (newest event's `created_at`), falling back to `created_at`:
 
      # Newest event's created_at (events come back chronological ASC → take the last one).
-     curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID/activity?project=$P"
+     curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/activity?project=$P"
 
      python3 -c "
      import json, sys
@@ -138,6 +143,7 @@ Scan all active projects (or a single project) for tasks that have had no agent 
      last_ts = sys.argv[5]
      base_url = sys.argv[6]
      auth_token = sys.argv[7]
+     org = sys.argv[8]
 
      auth_header = ['-H', f'Authorization: Bearer {auth_token}'] if auth_token else []
      body = json.dumps({
@@ -146,14 +152,14 @@ Scan all active projects (or a single project) for tasks that have had no agent 
          'message': f'⚠️ Stagnant {days} days in {status}. Last activity: {last_ts}',
      })
      subprocess.run(
-         ['curl', '-s', *auth_header, '-X', 'POST',
-          f'{base_url}/api/task/{task_id}/activity?project={project}',
+         ['curl', '-sL', *auth_header, '-X', 'POST',
+          f'{base_url}/api/orgs/{org}/task/{task_id}/activity?project={project}',
           '-H', 'Content-Type: application/json',
           '-d', body],
          capture_output=True
      )
      print(f'  Heartbeat written to task #{task_id}')
-     " "$TASK_ID" "$PROJECT" "$DAYS" "$STATUS" "$LAST_TS" "$BASE_URL" "$AUTH_TOKEN"
+     " "$TASK_ID" "$PROJECT" "$DAYS" "$STATUS" "$LAST_TS" "$BASE_URL" "$AUTH_TOKEN" "$SQUAD_ORG"
 
    Print: "Heartbeat activity events written for X tasks."
 ```
@@ -211,15 +217,23 @@ if not os.environ.get("SQUAD_AUTH_TOKEN") and per_org_token:
     auth_token = per_org_token
 base_url = base_url or "https://steloit-squad.vercel.app"
 
+# Every board call is org-scoped (/api/orgs/<org>/...). SQUAD_ORG is REQUIRED.
+org = squad_org
+if not org:
+    raise SystemExit(
+        "SQUAD_ORG is not set. Every board call is org-scoped (/api/orgs/<org>/...). "
+        "Export SQUAD_ORG=<slug> (from the mint dialog) before running the heartbeat."
+    )
+
 def curl_get(url):
-    cmd = ["curl", "-s", url]
+    cmd = ["curl", "-sL", url]
     if auth_token:
         cmd += ["-H", f"Authorization: Bearer {auth_token}"]
     r = subprocess.run(cmd, capture_output=True, text=True)
     return json.loads(r.stdout)
 
 def curl_post(url, payload):
-    cmd = ["curl", "-s", "-X", "POST", url, "-H", "Content-Type: application/json", "-d", json.dumps(payload)]
+    cmd = ["curl", "-sL", "-X", "POST", url, "-H", "Content-Type: application/json", "-d", json.dumps(payload)]
     if auth_token:
         cmd += ["-H", f"Authorization: Bearer {auth_token}"]
     subprocess.run(cmd, capture_output=True)
@@ -227,7 +241,7 @@ def curl_post(url, payload):
 # ── Fetch projects ───────────────────────────────────────────────
 if project_filter:
     try:
-        proj_data = curl_get(f"{base_url}/api/projects/{project_filter}")
+        proj_data = curl_get(f"{base_url}/api/orgs/{org}/projects/{project_filter}")
         if "error" in proj_data:
             print(f"Error: Project '{project_filter}' not found.")
             sys.exit(1)
@@ -236,7 +250,7 @@ if project_filter:
         print(f"Error: Project '{project_filter}' not found.")
         sys.exit(1)
 else:
-    all_proj = curl_get(f"{base_url}/api/projects")
+    all_proj = curl_get(f"{base_url}/api/orgs/{org}/projects")
     projects = [p["id"] for p in all_proj.get("projects", []) if p.get("status") == "active"]
 
 if not projects:
@@ -250,7 +264,7 @@ stagnant_tasks = []
 
 for proj in projects:
     try:
-        board = curl_get(f"{base_url}/api/board?project={proj}")
+        board = curl_get(f"{base_url}/api/orgs/{org}/board?project={proj}")
     except Exception:
         print(f"Warning: failed to fetch board for project '{proj}', skipping.", file=sys.stderr)
         continue
@@ -270,7 +284,7 @@ for proj in projects:
             last_ts = None
             read_error = False
             try:
-                resp = curl_get(f"{base_url}/api/task/{task_id}/activity?project={proj}")
+                resp = curl_get(f"{base_url}/api/orgs/{org}/task/{task_id}/activity?project={proj}")
                 events = resp.get("activity") if isinstance(resp, dict) else None
                 if isinstance(events, list) and events:
                     stamps = [e.get("created_at", "") for e in events if isinstance(e, dict)]
@@ -344,7 +358,7 @@ for t in stagnant_tasks:
     try:
         # One atomic POST per task \u2014 no read-modify-write.
         curl_post(
-            f"{base_url}/api/task/{t['id']}/activity?project={t['project']}",
+            f"{base_url}/api/orgs/{org}/task/{t['id']}/activity?project={t['project']}",
             {
                 "actor": "Heartbeat",
                 "model": "system",

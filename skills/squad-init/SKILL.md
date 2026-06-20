@@ -50,12 +50,26 @@ Create **one** tool-agnostic file at the **current project root**, committed to 
 `.squadrc`
 ```
 SQUAD_PROJECT=<PROJECT_NAME>
-SQUAD_ORG=<ORG_LABEL>          # OPTIONAL — only when the user supplies an org label (multi-org machines)
+SQUAD_ORG=<ORG_SLUG>          # REQUIRED — every board call is org-scoped (/api/orgs/<org>/...)
 ```
 
-**`.squadrc` holds the project name and an OPTIONAL org label** (both non-secret → safe to commit). Write the `SQUAD_ORG=<label>` line **only when the user supplies a label** — from the mint dialog's `SQUAD_ORG=<slug>` line or an explicit init arg. Single-org users supply nothing → no `SQUAD_ORG` line → the bare `SQUAD_AUTH_TOKEN=` default is used (zero friction). The label is **never** auto-derived from the board (the project API exposes no org slug today — a noted follow-up). The token never lives in `.squadrc`; it lives in `~/.squad/auth` as a per-org `SQUAD_AUTH_TOKEN_<label>=` line or the bare default.
+**`.squadrc` holds the project name and the org slug** (both non-secret → safe to commit). The `SQUAD_ORG=<slug>` line is **REQUIRED** and **ALWAYS** written — every board call is org-scoped (`/api/orgs/<org>/...`), including squad-init's own `POST /api/orgs/<org>/projects`. Resolve the slug from an explicit init arg or the mint dialog's `SQUAD_ORG=<slug>` line (env or an existing `.squadrc`):
 
-Use the Write tool to create `.squadrc` (include the `SQUAD_ORG=` line only when a label was supplied).
+```bash
+# Org slug — env (the mint dialog exports it) > existing .squadrc. REQUIRED.
+SQUAD_ORG="${SQUAD_ORG:-}"
+[ -z "$SQUAD_ORG" ] && [ -f .squadrc ] && SQUAD_ORG=$(grep '^SQUAD_ORG=' .squadrc | cut -d= -f2-)
+if [ -z "$SQUAD_ORG" ]; then
+  echo "ERROR: SQUAD_ORG is not set. Every board call is org-scoped (/api/orgs/<org>/...)." >&2
+  echo "Set it from the mint dialog's \`SQUAD_ORG=<slug>\` line — add \`SQUAD_ORG=<slug>\` to .squadrc" >&2
+  echo "(committed) or export SQUAD_ORG=<slug> for this shell. Resolution order: env > .squadrc." >&2
+  exit 1
+fi
+```
+
+The slug is **never** auto-derived from the board (the project API exposes no org slug today — a noted follow-up). The token never lives in `.squadrc`; it lives in `~/.squad/auth` as a per-org `SQUAD_AUTH_TOKEN_<slug>=` line or the bare default.
+
+Use the Write tool to create `.squadrc` with **both** the `SQUAD_PROJECT=` and the `SQUAD_ORG=<slug>` lines (always write `SQUAD_ORG`; if no slug can be resolved, stop with the error above — do NOT register without it).
 
 ### 2b. Detect auth (no token store here)
 
@@ -116,7 +130,7 @@ PROJ_PAYLOAD=$(jq -n \
     purpose:  (if $purpose  == "" then null else $purpose  end),
     stack:    (if $stack    == "" then null else $stack    end),
     repo_url: (if $repo_url == "" then null else $repo_url end)}')
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/projects" \
+curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/projects" \
   -H 'Content-Type: application/json' \
   -d "$PROJ_PAYLOAD" > /dev/null 2>&1 || true
 ```
@@ -130,7 +144,7 @@ Output:
 ✅ Project '<PROJECT_NAME>' registered in squad.
 
   Config:  .squadrc (committed)
-  Org:     <ORG_LABEL>   (or "(default key)" when no SQUAD_ORG label was supplied)
+  Org:     <ORG_SLUG>   (required — written to .squadrc; every board call is org-scoped)
   DB:      PostgreSQL (shared central DB)
   Board:   <BASE_URL>/?project=<PROJECT_NAME>
   Auth:    org-scoped API key — SQUAD_AUTH_TOKEN env / ~/.squad/auth (global secret; configured / empty, value-free)
@@ -155,6 +169,6 @@ Options:
 
 - `/squad-init` defaults to `https://steloit-squad.vercel.app` unless you provide another deployment URL.
 - Tokens are **org-scoped, scoped API keys** stored globally in `~/.squad/auth` (mode 600) — per-org `SQUAD_AUTH_TOKEN_<label>=` lines plus an optional bare `SQUAD_AUTH_TOKEN=` default — or the `SQUAD_AUTH_TOKEN` env var; NEVER in `.squadrc`. This keeps secrets out of git and lets one machine serve multiple orgs.
-- `.squadrc` carries only the project name + an optional non-secret `SQUAD_ORG=<label>` selector. squad-init writes `SQUAD_ORG` solely from a user-supplied label — it is **not** board-derived (the project API exposes no org slug; auto-derive + verify is a noted follow-up).
+- `.squadrc` carries the project name + the **required** non-secret `SQUAD_ORG=<slug>` selector (every board call is org-scoped `/api/orgs/<org>/...`). squad-init ALWAYS writes `SQUAD_ORG` (resolved from an explicit init arg or the mint dialog's `SQUAD_ORG=<slug>` line); it is **not** board-derived (the project API exposes no org slug; auto-derive + verify is a noted follow-up). With no slug, squad-init stops with an actionable error rather than registering without one.
 - squad-init **never stores or prompts for a token**: minting + the store command live only at the web mint UI — Settings → API Keys (`$BASE_URL/api-keys`). On no token it prints a one-line pointer to that UI.
 - For remote private boards, mint an org-scoped key at `$BASE_URL/api-keys` and run the store command it prints (writes `~/.squad/auth`, mode 600), or set `SQUAD_AUTH_TOKEN` in the shell before running `/squad-init`.

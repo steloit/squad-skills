@@ -5,8 +5,14 @@ SQUAD_ORG EXPORT CONTRACT: ``load_squad_auth`` reads ``SQUAD_ORG`` from the
 ENVIRONMENT only — it does NOT parse ``.squadrc``. The calling skill
 (squad-batch-run) MUST resolve ``.squadrc``'s ``SQUAD_ORG=`` line and
 ``export SQUAD_ORG`` before launching this script, so the per-org
-``SQUAD_AUTH_TOKEN_<org>`` key is selected. With no ``SQUAD_ORG`` exported, the
-bare ``SQUAD_AUTH_TOKEN=`` default is used (single-org / back-compat).
+``SQUAD_AUTH_TOKEN_<org>`` key is selected.
+
+ORG-IN-PATH: every board call targets the org-scoped surface
+``{base_url}/api/orgs/{org}/...`` (org in the path, ``project`` in the query).
+``SQUAD_ORG`` is therefore REQUIRED — ``main`` fails fast with an actionable
+``SystemExit`` if it is unset. ``fetch_task`` is a GET, which ``urllib`` follows
+across a former-slug 308 redirect (the analogue of ``curl -L``); if a redirect is
+not followed, update ``.squadrc`` to the canonical slug.
 """
 from __future__ import annotations
 
@@ -127,12 +133,17 @@ def expand_selector(raw: str) -> list[int]:
 
 def fetch_task(
     base_url: str,
+    org: str,
     project: str,
     task_id: int,
     auth_token: str = "",
     ssl_context: ssl.SSLContext | None = None,
 ) -> dict:
-    url = f"{base_url}/api/task/{task_id}?project={urllib.parse.quote(project)}"
+    # Org-scoped board surface: org in the path, project stays in the query.
+    url = (
+        f"{base_url}/api/orgs/{urllib.parse.quote(org)}/task/{task_id}"
+        f"?project={urllib.parse.quote(project)}"
+    )
     auth_state = "present" if auth_token else "missing"
     request = urllib.request.Request(url)
     if auth_token:
@@ -380,13 +391,23 @@ def main() -> int:
         or ""
     )
 
+    # Every board call is org-scoped (/api/orgs/<org>/...). SQUAD_ORG is required;
+    # the calling skill resolves .squadrc and exports it before launching this script.
+    org = os.environ.get("SQUAD_ORG") or ""
+    if not org:
+        raise SystemExit(
+            "SQUAD_ORG is not set. Every board call is org-scoped (/api/orgs/<org>/...).\n"
+            "Set it from the mint dialog's `SQUAD_ORG=<slug>` line — add `SQUAD_ORG=<slug>` to "
+            ".squadrc or export SQUAD_ORG=<slug>. Resolution order: env > .squadrc."
+        )
+
     task_ids = expand_selector(args.tasks)
     if not task_ids:
         raise SystemExit("no task ids resolved")
 
     input_order = {task_id: index for index, task_id in enumerate(task_ids)}
     raw_tasks = [
-        fetch_task(base_url, args.project, task_id, auth_token, ssl_context)
+        fetch_task(base_url, org, args.project, task_id, auth_token, ssl_context)
         for task_id in task_ids
     ]
     inferred = [infer_task(task) for task in raw_tasks]

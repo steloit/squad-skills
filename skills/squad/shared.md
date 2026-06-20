@@ -17,6 +17,12 @@ PROJECT=""
 # 2. Auth token — env > per-org line > bare default (all from ~/.squad/auth)
 SQUAD_ORG="${SQUAD_ORG:-}"
 [ -z "$SQUAD_ORG" ] && [ -f .squadrc ] && SQUAD_ORG=$(grep '^SQUAD_ORG=' .squadrc | cut -d= -f2-)
+if [ -z "$SQUAD_ORG" ]; then
+  echo "ERROR: SQUAD_ORG is not set. Every board call is org-scoped (/api/orgs/<org>/...)." >&2
+  echo "Set it from the mint dialog's \`SQUAD_ORG=<slug>\` line — add \`SQUAD_ORG=<slug>\` to .squadrc" >&2
+  echo "(committed) or export SQUAD_ORG=<slug> for this shell. Resolution order: env > .squadrc." >&2
+  exit 1
+fi
 AUTH_TOKEN="${SQUAD_AUTH_TOKEN:-}"; AUTH_SOURCE=$([ -n "$AUTH_TOKEN" ] && echo env || echo none)
 if [ -z "$AUTH_TOKEN" ] && [ -f "$HOME/.squad/auth" ]; then
   if [ -n "$SQUAD_ORG" ]; then
@@ -44,7 +50,7 @@ fi
 
 If `.squadrc` is absent, `PROJECT` falls back to the directory name — prompt the user to run `/squad-init` to register it explicitly.
 
-**Resolution:** token = `SQUAD_AUTH_TOKEN` env > `SQUAD_AUTH_TOKEN_<SQUAD_ORG>` (`~/.squad/auth`) > bare `SQUAD_AUTH_TOKEN=` (`~/.squad/auth`); `SQUAD_ORG` = env > `.squadrc`; URL = `SQUAD_BASE_URL` env > `~/.squad/config` > deployed default; project = `.squadrc` (`SQUAD_PROJECT=`) > directory name.
+**Resolution:** token = `SQUAD_AUTH_TOKEN` env > `SQUAD_AUTH_TOKEN_<SQUAD_ORG>` (`~/.squad/auth`) > bare `SQUAD_AUTH_TOKEN=` (`~/.squad/auth`); `SQUAD_ORG` = env > `.squadrc` (**required** — every board call is org-scoped `/api/orgs/<org>/...`; unset is a fail-fast pre-flight error pointing to the mint dialog's `SQUAD_ORG=<slug>` line / `.squadrc`); URL = `SQUAD_BASE_URL` env > `~/.squad/config` > deployed default; project = `.squadrc` (`SQUAD_PROJECT=`) > directory name.
 
 ### Multi-org store format
 
@@ -60,7 +66,7 @@ SQUAD_AUTH_TOKEN=<optional bare default key>
 
 ### Auth errors — 401 vs 403
 
-The token resolves straight into the `Authorization` header; **never** `echo`/`cat`/Read it or `~/.squad/auth`, and **never** use `curl -v`. Two distinct, scope-aware cases (plain text the agent relays — non-interactive):
+The token resolves straight into the `Authorization` header; **never** `echo`/`cat`/Read it or `~/.squad/auth`, and **never** use `curl -v`. Note: a missing `SQUAD_ORG` is a *pre-flight* failure — it stops before any request is even sent (no 401/403), with the actionable error above pointing to the mint dialog's `SQUAD_ORG=<slug>` line / `.squadrc`. Two distinct, scope-aware cases (plain text the agent relays — non-interactive):
 
 - **401 (no / invalid / expired token).** Board returned `401` — no valid token for `$SQUAD_ORG`/this board. The human mints or refreshes an org-scoped key in the board UI (Settings → API Keys at `$BASE_URL/api-keys`) and runs the store command it prints — per-org line `SQUAD_AUTH_TOKEN_<org>=…` (multi-org) or the bare `SQUAD_AUTH_TOKEN=…` default (single-org), mode 600. The token is **never pasted to the agent**.
 - **403 FORBIDDEN (valid token, missing scope).** Board returned `403 FORBIDDEN` — the API key is valid but **lacks the required scope** for this action. The human mints a key **with the needed scopes** at `$BASE_URL/api-keys`. Do not retry until a wider-scoped key is stored.
@@ -72,7 +78,7 @@ Quick debug check before a failing request (value-free — never prints the toke
 ```bash
 echo "SQUAD_PROJECT=$PROJECT"
 echo "SQUAD_BASE_URL=$BASE_URL"
-echo "SQUAD_ORG=${SQUAD_ORG:-unset}"
+echo "SQUAD_ORG=${SQUAD_ORG:-unset (REQUIRED — fail-fast; add SQUAD_ORG=<slug> to .squadrc)}"
 echo "SQUAD_AUTH_TOKEN=$([ -n "$AUTH_TOKEN" ] && echo configured || echo empty)"
 echo "SQUAD_AUTH_SOURCE=$AUTH_SOURCE"   # env | org:<label> | default | none
 ```
@@ -145,7 +151,7 @@ This protocol belongs to the orchestrator (`squad-run`). **Only the orchestrator
 **Step 1 — Check current state**
 
 ```bash
-TASK=$(curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=status,level")
+TASK=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT&fields=status,level")
 STATUS=$(echo "$TASK" | jq -r '.status')
 LEVEL=$(echo "$TASK" | jq -r '.level')
 ```
@@ -167,7 +173,7 @@ LEVEL=$(echo "$TASK" | jq -r '.level')
 **Step 3 — Execute the move**
 
 ```bash
-RESPONSE=$(curl -s -w "\n%{http_code}" "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
+RESPONSE=$(curl -sL -w "\n%{http_code}" "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d "{\"status\": \"$NEXT_STATUS\"}")
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
@@ -181,7 +187,7 @@ if [ "$HTTP_CODE" = "400" ]; then
   # Read a valid destination from the response's allowed[] array and retry
   ALLOWED=$(echo "$BODY" | jq -r '.allowed[0]')
   if [ -n "$ALLOWED" ] && [ "$ALLOWED" != "null" ]; then
-    curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
+    curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT" \
       -H 'Content-Type: application/json' \
       -d "{\"status\": \"$ALLOWED\"}"
   else
@@ -201,24 +207,24 @@ All DB operations go through the deployed Squad board HTTP API (`$BASE_URL`).
 
 ```bash
 # Board — full (web UI, task detail views)
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT"
+curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=$PROJECT"
 
 # Board — summary (list/stats/context — excludes large TEXT fields)
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=$PROJECT&summary=true"
+curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=$PROJECT&summary=true"
 
 # Read task — full
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT"
+curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT"
 
 # Read task — agent-specific fields only (always includes id, project, status)
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=title,description,plan"
+curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT&fields=title,description,plan"
 
 # Update task fields / status
-curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
+curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"plan": "...", "status": "plan_review"}'
 
 # Create task
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
+curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task" \
   -H 'Content-Type: application/json' \
   -d "{\"title\": \"...\", \"project\": \"$PROJECT\", \"priority\": \"medium\", \"level\": 3, \"description\": \"...\"}"
 
@@ -229,64 +235,64 @@ curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
 # separately via the generic PATCH above.
 
 # Plan review result (record-only)
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/plan-review?project=$PROJECT" \
+curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/plan-review?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"reviewer": "Critic", "model": "<MODEL_CRITIC>", "status": "approved", "comment": "..."}'
 # → {"success":true,"comment":{...},"version":<int>} — verdict recorded; status unchanged.
 
 # Impl review result (record-only)
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/review?project=$PROJECT" \
+curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/review?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"reviewer": "Inspector", "model": "<MODEL_INSPECTOR>", "status": "approved", "comment": "..."}'
 # → {"success":true,"comment":{...},"version":<int>} — verdict recorded; status unchanged.
 
 # Test result (record-only)
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/test-result?project=$PROJECT" \
+curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/test-result?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"tester": "test-runner", "status": "pass", "lint": "...", "build": "...", "tests": "...", "comment": "..."}'
 # → {"success":true,"result":{...},"version":<int>} — verdict recorded; status unchanged.
 
 # Append an activity event (machine event stream — see "Activity vs Comments" below)
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/activity?project=$PROJECT" \
+curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/activity?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"actor": "Orchestrator", "model": "system", "message": "Committed abc1234: <subject> [squad #'$ID']"}'
 # → {"success":true,"event":{...}}
 
 # Read a task's activity events (chronological reader)
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID/activity?project=$PROJECT&limit=50"
+curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/activity?project=$PROJECT&limit=50"
 
 # Add a human comment (human-only channel — skills NEVER write this)
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/comment?project=$PROJECT" \
+curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/comment?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"content": "Looks good to ship."}'
 
 # Reorder
-curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID/reorder?project=$PROJECT" \
+curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/reorder?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"status": "plan", "afterId": null, "beforeId": null}'
 
 # Delete
-curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/task/$ID?project=$PROJECT"
+curl -sL "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT"
 
 # Reopen a completed task (done → todo). Optional reason is recorded as an activity event.
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/reopen?project=$PROJECT" \
+curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/reopen?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"reason": "regression found in prod"}'
 # → {"success":true,"status":"todo","version":<int>}
 
 # Upload an image attachment (base64 over JSON; stored in R2, served from a public URL)
 DATA=$(base64 < "$IMG_PATH" | tr -d '\n')
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$ID/attachment?project=$PROJECT" \
+curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/attachment?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d "$(jq -n --arg filename "$(basename "$IMG_PATH")" --arg data "$DATA" '{filename: $filename, data: $data}')"
 # → {"success":true,"attachment":{"filename","storedName","url","size","uploaded_at"}}
 
 # Delete an attachment (storedName from the task's attachments array)
-curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/task/$ID/attachment/$STORED_NAME?project=$PROJECT"
+curl -sL "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/attachment/$STORED_NAME?project=$PROJECT"
 
 # Download a task's attachments to local files (host-agnostic; temp dir, no repo pollution)
 DIR="${TMPDIR:-/tmp}/squad-attachments/$ID"; mkdir -p "$DIR"
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$ID?project=$PROJECT&fields=attachments" \
+curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT&fields=attachments" \
   | jq -r '.attachments[]? | "\(.url)\t\(.filename)"' \
   | while IFS=$'\t' read -r url fn; do curl -s "$url" -o "$DIR/$fn"; done   # files now in $DIR
 ```
@@ -316,7 +322,7 @@ If the supplied version no longer matches the row, the PATCH is rejected with **
 
 ```bash
 # Conditional update: only applies if the row is still at version 7
-curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/task/$ID?project=$PROJECT" \
+curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -H 'If-Match: "7"' \
   -d '{"status": "plan_review"}'
@@ -341,34 +347,34 @@ The orchestrator reads these to get each stage's verdict directly, instead of pa
 
 ```bash
 # List all projects with links
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects"
+curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/projects"
 
 # Get single project with task counts and links
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects/$PROJECT"
+curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT"
 
 # Create/upsert project
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/projects" \
+curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/projects" \
   -H 'Content-Type: application/json' \
   -d '{"id": "my-project", "name": "My Project", "purpose": "...", "stack": "...", "category": "personal"}'
 
 # Update project fields (purpose, stack, brief, status, category, repo_url)
-curl -s "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/projects/$PROJECT" \
+curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT" \
   -H 'Content-Type: application/json' \
   -d '{"brief": "Current state + direction + recent decisions"}'
 
 # Delete project
-curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/projects/$PROJECT"
+curl -sL "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT"
 
 # List project links
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/projects/$PROJECT/links"
+curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT/links"
 
 # Create project link
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/projects/$PROJECT/links" \
+curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT/links" \
   -H 'Content-Type: application/json' \
   -d '{"target_id": "other-project", "relation": "depends_on"}'
 
 # Delete project link
-curl -s "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/projects/$PROJECT/links" \
+curl -sL "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT/links" \
   -H 'Content-Type: application/json' \
   -d '{"target_id": "other-project", "relation": "depends_on"}'
 ```
@@ -467,7 +473,7 @@ The card description is this structured body (Markdown is fine; keep the field l
 # Open friction cards (not done), id+title from the summary.
 # The summary is an object keyed by status (todo/plan/plan_review/impl/impl_review/test/done),
 # each an array of cards; flatten the non-done buckets so `done` cards are excluded by construction.
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/board?project=squad&summary=true" \
+curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=squad&summary=true" \
   | jq -r '[ .todo, .plan, .plan_review, .impl, .impl_review, .test ] | add // []
            | .[]
            | select((.tags // "") | test("friction"))
@@ -498,13 +504,15 @@ BODY=$(jq -n \
       + "\n**suggestion:** " + $suggestion
       + "\n**source_project:** " + $source_project
       + "\n**source_task:** " + $source_task)}')
-curl -s "${AUTH_HEADER[@]}" -X POST "$SQUAD_BASE_URL_FOR_REPORTS/api/task" \
+curl -sL "${AUTH_HEADER[@]}" -X POST "$SQUAD_BASE_URL_FOR_REPORTS/api/orgs/$SQUAD_ORG/task" \
   -H 'Content-Type: application/json' -d "$BODY"
 # → {"success":true,"id":<NNN>} — a todo card tagged `friction, triage` on project squad.
 ```
 
 > Reports always target **project `squad`**, even when you are working on a different project. The board
-> URL is the same `$BASE_URL` you already resolved; only the `project` field changes to `squad`.
+> URL is the same `$BASE_URL` you already resolved and the same org path `/api/orgs/$SQUAD_ORG/...`;
+> only the `project` field changes to `squad`. The reporting org (`$SQUAD_ORG`) must own project `squad`
+> (single-DB reality; a dedicated reports-org override is a noted follow-up, not in scope).
 
 ## Run Audit
 
@@ -631,7 +639,7 @@ PAYLOAD=$(jq -n \
   --arg description "$DESCRIPTION" \
   --argjson level 2 \
   '{title: $title, project: $project, priority: "medium", level: $level, description: $description}')
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task" \
+curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task" \
   -H 'Content-Type: application/json' \
   -d "$PAYLOAD"
 ```
@@ -709,11 +717,11 @@ The server **enforces acyclicity at write time** (in-transaction CTE) and single
 
 ```bash
 # Declare a blocks dependency: #DEP blocks #ID (ID is blocked_by DEP)
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$DEP/relationships?project=$PROJECT" \
+curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$DEP/relationships?project=$PROJECT" \
   -H 'Content-Type: application/json' -d "$(jq -n --argjson to "$ID" '{to:$to, type:"blocks"}')"
 
 # Attach a child to its epic: #CHILD's parent is #EPIC
-curl -s "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/task/$CHILD/relationships?project=$PROJECT" \
+curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$CHILD/relationships?project=$PROJECT" \
   -H 'Content-Type: application/json' -d "$(jq -n --argjson to "$EPIC" '{to:$to, type:"parent"}')"
 ```
 
@@ -725,7 +733,7 @@ Read `blocks` edges via `GET /api/task/:id/relationships` → `.blocked_by` (NOT
 
 **Context injection**: take dep ids from `.blocked_by[].id`, then fetch each dep's context fields:
 ```bash
-curl -s "${AUTH_HEADER[@]}" "$BASE_URL/api/task/$DEP_ID?project=$PROJECT&fields=title,status,decision_log,implementation_notes"
+curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$DEP_ID?project=$PROJECT&fields=title,status,decision_log,implementation_notes"
 ```
 All fields are fetched once and cached. Per-agent filtering happens at context assembly time.
 

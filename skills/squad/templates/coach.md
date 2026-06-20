@@ -125,7 +125,7 @@ print(json.dumps({
 PY
 )
 # Best-effort POST — observability must NOT break the run or block triage.
-RESP=$(curl -s -w "\n%{http_code}" "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/run-audit?project=squad" \
+RESP=$(curl -sL -w "\n%{http_code}" "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/run-audit?project=squad" \
   -H 'Content-Type: application/json' -d "$BODY")
 CODE=$(printf '%s' "$RESP" | tail -1)
 if [ "$CODE" != "200" ]; then
