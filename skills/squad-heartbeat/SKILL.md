@@ -44,7 +44,7 @@ Scan all active projects (or a single project) for tasks that have had no agent 
    fi
    BASE_URL="${SQUAD_BASE_URL:-}"
    [ -z "$BASE_URL" ] && [ -f "$HOME/.squad/config" ] && BASE_URL=$(grep '^SQUAD_BASE_URL=' "$HOME/.squad/config" | cut -d= -f2-)
-   BASE_URL="${BASE_URL:-https://steloit-squad.vercel.app}"
+   BASE_URL="${BASE_URL:-https://squad-api-285415501393.asia-south1.run.app}"
    AUTH_HEADER=(); [ -n "$AUTH_TOKEN" ] && AUTH_HEADER=(-H "Authorization: Bearer $AUTH_TOKEN")
 
    Parse CLI arguments:
@@ -215,7 +215,7 @@ for f in (auth_file, config_file):
 # env wins; else per-org (SQUAD_ORG) line; else bare default already in auth_token.
 if not os.environ.get("SQUAD_AUTH_TOKEN") and per_org_token:
     auth_token = per_org_token
-base_url = base_url or "https://steloit-squad.vercel.app"
+base_url = base_url or "https://squad-api-285415501393.asia-south1.run.app"
 
 # Every board call is org-scoped (/api/orgs/<org>/...). SQUAD_ORG is REQUIRED.
 org = squad_org

@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 
 BASE_URL = (os.environ.get("SQUAD_BASE_URL")
-            or "https://steloit-squad.vercel.app").rstrip("/")
+            or "https://squad-api-285415501393.asia-south1.run.app").rstrip("/")
 
 
 def org() -> str:

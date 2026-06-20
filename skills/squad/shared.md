@@ -41,7 +41,7 @@ fi
 # 3. Board URL — env → ~/.squad/config → deployed default
 BASE_URL="${SQUAD_BASE_URL:-}"
 [ -z "$BASE_URL" ] && [ -f "$HOME/.squad/config" ] && BASE_URL=$(grep '^SQUAD_BASE_URL=' "$HOME/.squad/config" | cut -d= -f2-)
-BASE_URL="${BASE_URL:-https://steloit-squad.vercel.app}"
+BASE_URL="${BASE_URL:-https://squad-api-285415501393.asia-south1.run.app}"
 AUTH_HEADER=()
 if [ -n "$AUTH_TOKEN" ]; then
   AUTH_HEADER=(-H "Authorization: Bearer $AUTH_TOKEN")
@@ -488,7 +488,7 @@ forced to `project=squad`, `priority=low`, with the two tags as a JSON array. Bu
 with jq or Python (see JSON Safety) so newlines/quotes in `evidence` can't break the JSON:
 
 ```bash
-SQUAD_BASE_URL_FOR_REPORTS="${SQUAD_BASE_URL:-https://steloit-squad.vercel.app}"
+SQUAD_BASE_URL_FOR_REPORTS="${SQUAD_BASE_URL:-https://squad-api-285415501393.asia-south1.run.app}"
 BODY=$(jq -n \
   --arg area "board-api" \
   --arg severity "med" \
@@ -651,7 +651,7 @@ Or use Python `json.dumps()` to serialize the body safely.
 > **CRITICAL: If the API call fails, NEVER fall back to SQLite or any direct DB access.**
 > The squad DB is PostgreSQL — there is no local SQLite file. Fix the API call and retry.
 
-- **Board unreachable**: Check `BASE_URL`, network reachability to `https://steloit-squad.vercel.app`, and whether `AUTH_TOKEN` is configured
+- **Board unreachable**: Check `BASE_URL`, network reachability to `https://squad-api-285415501393.asia-south1.run.app`, and whether `AUTH_TOKEN` is configured
 - **API error**: Debug the request (check JSON validity, `PROJECT`, `BASE_URL`, and whether `AUTH_TOKEN` is configured) — do NOT bypass the API
 - **Agent failure**: 1 retry on first failure; 2nd failure → keep status, record via `POST /activity` (actor=`Orchestrator`), notify user
 - **Plan review loop**: `plan_review_count > 3` → circuit breaker, ask user

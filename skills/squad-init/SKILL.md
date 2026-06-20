@@ -10,8 +10,8 @@ No per-project DB file is created — the central PostgreSQL server handles stor
 ## Usage
 
 ```
-/squad-init                                      — project name = basename of current directory, board = https://steloit-squad.vercel.app
-/squad-init my-project-name                      — explicit project name, board = https://steloit-squad.vercel.app
+/squad-init                                      — project name = basename of current directory, board = https://squad-api-285415501393.asia-south1.run.app
+/squad-init my-project-name                      — explicit project name, board = https://squad-api-285415501393.asia-south1.run.app
 /squad-init my-project-name https://board.example.com
                                                  — explicit project name + custom board URL
 /squad-init https://board.example.com           — current directory name + custom board URL
@@ -39,7 +39,7 @@ if printf '%s' "$ARG1" | grep -Eq '^https?://'; then
 else
   PROJECT=$(printf '%s' "$ARG1" | sed 's/^-*//')
   [ -z "$PROJECT" ] && PROJECT=$(basename "$(pwd)")
-  BASE_URL="${ARG2:-https://steloit-squad.vercel.app}"
+  BASE_URL="${ARG2:-https://squad-api-285415501393.asia-south1.run.app}"
 fi
 ```
 
@@ -97,7 +97,7 @@ if [ -z "$AUTH_TOKEN" ]; then
 fi
 
 # Persist a custom (non-default) board URL only — to ~/.squad/config
-if [ -n "$BASE_URL" ] && [ "$BASE_URL" != "https://steloit-squad.vercel.app" ]; then
+if [ -n "$BASE_URL" ] && [ "$BASE_URL" != "https://squad-api-285415501393.asia-south1.run.app" ]; then
   mkdir -p "$HOME/.squad"
   grep -q '^SQUAD_BASE_URL=' "$HOME/.squad/config" 2>/dev/null || printf 'SQUAD_BASE_URL=%s\n' "$BASE_URL" >> "$HOME/.squad/config"
 fi
@@ -167,7 +167,7 @@ Options:
 2. Keep as-is — leave .squadrc unchanged
 ```
 
-- `/squad-init` defaults to `https://steloit-squad.vercel.app` unless you provide another deployment URL.
+- `/squad-init` defaults to `https://squad-api-285415501393.asia-south1.run.app` unless you provide another deployment URL.
 - Tokens are **org-scoped, scoped API keys** stored globally in `~/.squad/auth` (mode 600) — per-org `SQUAD_AUTH_TOKEN_<label>=` lines plus an optional bare `SQUAD_AUTH_TOKEN=` default — or the `SQUAD_AUTH_TOKEN` env var; NEVER in `.squadrc`. This keeps secrets out of git and lets one machine serve multiple orgs.
 - `.squadrc` carries the project name + the **required** non-secret `SQUAD_ORG=<slug>` selector (every board call is org-scoped `/api/orgs/<org>/...`). squad-init ALWAYS writes `SQUAD_ORG` (resolved from an explicit init arg or the mint dialog's `SQUAD_ORG=<slug>` line); it is **not** board-derived (the project API exposes no org slug; auto-derive + verify is a noted follow-up). With no slug, squad-init stops with an actionable error rather than registering without one.
 - squad-init **never stores or prompts for a token**: minting + the store command live only at the web mint UI — Settings → API Keys (`$BASE_URL/api-keys`). On no token it prints a one-line pointer to that UI.

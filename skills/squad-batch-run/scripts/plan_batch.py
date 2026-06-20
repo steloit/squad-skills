@@ -381,7 +381,7 @@ def main() -> int:
         args.base_url
         or os.environ.get("SQUAD_BASE_URL")
         or squad_auth.get("SQUAD_BASE_URL")
-        or "https://steloit-squad.vercel.app"
+        or "https://squad-api-285415501393.asia-south1.run.app"
     )
     auth_token = (
         args.auth_token
