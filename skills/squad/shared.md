@@ -699,7 +699,7 @@ Tasks relate through **two typed, structured edges** stored on the board (not en
 ### Endpoints (deployed)
 
 ```
-POST   /api/task/:id/relationships  {to, type}   type ∈ {blocks, parent}
+POST   /api/task/:id/relationships  {to, type}   to = <KEY>-<seq> id string · type ∈ {blocks, parent}
        → {success, relationship}
        400 self-edge / second parent / bad input · 404 task · 409 cycle (blocks DAG or parent ancestor)
 GET    /api/task/:id/relationships
@@ -716,13 +716,14 @@ The server **enforces acyclicity at write time** (in-transaction CTE) and single
 ### Declaring edges
 
 ```bash
-# Declare a blocks dependency: #DEP blocks #ID (ID is blocked_by DEP)
+# Declare a blocks dependency: DEP blocks ID (ID is blocked_by DEP)
+# `to` is an opaque <KEY>-<seq> display id string (e.g. SQD-12) — use --arg, never --argjson
 curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$DEP/relationships?project=$PROJECT" \
-  -H 'Content-Type: application/json' -d "$(jq -n --argjson to "$ID" '{to:$to, type:"blocks"}')"
+  -H 'Content-Type: application/json' -d "$(jq -n --arg to "$ID" '{to:$to, type:"blocks"}')"
 
-# Attach a child to its epic: #CHILD's parent is #EPIC
+# Attach a child to its epic: CHILD's parent is EPIC
 curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$CHILD/relationships?project=$PROJECT" \
-  -H 'Content-Type: application/json' -d "$(jq -n --argjson to "$EPIC" '{to:$to, type:"parent"}')"
+  -H 'Content-Type: application/json' -d "$(jq -n --arg to "$EPIC" '{to:$to, type:"parent"}')"
 ```
 
 ### Resolving dependencies (squad-run ⓪ʙ)

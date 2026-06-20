@@ -105,7 +105,8 @@ if [ "$ANY_MATERIAL" = "1" ] || [ ${#FILED_IDS[@]} -gt 0 ]; then OVERALL=frictio
 #                [{area,present(bool),evidence,cleared_bar(bool),severity?}, … all 6 rows …]
 # SIGNALS_JSON = the friction signals as a JSON array or object (e.g. ["signal one", "signal two"] or
 #                {"summary":"…"}) — NEVER a bare JSON string scalar (the endpoint 400s on a string).
-# FILED_JSON   = JSON array of the collected card ids: $(printf '%s\n' "${FILED_IDS[@]}" | jq -R . | jq -s 'map(tonumber)')  (or [] if none)
+# FILED_JSON   = JSON array of the collected card ids (opaque <KEY>-<seq> strings, NOT numbers):
+#                $(printf '%s\n' "${FILED_IDS[@]}" | jq -R . | jq -s .)  (or [] if none)
 # Pass rubric/signals/filed via env so embedded quotes/newlines can't break the shell or the JSON.
 BODY=$(RUBRIC_JSON="$RUBRIC_JSON" SIGNALS_JSON="$SIGNALS_JSON" FILED_JSON="$FILED_JSON" \
   python3 - "$SOURCE_PROJECT" "$SOURCE_TASK" "$SKILL" "$LEVEL" "$MODEL_PROVIDER" "$OVERALL" <<'PY'
