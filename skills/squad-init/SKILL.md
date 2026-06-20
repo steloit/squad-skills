@@ -93,7 +93,7 @@ fi
 AUTH_HEADER=(); [ -n "$AUTH_TOKEN" ] && AUTH_HEADER=(-H "Authorization: Bearer $AUTH_TOKEN")
 
 if [ -z "$AUTH_TOKEN" ]; then
-  echo "No Squad key for org '${SQUAD_ORG:-this board}' — mint one at $BASE_URL/api-keys and run the store command it shows."
+  echo "No Squad key for org '${SQUAD_ORG:-this board}' — mint one in your Squad board's web UI (Settings → API Keys) and run the store command it shows."
 fi
 
 # Persist a custom (non-default) board URL only — to ~/.squad/config
@@ -170,5 +170,5 @@ Options:
 - `/squad-init` defaults to `https://squad-api-285415501393.asia-south1.run.app` unless you provide another deployment URL.
 - Tokens are **org-scoped, scoped API keys** stored globally in `~/.squad/auth` (mode 600) — per-org `SQUAD_AUTH_TOKEN_<label>=` lines plus an optional bare `SQUAD_AUTH_TOKEN=` default — or the `SQUAD_AUTH_TOKEN` env var; NEVER in `.squadrc`. This keeps secrets out of git and lets one machine serve multiple orgs.
 - `.squadrc` carries the project name + the **required** non-secret `SQUAD_ORG=<slug>` selector (every board call is org-scoped `/api/orgs/<org>/...`). squad-init ALWAYS writes `SQUAD_ORG` (resolved from an explicit init arg or the mint dialog's `SQUAD_ORG=<slug>` line); it is **not** board-derived (the project API exposes no org slug; auto-derive + verify is a noted follow-up). With no slug, squad-init stops with an actionable error rather than registering without one.
-- squad-init **never stores or prompts for a token**: minting + the store command live only at the web mint UI — Settings → API Keys (`$BASE_URL/api-keys`). On no token it prints a one-line pointer to that UI.
-- For remote private boards, mint an org-scoped key at `$BASE_URL/api-keys` and run the store command it prints (writes `~/.squad/auth`, mode 600), or set `SQUAD_AUTH_TOKEN` in the shell before running `/squad-init`.
+- squad-init **never stores or prompts for a token**: minting + the store command live only in the board's web UI — **Settings → API Keys**. On no token it prints a one-line pointer to that UI (the breadcrumb, NOT a URL — the skill only knows the API `BASE_URL`, not the web host).
+- For remote private boards, mint an org-scoped key in the web UI (**Settings → API Keys**) and run the store command it prints (writes `~/.squad/auth`, mode 600), or set `SQUAD_AUTH_TOKEN` in the shell before running `/squad-init`.
