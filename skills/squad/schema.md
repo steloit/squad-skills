@@ -35,9 +35,10 @@ A **projected read** (`?fields=a,b,c`) returns only the requested fields (plus `
 `project`, `status`); a **full read** (no `?fields=`) additionally embeds `activity`,
 `comments`, and `relationships`.
 
-> **Attachments** are not part of the task JSON — they live behind their own endpoints
-> (`POST /task/:id/attachment`, `DELETE /task/:id/attachment/:stored_name`, download
-> `GET /uploads/:stored_name`). A task read does NOT embed an `attachments` array.
+> **Attachments** are not part of the task JSON — they live behind their own endpoints:
+> list `GET /task/:id/attachment` → array of `{filename, stored_name, url, size, uploaded_at}`;
+> `POST /task/:id/attachment`; `DELETE /task/:id/attachment/:stored_name`; download
+> `GET /uploads/:stored_name`. A task read does NOT embed an `attachments` array.
 
 ## Agent Nicknames
 

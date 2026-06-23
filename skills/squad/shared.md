@@ -292,12 +292,12 @@ curl -sL "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/a
 
 # Download a task's attachments to local files (host-agnostic; temp dir, no repo pollution)
 DIR="${TMPDIR:-/tmp}/squad-attachments/$ID"; mkdir -p "$DIR"
-curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT&fields=attachments" \
-  | jq -r '.attachments[]? | "\(.url)\t\(.filename)"' \
+curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/attachment?project=$PROJECT" \
+  | jq -r '.[] | "\(.url)\t\(.filename)"' \
   | while IFS=$'\t' read -r url fn; do curl -s "$url" -o "$DIR/$fn"; done   # files now in $DIR
 ```
 
-The `attachments` field on a task read is a JSON array of `{filename, stored_name, url, size, uploaded_at}` — the `url` is a public R2 link, and the web board renders it for humans. Accepted: png, jpg/jpeg, gif, webp, svg. Deleting a task removes its R2 objects.
+`GET /task/:id/attachment` returns a JSON array of `{filename, stored_name, url, size, uploaded_at}` — the `url` is a public R2 link, and the web board renders it for humans. Accepted: png, jpg/jpeg, gif, webp, svg. Deleting a task removes its R2 objects.
 
 **Viewing an attachment as an agent is host-dependent**:
 - **Claude Code**: download it (above), then `Read` the local file — it renders as vision. ✅
