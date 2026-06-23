@@ -668,10 +668,10 @@ The `model` value should be the resolved provider model from `models.json` (not 
 
 | Nickname | Reads | Writes (signed) |
 |----------|-------|-----------------|
-| `Refiner` | `title`, `description` | `description` (rewrite) |
-| `Planner` | `description` | `plan`, `decision_log`, `done_when` |
-| `Critic` | `description`, `plan`, `decision_log`, `done_when` | `plan_review_comments` (records verdict) |
-| `Builder` | `description`, `plan`, `done_when`, `plan_review_comments` | `implementation_notes` |
+| `Refiner` | `title`, `description` | `spec` (via `/task/:id/spec`; `description` untouched) |
+| `Planner` | `description`, `spec` | `plan`, `decision_log`, `done_when` |
+| `Critic` | `description`, `spec`, `plan`, `decision_log`, `done_when` | `plan_review_comments` (records verdict) |
+| `Builder` | `description`, `spec`, `plan`, `done_when`, `plan_review_comments` | `implementation_notes` |
 | `Shield` | `description`, `implementation_notes` | `implementation_notes` (append) |
 | `Inspector` | `description`, `plan`, `done_when`, `implementation_notes` | `review_comments` (records verdict) |
 | `Ranger` | `title`, `implementation_notes` | `test_results` (records verdict) |

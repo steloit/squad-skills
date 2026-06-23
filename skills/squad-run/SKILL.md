@@ -244,9 +244,9 @@ Template files are at `../squad/templates/`.
 
 | Nickname | Required Fields |
 |----------|----------------|
-| `Planner` | `title,description,plan_review_comments` |
-| `Critic` | `title,description,plan,decision_log,done_when` |
-| `Builder` | `title,description,plan,done_when,plan_review_comments,review_comments` |
+| `Planner` | `title,description,spec,plan_review_comments` |
+| `Critic` | `title,description,spec,plan,decision_log,done_when` |
+| `Builder` | `title,description,spec,plan,done_when,plan_review_comments,review_comments` |
 | `Shield` | `title,description,implementation_notes` |
 | `Inspector` | `title,description,plan,done_when,implementation_notes` |
 | `Ranger` | `title,implementation_notes` |
@@ -353,11 +353,11 @@ Template files are at `../squad/templates/`.
 
 ① Read task fields (use per-agent fields to minimize token usage)
    # Planner
-   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,plan_review_comments
+   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,spec,plan_review_comments
    # Critic
-   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,plan,decision_log,done_when
+   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,spec,plan,decision_log,done_when
    # Builder
-   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,plan,done_when,plan_review_comments,review_comments
+   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,spec,plan,done_when,plan_review_comments,review_comments
    # Shield
    TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,implementation_notes
    # Inspector
@@ -388,7 +388,8 @@ Template files are at `../squad/templates/`.
      <PROJECT>                → actual project name
      <project_brief>          → project brief from step ⓪ (empty string if not set)
      <title>                  → task title
-     <description>            → task description (requirements)
+     <description>            → task description (the human's original request)
+     <spec>                   → rendered Refiner spec (Planner/Critic/Builder only): "## Refined Spec\n\n…" or "" if no spec (see SPEC_MD below)
      <plan>                   → plan field value
      <decision_log>           → decision_log field value
      <done_when>              → done_when field value
@@ -411,6 +412,30 @@ Template files are at `../squad/templates/`.
      <EFFORT_INSPECTOR>       → $EFFORT_INSPECTOR
      <EFFORT_RANGER>          → $EFFORT_RANGER
 
+   **Spec render (Planner/Critic/Builder only)** — render the fetched `spec` JSON → markdown for
+   `<spec>`. Empty string when the task has no spec (legacy/un-refined), so `<spec>` collapses
+   cleanly and `## Original Request` (`<description>`) carries the requirements. (Inline python,
+   mirrors the `CRITIC_FEEDBACK` pattern — no new script.)
+   ```bash
+   SPEC_MD=$(echo "$TASK" | python3 -c "
+   import sys, json
+   d = json.load(sys.stdin); spec = d.get('spec')
+   if not spec: print('', end=''); sys.exit(0)
+   out = ['## Refined Spec', '']
+   if spec.get('goal'): out += ['**Goal:** ' + spec['goal'], '']
+   reqs = spec.get('requirements') or []
+   if reqs: out += ['**Requirements:**'] + ['- ' + r for r in reqs] + ['']
+   qa = spec.get('qa') or []
+   if qa:
+       out += ['**Clarifications (Q&A):**']
+       for it in qa:
+           out += ['- Q: ' + (it.get('question') or '')]
+           out += ['  A: ' + (it['answer'] if it.get('answer') is not None else '(unanswered)')]
+   print('\n'.join(out).rstrip())
+   ")
+   # Shield/Inspector/Ranger don't consume the spec → pass SPEC_MD="" for them.
+   ```
+
    Recommended helper script:
    ```bash
    PROMPT=$(python3 ../squad/scripts/render_agent_prompt.py \
@@ -422,6 +447,7 @@ Template files are at `../squad/templates/`.
      --set project_brief="$PROJECT_BRIEF" \
      --set title="$TITLE" \
      --set description="$DESCRIPTION" \
+     --set spec="$SPEC_MD" \
      --set plan="$PLAN" \
      --set decision_log="$DECISION_LOG" \
      --set done_when="$DONE_WHEN" \

@@ -70,48 +70,69 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
    - Don't ask about things that are already clear
    - Use concrete options when possible, not open-ended questions
 
-⑤ Synthesize refined description
-   Rewrite the description using this template.
-   If PRIOR_CONTEXT exists, ground scope/requirements/constraints in confirmed interfaces
-   and file paths from the prior implementation — not assumptions.
+⑤ Synthesize the refined SPEC
+   Build a structured spec OBJECT — NOT a description rewrite. The human's original
+   request stays in `description` and is NEVER overwritten; the refined spec is a
+   separate first-class artifact (the `tasks.spec` shape). If PRIOR_CONTEXT exists,
+   ground requirements in confirmed interfaces/file paths — not assumptions.
 
-   ## Goal
-   [1–2 sentences: what this task achieves and why]
+   The spec has three authored fields (the server assigns `version`):
 
-   ## Prior Implementation Context  ← include only if PRIOR_CONTEXT exists
-   [Confirmed interfaces, schemas, components, or file paths from the prior card
-    that this task directly builds on. e.g. "POST /api/items → {id, name} per #201"]
+   - goal:         1–2 sentences — what this task achieves and why.
+   - requirements: string[] — the COMPLETE, testable set, each item a discrete
+                   string. Describe WHAT, not HOW (no implementation hints/pseudo-code).
+                   Use soft prefixes so intent is explicit (author convention, not
+                   enforced by the API):
+                     "REQ: …"                              core requirement
+                     "AC: WHEN … THE SYSTEM SHALL …"       acceptance criterion (EARS)
+                     "SCOPE(IN): …" / "SCOPE(OUT): …"      the in / "Not Included" boundary
+                     "CONSTRAINT: …"                       technical constraint
+                     "EDGE: …"                             edge case
+   - qa:           {question, answer}[] — one entry per interview question asked in ④
+                   (answer = the user's chosen value; null if a question went unanswered).
 
-   ## Scope
-   - IN: [bulleted list of what's included]
-   - OUT: [bulleted list of what's explicitly excluded]
+   Example:
+   ```json
+   {
+     "goal": "Let admins invite members so teams can self-serve onboarding.",
+     "requirements": [
+       "REQ: An admin can send an invite by email from the members page.",
+       "AC: WHEN an admin submits a valid email THE SYSTEM SHALL create an invite and email a signed link.",
+       "SCOPE(OUT): bulk CSV invites are not included.",
+       "EDGE: re-inviting an existing member returns 'already a member' without creating a duplicate."
+     ],
+     "qa": [{ "question": "Email or OAuth invites?", "answer": "Email only for v1" }]
+   }
+   ```
 
-   ## Requirements
-   [Numbered list of concrete, testable requirements]
-
-   ## Acceptance Criteria
-   - [ ] [Checklist items — each verifiable]
-
-   ## Constraints
-   [Technical constraints, if any identified]
-
-   ## Edge Cases
-   [Edge cases to handle, if any identified]
-
-   Omit sections that have no content (e.g., skip Constraints if none).
-
-⑥ Present the refined description to the user
-   Show the full refined description in a code block.
+⑥ Present the refined SPEC to the user
+   Show the spec in a readable form (goal, the requirements list, the Q&A).
    Ask user to confirm with AskUserQuestion:
-   - "Approve & save" (update the task)
+   - "Approve & save" (write the spec)
    - "Edit more" (go back to interview)
    - "Cancel" (discard changes)
 
 ⑦ Save
    If approved:
-   - PATCH description via API
-   - Also update title if it was clarified during interview
-   - Update level/priority/tags if discussed
+   - **Write the SPEC via the dedicated endpoint** — the human `description` is NEVER touched.
+     The CAS token is the TASK `version` (same token every write uses); read it immediately
+     before writing. The endpoint writes `spec`, bumps `spec_version`, and emits the
+     `kind='spec'` provenance row. `spec.version` is server-assigned, so omit it from the body.
+     ```bash
+     # Build the spec object from ⑤ (no `version` — the server stamps it).
+     SPEC_JSON=$(jq -n --arg goal "$GOAL" \
+       --argjson reqs "$REQUIREMENTS_JSON_ARRAY" --argjson qa "$QA_JSON_ARRAY" \
+       '{goal:$goal, requirements:$reqs, qa:$qa}')
+     VER=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT&fields=version" | jq -r '.version')
+     RESP=$(curl -sL -w "\n%{http_code}" "${AUTH_HEADER[@]}" -X POST \
+       "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/spec?project=$PROJECT" \
+       -H 'Content-Type: application/json' \
+       -d "$(jq -n --argjson spec "$SPEC_JSON" --argjson ev "$VER" --arg model "$MODEL_REFINER" \
+             '{spec:$spec, expected_version:$ev, actor:"Refiner", model:$model}')")
+     # 200 → { success, version, spec_version }. On 412 (concurrent edit): re-read `version`
+     # and retry ONCE; if it still 412s, surface to the user (don't loop). 400 = malformed spec.
+     ```
+   - Update title/level/priority/tags ONLY if the interview changed them (PATCH — never `description`).
    - **Declare dependencies structurally**: if the interview surfaced that this task is blocked by
      another (#DEP), declare it via a `blocks` edge — NOT a `Depends on:` text line:
      ```bash
@@ -121,7 +142,8 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
        -H 'Content-Type: application/json' \
        -d "$(jq -n --arg to "$ID" '{to:$to, type:"blocks"}')"
      ```
-   - Append an activity event (POST /api/task/$ID/activity):
+   - Append the short Refiner activity note (the `kind='spec'` row above carries the snapshot;
+     this records the round count). POST /api/task/$ID/activity:
      { "actor": "Refiner", "model": "<MODEL_REFINER>", "message": "Requirements refined. N questions across M rounds." }
 ```
 
@@ -139,8 +161,8 @@ After step ⑦ Save completes (an approved refine), dispatch the **Coach** per `
 - `skill_name` = `squad-refine`
 - `source_task` = `$ID`
 - `run_summary` = `"squad-refine refined the requirements for task $ID."`
-- `trajectory` = the interview Q/A rounds + the refined description
-- `friction_signals` = any board-API friction during the PATCH; `none` if clean
+- `trajectory` = the interview Q/A rounds + the refined spec
+- `friction_signals` = any board-API friction during the spec write (`POST /task/:id/spec`); `none` if clean
 
 ### Interview Tips
 
