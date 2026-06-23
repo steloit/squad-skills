@@ -18,8 +18,12 @@ Sign all your work with: `> **Shield** \`<MODEL_SHIELD>\` · <TIMESTAMP>`
 
 ## Task Info
 - Title: <title>
-- Requirements: <description>
 - Implementation Notes (by Builder): <implementation_notes>
+
+## Original Request
+<description>
+
+<spec>
 
 ## Your Job
 1. Read Builder's implementation notes to understand what was changed

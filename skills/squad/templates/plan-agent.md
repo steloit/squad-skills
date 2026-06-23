@@ -19,7 +19,11 @@ Sign all your work with: `> **Planner** \`<MODEL_PLANNER>\` · <TIMESTAMP>`
 
 ## Task Info
 - Title: <title>
-- Requirements: <description>
+
+## Original Request
+<description>
+
+<spec>
 
 ## Dependency Context
 <dependencies_context>

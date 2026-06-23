@@ -131,7 +131,7 @@ For each task N in order:
 A. Refine(N)
    - Skill(skill="squad-refine", args="<ID>")  [Codex: $squad-refine <ID>]
    - squad-refine auto-detects the prior card via the relationships API (`.blocked_by`) or asks one question.
-   - Reads N-1's implementation_notes + actual codebase to ground N's description.
+   - Reads N-1's implementation_notes + actual codebase to ground N's requirements spec.
    - First task in the batch (no prior card): regular user interview.
 
    Card split check (before invoking squad-refine):
@@ -155,7 +155,7 @@ C. Verify(N)
 **Loop exceptions:**
 - Split triggered during Refine → insert sub-cards, continue
 - Circuit breaker or blocker during Implement → stop, report resume point
-- Unexpected design change during Verify → update downstream task descriptions; report to user
+- Unexpected design change during Verify → queue a re-refine for downstream tasks (writes a new spec; never patch their `description`); report to user
 
 ### 6b. Execute — Big Bang mode (`--big-bang`)
 

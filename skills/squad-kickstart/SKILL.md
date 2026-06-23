@@ -185,9 +185,10 @@ for each task N in execution order:
 
   A. Refine(N)
      - Read prior task (N-1) actual implementation from codebase
-     - Elaborate N's description based on confirmed interfaces/schema/components from N-1
-     - Add: Acceptance Criteria, Edge Cases, code reference paths
-     - Call /squad-refine #N or directly PATCH description
+     - Elaborate N's requirements based on confirmed interfaces/schema/components from N-1
+     - Add to the spec: Acceptance Criteria, Edge Cases, code reference paths
+     - Call /squad-refine #N to write the spec (the human `description` is the original
+       request — it stays untouched; NEVER PATCH it)
 
      **Card split rules (auto-applied during Refine)**:
      Split if any of these are true:

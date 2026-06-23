@@ -2,59 +2,42 @@
 
 ## Table: tasks
 
-```sql
-CREATE TABLE IF NOT EXISTS tasks (
-  id SERIAL PRIMARY KEY,
-  project TEXT NOT NULL,
-  title TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'todo',
-  priority TEXT NOT NULL DEFAULT 'medium',
-  description TEXT,
-  plan TEXT,
-  implementation_notes TEXT,
-  tags TEXT,
-  review_comments TEXT,
-  plan_review_comments TEXT,
-  test_results TEXT,
-  current_agent TEXT,
-  plan_review_count INTEGER NOT NULL DEFAULT 0,
-  impl_review_count INTEGER NOT NULL DEFAULT 0,
-  version INTEGER NOT NULL DEFAULT 1,
-  level INTEGER NOT NULL DEFAULT 3,
-  attachments TEXT,
-  decision_log TEXT,
-  done_when TEXT,
-  rank INTEGER NOT NULL DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  started_at TIMESTAMPTZ,
-  planned_at TIMESTAMPTZ,
-  reviewed_at TIMESTAMPTZ,
-  tested_at TIMESTAMPTZ,
-  completed_at TIMESTAMPTZ
-);
-```
+The **task resource as returned by the board REST API** (`GET /api/orgs/:org/task/:id`).
+This documents the JSON the API exposes — the board owns its own storage. Tasks are
+addressed by their **display id** `<KEY>-<seq>` (e.g. `SQD-42`) in every API path.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `project` | TEXT | Project identifier |
-| `status` | TEXT | `todo` / `plan` / `plan_review` / `impl` / `impl_review` / `test` / `done` |
-| `priority` | TEXT | `high` / `medium` / `low` |
-| `description` | TEXT | Requirements in markdown |
-| `plan` | TEXT | Implementation plan in markdown |
-| `implementation_notes` | TEXT | Implementation log in markdown |
-| `tags` | TEXT | JSON array string (e.g., `'["api","ui"]'`) |
-| `review_comments` | TEXT | JSON array of impl review objects |
-| `plan_review_comments` | TEXT | JSON array of plan review objects |
-| `test_results` | TEXT | JSON array of test result objects |
-| `current_agent` | TEXT | Currently active agent name |
-| `plan_review_count` | INTEGER | Plan review iteration count |
-| `impl_review_count` | INTEGER | Impl review iteration count |
-| `version` | INTEGER | Optimistic-concurrency row version; bumped on every write. Returned as the `ETag` and accepted as `If-Match` / `expected_version` on conditional PATCH |
-| `level` | INTEGER | Pipeline level: 1 (Quick), 2 (Standard), 3 (Full) |
-| `attachments` | TEXT | JSON array of attachment objects: `{filename, storedName, url, size, uploaded_at}` |
-| `decision_log` | TEXT | Key architecture decisions by Planner (markdown table) |
-| `done_when` | TEXT | Verifiable completion criteria written by Planner (markdown checklist) |
-| `rank` | INTEGER | Display order within column |
+| Field (JSON) | Type | Description |
+|--------------|------|-------------|
+| `id` | string | Display id `<KEY>-<seq>` (e.g. `SQD-42`) — used in all API paths and as activity `task_id` |
+| `project` | string | Project key/name (matches `.squadrc` `SQUAD_PROJECT`) |
+| `title` | string | Task title |
+| `status` | string | `todo` / `plan` / `plan_review` / `impl` / `impl_review` / `test` / `done` |
+| `priority` | string | `urgent` / `high` / `medium` / `low` |
+| `card_type` | string | `task` (runnable) or `epic` (container) |
+| `description` | string\|null | The human's **original request** — immutable; agents NEVER overwrite it. The refined, testable requirements live in **`spec`**. |
+| `spec` | object\|null | The Refiner's structured spec `{goal, requirements[], qa[], version}` (null until refined). Written ONLY via `POST /task/:id/spec`. |
+| `spec_version` | number | `0` = no spec yet; bumped on each spec write (under the task-`version` CAS) |
+| `plan` | string\|null | Implementation plan in markdown (Planner) |
+| `implementation_notes` | string\|null | Implementation log in markdown (Builder + Shield) |
+| `decision_log` | string\|null | Key architecture decisions by Planner (markdown table) |
+| `done_when` | string\|null | Verifiable completion criteria by Planner (markdown checklist) |
+| `tags` | string[] | structured array (NOT a stringified blob) |
+| `review_comments` / `plan_review_comments` / `test_results` | object[] | structured arrays of verdict objects (see JSON Formats below) |
+| `current_agent` | string\|null | Currently active agent nickname |
+| `version` | number | Optimistic-concurrency token; bumped on every write; sent as `expected_version` on conditional PATCH / spec writes (412 on mismatch) |
+| `level` | number | 1 (Quick) / 2 (Standard) / 3 (Full) |
+| `plan_review_count` / `impl_review_count` | number | Review iteration counts |
+| `pinned` | boolean | Pinned-to-top flag |
+| `rank` | number | Display order within column |
+| `created_at` / `updated_at` / `started_at` / `planned_at` / `reviewed_at` / `tested_at` / `completed_at` | string\|null | ISO 8601 timestamps |
+
+A **projected read** (`?fields=a,b,c`) returns only the requested fields (plus `id`,
+`project`, `status`); a **full read** (no `?fields=`) additionally embeds `activity`,
+`comments`, and `relationships`.
+
+> **Attachments** are not part of the task JSON — they live behind their own endpoints
+> (`POST /task/:id/attachment`, `DELETE /task/:id/attachment/:stored_name`, download
+> `GET /uploads/:stored_name`). A task read does NOT embed an `attachments` array.
 
 ## Agent Nicknames
 
@@ -62,6 +45,7 @@ Each agent has a fixed nickname used in all log records, field headers, and `cur
 
 | Nickname | Role | Model Key | Writes to |
 |----------|------|-------|-----------|
+| `Refiner` | Requirements Refiner | `refiner` | `spec` (via `POST /task/:id/spec`; `description` untouched) |
 | `Planner` | Plan Agent | `planner` | `plan`, `decision_log`, `done_when` |
 | `Critic` | Plan Review Agent | `critic` | `plan_review_comments` |
 | `Builder` | Worker Agent | `builder` | `implementation_notes` |
@@ -116,54 +100,32 @@ This makes every card field self-documenting — you can see at a glance who wro
 
 ## Table: task_activities
 
-The immutable machine **event stream** for a task (replaces the old `agent_log` JSON column). One row per event; rows are never edited or deleted.
+The immutable machine **event stream** for a task — one append-only event per agent step; events are never edited or deleted.
 
-```sql
-CREATE TABLE IF NOT EXISTS task_activities (
-  id SERIAL PRIMARY KEY,
-  project TEXT NOT NULL,
-  task_id INTEGER NOT NULL,
-  actor TEXT NOT NULL,
-  model TEXT NOT NULL,
-  message TEXT NOT NULL,
-  tokens INTEGER,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-```
-
-Event shape (as returned by the API):
+**Event shape as returned by the activity API:**
 
 ```json
-{"id": 42, "project": "demo", "task_id": 1, "actor": "Planner", "model": "<MODEL_PLANNER>", "message": "Plan complete. 4 files to modify.", "tokens": 12000, "created_at": "2026-02-20T10:05:00.000Z"}
+{"id": "<uuid>", "task_id": "SQD-42", "actor": "Planner", "model": "<MODEL_PLANNER>", "message": "Plan complete. 4 files to modify.", "tokens": 12000, "created_at": "2026-02-20T10:05:00.000Z"}
 ```
 
-- `actor` is the squad actor (see actor vocabulary below); `model` is the resolved provider model from `models.json` (or `system` for `Orchestrator`/`Heartbeat`).
-- `tokens` is optional — estimated total tokens (input + output) for the step; omit when unknown (missing counts as 0 in stats).
+- `id` is an opaque string (used as the `?before=<id>` pagination cursor); `task_id` is the **display id** `<KEY>-<seq>` (e.g. `SQD-42`), not a number. There is no `project` field on the event.
+- `actor` is the squad actor (see actor vocabulary below); `model` is the resolved provider model from `models.json` (or `system` for `Orchestrator`/`Heartbeat`) — it may be `null`.
+- `tokens` is optional/`null` — estimated total tokens (input + output) for the step; omit when unknown (missing counts as 0 in stats).
 - `created_at` is server-set — clients do **not** send a timestamp.
+- **Clients send only** `{actor, model?, message, tokens?}` on append. The board classifies each event internally (whether it was written by a human, an agent, or the system, and the kind of event); those classifications are NOT part of the append body or the returned shape — do not send or expect them.
 
 ## Table: task_comments
 
 The mutable **human** comment channel. Skills NEVER write this.
 
-```sql
-CREATE TABLE IF NOT EXISTS task_comments (
-  id SERIAL PRIMARY KEY,
-  project TEXT NOT NULL,
-  task_id INTEGER NOT NULL,
-  author TEXT,
-  content TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-```
-
-Comment shape: `{"id", "project", "task_id", "author", "content", "created_at"}`.
+Comment shape as returned by the API: `{"id": "<uuid>", "task_id": "SQD-42", "author": <string|null>, "content": "...", "created_at": "<iso>"}` (`task_id` is the display id; there is no `project` field).
 
 ## Activity & Comment Endpoints
 
 | Endpoint | Purpose |
 |----------|---------|
-| `POST /api/task/:id/activity?project=` | Append one event `{actor, model, message, tokens?}` → `{success, event}`. Single atomic INSERT, no read-modify-write; `actor`/`model`/`message` must be non-empty strings, `tokens` if present finite, else 400. Bumps task `version`. Immutable. |
-| `GET /api/task/:id/activity?project=` | Chronological reader (`ORDER BY id ASC`), `?limit` (≤500), `?before=<id>`. |
+| `POST /api/task/:id/activity?project=` | Append one event `{actor, message, model?, tokens?}` → `{success, event}`. Single atomic INSERT, no read-modify-write; `actor` + `message` are required non-empty strings, `model` optional non-empty, `tokens` if present finite, else 400. `actor` must be a known actor (see vocabulary). |
+| `GET /api/task/:id/activity?project=` | Reader, **newest-first** (`ORDER BY created_at DESC`), `?limit` (≤500), `?before=<id>` (returns events older than that cursor id). |
 | `GET /api/activity/stats?project=[&task_id=]` | Per-actor aggregate `{success, stats:[{actor, events, tokens}], totals}` via one `GROUP BY`. |
 | `POST /api/task/:id/comment?project=` | Human comment `{content}` (optional `author`). |
 | `DELETE /api/task/:id/comment/:commentId?project=` | Delete a human comment. |
@@ -178,6 +140,8 @@ Comment shape: `{"id", "project", "task_id", "author", "content", "created_at"}`
 | `Refiner` | squad-refine refine summary | resolved LLM |
 | `Orchestrator` | squad-run commit record, squad-batch-run "Verified", squad-kickstart "Impact", move failures | `system` |
 | `Heartbeat` | squad-heartbeat stagnation warnings | `system` |
+
+(The **Coach** is not an activity actor — it writes to the run-audit store + files friction cards, never `/task/:id/activity`.)
 
 ### Appending an event (orchestrator)
 

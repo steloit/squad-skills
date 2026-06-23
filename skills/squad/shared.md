@@ -269,7 +269,7 @@ curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/com
 # Reorder
 curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/reorder?project=$PROJECT" \
   -H 'Content-Type: application/json' \
-  -d '{"status": "plan", "afterId": null, "beforeId": null}'
+  -d '{"status": "plan", "after_id": null, "before_id": null}'
 
 # Delete
 curl -sL "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT"
@@ -285,9 +285,9 @@ DATA=$(base64 < "$IMG_PATH" | tr -d '\n')
 curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/attachment?project=$PROJECT" \
   -H 'Content-Type: application/json' \
   -d "$(jq -n --arg filename "$(basename "$IMG_PATH")" --arg data "$DATA" '{filename: $filename, data: $data}')"
-# → {"success":true,"attachment":{"filename","storedName","url","size","uploaded_at"}}
+# → {"success":true,"attachment":{"filename","stored_name","url","size","uploaded_at"}}
 
-# Delete an attachment (storedName from the task's attachments array)
+# Delete an attachment (stored_name from the task's attachments array)
 curl -sL "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/attachment/$STORED_NAME?project=$PROJECT"
 
 # Download a task's attachments to local files (host-agnostic; temp dir, no repo pollution)
@@ -297,7 +297,7 @@ curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PR
   | while IFS=$'\t' read -r url fn; do curl -s "$url" -o "$DIR/$fn"; done   # files now in $DIR
 ```
 
-The `attachments` field on a task read is a JSON array of `{filename, storedName, url, size, uploaded_at}` — the `url` is a public R2 link, and the web board renders it for humans. Accepted: png, jpg/jpeg, gif, webp, svg. Deleting a task removes its R2 objects.
+The `attachments` field on a task read is a JSON array of `{filename, stored_name, url, size, uploaded_at}` — the `url` is a public R2 link, and the web board renders it for humans. Accepted: png, jpg/jpeg, gif, webp, svg. Deleting a task removes its R2 objects.
 
 **Viewing an attachment as an agent is host-dependent**:
 - **Claude Code**: download it (above), then `Read` the local file — it renders as vision. ✅
@@ -668,12 +668,12 @@ The `model` value should be the resolved provider model from `models.json` (not 
 
 | Nickname | Reads | Writes (signed) |
 |----------|-------|-----------------|
-| `Refiner` | `title`, `description` | `description` (rewrite) |
-| `Planner` | `description` | `plan`, `decision_log`, `done_when` |
-| `Critic` | `description`, `plan`, `decision_log`, `done_when` | `plan_review_comments` (records verdict) |
-| `Builder` | `description`, `plan`, `done_when`, `plan_review_comments` | `implementation_notes` |
-| `Shield` | `description`, `implementation_notes` | `implementation_notes` (append) |
-| `Inspector` | `description`, `plan`, `done_when`, `implementation_notes` | `review_comments` (records verdict) |
+| `Refiner` | `title`, `description` | `spec` (via `/task/:id/spec`; `description` untouched) |
+| `Planner` | `description`, `spec` | `plan`, `decision_log`, `done_when` |
+| `Critic` | `description`, `spec`, `plan`, `decision_log`, `done_when` | `plan_review_comments` (records verdict) |
+| `Builder` | `description`, `spec`, `plan`, `done_when`, `plan_review_comments` | `implementation_notes` |
+| `Shield` | `description`, `spec`, `implementation_notes` | `implementation_notes` (append) |
+| `Inspector` | `description`, `spec`, `plan`, `done_when`, `implementation_notes` | `review_comments` (records verdict) |
 | `Ranger` | `title`, `implementation_notes` | `test_results` (records verdict) |
 
 Agents write only their own domain field above; they do **not** append to the activity stream themselves. The orchestrating skill (`squad-run`) appends one signed `POST /api/task/:id/activity` event per agent step (actor=the agent's nickname, model=its resolved model, optional `tokens`), reads the domain fields, and performs every status move (see Move Protocol).

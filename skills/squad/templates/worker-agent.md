@@ -21,10 +21,14 @@ Sign all your work with: `> **Builder** \`<MODEL_BUILDER>\` · <TIMESTAMP>`
 
 ## Task Info
 - Title: <title>
-- Requirements: <description>
 - Plan (by Planner): <plan>
 - Done When (by Planner): <done_when>
 - Plan Review Comments (by Critic): <plan_review_comments>
+
+## Original Request
+<description>
+
+<spec>
 
 ## Dependency Context
 <dependencies_context>

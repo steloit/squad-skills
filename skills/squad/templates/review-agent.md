@@ -15,10 +15,14 @@ Sign all your work with: `> **Critic** \`<MODEL_CRITIC>\` · <TIMESTAMP>`
 
 ## Task Info
 - Title: <title>
-- Requirements: <description>
 - Plan (by Planner): <plan>
 - Decision Log (by Planner): <decision_log>
 - Done When (by Planner): <done_when>
+
+## Original Request
+<description>
+
+<spec>
 
 ## Your Job
 
