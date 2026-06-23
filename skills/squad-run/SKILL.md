@@ -247,8 +247,8 @@ Template files are at `../squad/templates/`.
 | `Planner` | `title,description,spec,plan_review_comments` |
 | `Critic` | `title,description,spec,plan,decision_log,done_when` |
 | `Builder` | `title,description,spec,plan,done_when,plan_review_comments,review_comments` |
-| `Shield` | `title,description,implementation_notes` |
-| `Inspector` | `title,description,plan,done_when,implementation_notes` |
+| `Shield` | `title,description,spec,implementation_notes` |
+| `Inspector` | `title,description,spec,plan,done_when,implementation_notes` |
 | `Ranger` | `title,implementation_notes` |
 
 **Dispatch procedure — execute in this order for every agent:**
@@ -359,9 +359,9 @@ Template files are at `../squad/templates/`.
    # Builder
    TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,spec,plan,done_when,plan_review_comments,review_comments
    # Shield
-   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,implementation_notes
+   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,spec,implementation_notes
    # Inspector
-   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,plan,done_when,implementation_notes
+   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,spec,plan,done_when,implementation_notes
    # Ranger
    TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,implementation_notes
    Extract only the fields listed above for each agent
@@ -433,7 +433,8 @@ Template files are at `../squad/templates/`.
            out += ['  A: ' + (it['answer'] if it.get('answer') is not None else '(unanswered)')]
    print('\n'.join(out).rstrip())
    ")
-   # Shield/Inspector/Ranger don't consume the spec → pass SPEC_MD="" for them.
+   # Planner/Critic/Builder + Shield/Inspector all consume the spec. Ranger does NOT
+   # (mechanical lint/build/test only) → pass SPEC_MD="" for Ranger.
    ```
 
    Recommended helper script:

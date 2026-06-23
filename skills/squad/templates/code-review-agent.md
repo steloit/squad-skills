@@ -15,10 +15,14 @@ Sign all your work with: `> **Inspector** \`<MODEL_INSPECTOR>\` · <TIMESTAMP>`
 
 ## Task Info
 - Title: <title>
-- Requirements: <description>
 - Plan (by Planner): <plan>
 - Done When (by Planner): <done_when>
 - Implementation Notes (by Builder + Shield): <implementation_notes>
+
+## Original Request
+<description>
+
+<spec>
 
 ## Dependency Context
 <dependencies_context>
