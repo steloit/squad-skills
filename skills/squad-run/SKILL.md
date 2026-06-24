@@ -46,31 +46,31 @@ The agent records its verdict (approved/reject | pass/fail + comment) by POSTing
 verdict endpoint; it does NOT move status. The orchestrator then: (1) reads the recorded
 verdict, (2) gates (default mode: the card SITS in its review state until the user signal;
 `--auto` skips the human gate only), (3) commits the move via the generic `PATCH /api/task/:id`
-to the verdict-correct next status with `current_agent:null` (re-issuing a move that is already
+to the verdict-correct next status with `current_agent:null` and `actor:"Orchestrator"` (re-issuing a move that is already
 applied is a safe no-op), (4) runs side-effects (git commit + note) AFTER the move.
 
 L1 Quick:
-  todo → orchestrator PATCH {status:impl, current_agent:Builder} → Worker(builder) implements
-       → orchestrator PATCH {status:done, current_agent:null} → side-effects (commit + note)
+  todo → orchestrator PATCH {status:impl, current_agent:Builder, actor:Orchestrator} → Worker(builder) implements
+       → orchestrator PATCH {status:done, current_agent:null, actor:Orchestrator} → side-effects (commit + note)
 
 L2 Standard:
-  todo → [orchestrator: todo→plan, current_agent=Planner] → Plan Agent(planner) @plan
-       → orchestrator PATCH {status:impl, current_agent:null} (skip plan_review)
-  impl → Worker(builder) + TDD Tester(shield) → orchestrator PATCH {status:impl_review, current_agent:null}
+  todo → [orchestrator: todo→plan, current_agent=Planner, actor:Orchestrator] → Plan Agent(planner) @plan
+       → orchestrator PATCH {status:impl, current_agent:null, actor:Orchestrator} (skip plan_review)
+  impl → Worker(builder) + TDD Tester(shield) → orchestrator PATCH {status:impl_review, current_agent:null, actor:Orchestrator}
   impl_review → Inspector returns verdict → orchestrator records → [user confirm] →
-                orchestrator PATCH {status: done | impl, current_agent:null} → side-effects after done
+                orchestrator PATCH {status: done | impl, current_agent:null, actor:Orchestrator} → side-effects after done
 
 L3 Full:
-  todo → [orchestrator: todo→plan, current_agent=Planner] → Plan Agent(planner) @plan
-       → orchestrator PATCH {status:plan_review, current_agent:null}
+  todo → [orchestrator: todo→plan, current_agent=Planner, actor:Orchestrator] → Plan Agent(planner) @plan
+       → orchestrator PATCH {status:plan_review, current_agent:null, actor:Orchestrator}
   plan_review → Critic returns verdict → orchestrator records → [user confirm] →
-                orchestrator PATCH {status: impl (approve) | plan (reject), current_agent:null}
+                orchestrator PATCH {status: impl (approve) | plan (reject), current_agent:null, actor:Orchestrator}
                 (reject re-dispatches Planner with <critic_feedback>; plan→plan re-entry is idempotent)
-  impl → Worker(builder) + TDD Tester(shield) → orchestrator PATCH {status:impl_review, current_agent:null}
+  impl → Worker(builder) + TDD Tester(shield) → orchestrator PATCH {status:impl_review, current_agent:null, actor:Orchestrator}
   impl_review → Inspector returns verdict → orchestrator records → [user confirm] →
-                orchestrator PATCH {status: test (approve) | impl (reject), current_agent:null}
+                orchestrator PATCH {status: test (approve) | impl (reject), current_agent:null, actor:Orchestrator}
   test → Ranger returns verdict → orchestrator records → [gate] →
-         orchestrator PATCH {status: done (pass) | impl (fail), current_agent:null} → side-effects after done
+         orchestrator PATCH {status: done (pass) | impl (fail), current_agent:null, actor:Orchestrator} → side-effects after done
 
 Circuit breaker: plan_review_count > 3 OR impl_review_count > 3 → stop, ask user
   (counts are incremented when a verdict is recorded, not by the move PATCH)
@@ -148,8 +148,8 @@ if [ "$LEVEL" = "3" ]; then PLAN_NEXT=plan_review; else PLAN_NEXT=impl; fi
 
 # 2. Pipeline-entry / dispatch (see Agent Dispatch below)
 #    When STATUS == todo:
-#      L1  → ONE PATCH {"status":"impl","current_agent":"Builder"}, then dispatch Builder.
-#      L2/L3 → ONE PATCH {"status":"plan","current_agent":"Planner"} (the todo→plan entry
+#      L1  → ONE PATCH {"status":"impl","current_agent":"Builder","actor":"Orchestrator"}, then dispatch Builder.
+#      L2/L3 → ONE PATCH {"status":"plan","current_agent":"Planner","actor":"Orchestrator"} (the todo→plan entry
 #              move), then dispatch the Planner. The card is in the PLAN column before the
 #              Planner begins — step ② below is this same single level-aware entry PATCH.
 #    When STATUS == plan (fresh entry OR Critic-reject re-entry via plan_review→plan):
@@ -178,7 +178,7 @@ in strict order:
 3. **Gate** (default mode) — `AskUserQuestion` accept/reject runs BEFORE the move. `--auto` skips
    the human prompt but still issues the move.
 4. **Commit** — the orchestrator issues the single validated generic `PATCH /api/task/:id` to the
-   next status with `current_agent:null`.
+   next status with `current_agent:null` and `actor:"Orchestrator"`.
 5. **Side-effects** — git commit + commit note, only AFTER a `done` move is committed.
 
 **Read the verdict** — the server-derived status for the current review stage:
@@ -196,7 +196,7 @@ VERDICT=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?p
 ```
 
 **Verdict → next status** (computed locally; mirrors `getTransitions`). Every row is issued via the
-single validated generic PATCH `{status:<next>, current_agent:null}`. The verdict is the literal value
+single validated generic PATCH `{status:<next>, current_agent:null, actor:"Orchestrator"}`. The verdict is the literal value
 read from the derived field — reviews are `approved` / `changes_requested`, the test stage is `pass` / `fail`:
 
 | Agent @ status | Verdict | Generic PATCH move |
@@ -370,8 +370,8 @@ Template files are at `../squad/templates/`.
    The entry status move and current_agent assignment are a SINGLE PATCH (never a
    separate/third call). Pick the body by the agent being dispatched:
      • Planner from `todo` (L1): not applicable — L1 dispatches Builder, see below.
-     • Planner from `todo` (L2/L3):  { "status": "plan", "current_agent": "Planner" }
-     • Builder from `todo` (L1):     { "status": "impl", "current_agent": "Builder" }
+     • Planner from `todo` (L2/L3):  { "status": "plan", "current_agent": "Planner", "actor": "Orchestrator" }
+     • Builder from `todo` (L1):     { "status": "impl", "current_agent": "Builder", "actor": "Orchestrator" }
      • Planner already at `plan` (fresh entry handled above, OR Critic-reject
        re-entry via plan_review→plan):  { "current_agent": "Planner" }  (NO status move —
        plan→plan is illegal; idempotent re-dispatch)
@@ -488,7 +488,7 @@ issues the impl→impl_review **commit** move:
 ```bash
 curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
-  -d '{"status": "impl_review", "current_agent": null}'
+  -d '{"status": "impl_review", "current_agent": null, "actor": "Orchestrator"}'
 ```
 
 **Default mode**: at `plan_review`, `impl_review`, and `test` (the L3 Ranger gate), the contract order is explicit — the agent
@@ -504,7 +504,7 @@ PRECEDES the move PATCH; the move is always the generic PATCH, never the verdict
 #    Re-issuing when already done is a safe no-op.
 curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT" \
   -H 'Content-Type: application/json' \
-  -d '{"status": "done", "current_agent": null}'
+  -d '{"status": "done", "current_agent": null, "actor": "Orchestrator"}'
 
 # 2. Side-effects AFTER the state commit — commit pending changes.
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then

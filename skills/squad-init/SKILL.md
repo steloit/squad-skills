@@ -67,33 +67,27 @@ if [ -z "$SQUAD_ORG" ]; then
 fi
 ```
 
-The slug is **never** auto-derived from the board (the project API exposes no org slug today — a noted follow-up). The token never lives in `.squadrc`; it lives in `~/.squad/auth` as a per-org `SQUAD_AUTH_TOKEN_<slug>=` line or the bare default.
+The slug is **never** auto-derived from the board (the project API exposes no org slug today — a noted follow-up). The token never lives in `.squadrc`; it lives in `~/.squad/auth` as the bare `SQUAD_AUTH_TOKEN=` line.
 
 Use the Write tool to create `.squadrc` with **both** the `SQUAD_PROJECT=` and the `SQUAD_ORG=<slug>` lines (always write `SQUAD_ORG`; if no slug can be resolved, stop with the error above — do NOT register without it).
 
 ### 2b. Detect auth (no token store here)
 
-The token is resolved org-scoped via the shared.md chain (env > per-org line > bare default). squad-init **never** stores a token, **never** echoes/cats it, and **never** asks for a pasted one — the token-store command lives **only** at the web mint UI — Settings → API Keys (the single place the real token + org slug exist). On no token, squad-init just prints a one-line POINTER to that UI:
+The token is resolved via the shared.md chain (env > bare `SQUAD_AUTH_TOKEN=`). squad-init **never** stores a token, **never** echoes/cats it, and **never** asks for a pasted one — the token-store command lives **only** at the web mint UI — Settings → Personal Access Tokens (the single place the real token exists). On no token, squad-init just prints a one-line POINTER to that UI:
 
 ```bash
-# Resolve the token (env > per-org line > bare default) straight into the header — never echo it.
+# Resolve the token (env > bare `SQUAD_AUTH_TOKEN=`) straight into the header — never echo it.
 SQUAD_ORG="${SQUAD_ORG:-}"
 [ -z "$SQUAD_ORG" ] && [ -f .squadrc ] && SQUAD_ORG=$(grep '^SQUAD_ORG=' .squadrc | cut -d= -f2-)
 AUTH_TOKEN="${SQUAD_AUTH_TOKEN:-}"; AUTH_SOURCE=$([ -n "$AUTH_TOKEN" ] && echo env || echo none)
 if [ -z "$AUTH_TOKEN" ] && [ -f "$HOME/.squad/auth" ]; then
-  if [ -n "$SQUAD_ORG" ]; then
-    AUTH_TOKEN=$(grep "^SQUAD_AUTH_TOKEN_${SQUAD_ORG}=" "$HOME/.squad/auth" | cut -d= -f2-)
-    [ -n "$AUTH_TOKEN" ] && AUTH_SOURCE="org:$SQUAD_ORG"
-  fi
-  if [ -z "$AUTH_TOKEN" ]; then
-    AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$HOME/.squad/auth" | cut -d= -f2-)
-    [ -n "$AUTH_TOKEN" ] && AUTH_SOURCE=default
-  fi
+  AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$HOME/.squad/auth" | cut -d= -f2-)
+  [ -n "$AUTH_TOKEN" ] && AUTH_SOURCE=file
 fi
 AUTH_HEADER=(); [ -n "$AUTH_TOKEN" ] && AUTH_HEADER=(-H "Authorization: Bearer $AUTH_TOKEN")
 
 if [ -z "$AUTH_TOKEN" ]; then
-  echo "No Squad key for org '${SQUAD_ORG:-this board}' — mint one in your Squad board's web UI (Settings → API Keys) and run the store command it shows."
+  echo "No Squad Personal Access Token configured — mint one in your Squad board's web UI (Settings → Personal Access Tokens) and run the store command it shows."
 fi
 
 # Persist a custom (non-default) board URL only — to ~/.squad/config
@@ -147,7 +141,7 @@ Output:
   Org:     <ORG_SLUG>   (required — written to .squadrc; every board call is org-scoped)
   DB:      PostgreSQL (shared central DB)
   Board:   <BASE_URL>/?project=<PROJECT_NAME>
-  Auth:    org-scoped API key — SQUAD_AUTH_TOKEN env / ~/.squad/auth (global secret; configured / empty, value-free)
+  Auth:    Personal Access Token — SQUAD_AUTH_TOKEN env / ~/.squad/auth (global secret; configured / empty, value-free)
 
 Add tasks with /squad add <title>
 ```
@@ -168,7 +162,7 @@ Options:
 ```
 
 - `/squad-init` defaults to `https://squad-api-285415501393.asia-south1.run.app` unless you provide another deployment URL.
-- Tokens are **org-scoped, scoped API keys** stored globally in `~/.squad/auth` (mode 600) — per-org `SQUAD_AUTH_TOKEN_<label>=` lines plus an optional bare `SQUAD_AUTH_TOKEN=` default — or the `SQUAD_AUTH_TOKEN` env var; NEVER in `.squadrc`. This keeps secrets out of git and lets one machine serve multiple orgs.
+- Tokens are **Personal Access Tokens (PATs)** stored globally in `~/.squad/auth` (mode 600) as a bare `SQUAD_AUTH_TOKEN=` line — or the `SQUAD_AUTH_TOKEN` env var; NEVER in `.squadrc`. This keeps secrets out of git; `SQUAD_ORG` still selects the tenant per repo.
 - `.squadrc` carries the project name + the **required** non-secret `SQUAD_ORG=<slug>` selector (every board call is org-scoped `/api/orgs/<org>/...`). squad-init ALWAYS writes `SQUAD_ORG` (resolved from an explicit init arg or the mint dialog's `SQUAD_ORG=<slug>` line); it is **not** board-derived (the project API exposes no org slug; auto-derive + verify is a noted follow-up). With no slug, squad-init stops with an actionable error rather than registering without one.
-- squad-init **never stores or prompts for a token**: minting + the store command live only in the board's web UI — **Settings → API Keys**. On no token it prints a one-line pointer to that UI (the breadcrumb, NOT a URL — the skill only knows the API `BASE_URL`, not the web host).
-- For remote private boards, mint an org-scoped key in the web UI (**Settings → API Keys**) and run the store command it prints (writes `~/.squad/auth`, mode 600), or set `SQUAD_AUTH_TOKEN` in the shell before running `/squad-init`.
+- squad-init **never stores or prompts for a token**: minting + the store command live only in the board's web UI — **Settings → Personal Access Tokens**. On no token it prints a one-line pointer to that UI (the breadcrumb, NOT a URL — the skill only knows the API `BASE_URL`, not the web host).
+- For remote private boards, mint a **Personal Access Token** in the web UI (**Settings → Personal Access Tokens**) and run the store command it prints (writes `~/.squad/auth`, mode 600), or set `SQUAD_AUTH_TOKEN` in the shell before running `/squad-init`.

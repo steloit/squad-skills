@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """squad-batch-run planning helper.
 
-SQUAD_ORG EXPORT CONTRACT: ``load_squad_auth`` reads ``SQUAD_ORG`` from the
-ENVIRONMENT only — it does NOT parse ``.squadrc``. The calling skill
-(squad-batch-run) MUST resolve ``.squadrc``'s ``SQUAD_ORG=`` line and
-``export SQUAD_ORG`` before launching this script, so the per-org
-``SQUAD_AUTH_TOKEN_<org>`` key is selected.
+SQUAD_ORG EXPORT CONTRACT: ``main`` reads ``SQUAD_ORG`` from the ENVIRONMENT
+only — it does NOT parse ``.squadrc``. The calling skill (squad-batch-run) MUST
+resolve ``.squadrc``'s ``SQUAD_ORG=`` line and ``export SQUAD_ORG`` before
+launching this script, because every board call targets the ``/api/orgs/<org>/``
+path. ``SQUAD_ORG`` selects the tenant (the path), not the token.
 
 ORG-IN-PATH: every board call targets the org-scoped surface
 ``{base_url}/api/orgs/{org}/...`` (org in the path, ``project`` in the query).
@@ -56,18 +56,12 @@ HOTSPOT_HINTS = {
 
 
 def load_squad_auth() -> dict[str, str]:
-    """Resolve auth tool-agnostically and org-scoped: env vars take priority,
-    then a per-org ``SQUAD_AUTH_TOKEN_<SQUAD_ORG>`` line, then the bare
-    ``SQUAD_AUTH_TOKEN=`` default — all from ~/.squad/auth; ~/.squad/config
+    """Resolve auth tool-agnostically: env vars take priority, then the bare
+    ``SQUAD_AUTH_TOKEN=`` line — both from ~/.squad/auth; ~/.squad/config
     supplies the optional URL.
 
-    Precedence for the token: ``SQUAD_AUTH_TOKEN`` env >
-    ``SQUAD_AUTH_TOKEN_<SQUAD_ORG>`` (file) > bare ``SQUAD_AUTH_TOKEN=`` (file),
-    matching the bash chain in ``skills/squad/shared.md`` byte-for-byte.
-
-    ``SQUAD_ORG`` is read from the ENV (this loader does NOT read ``.squadrc``).
-    The calling skill must resolve ``.squadrc`` and ``export SQUAD_ORG`` BEFORE
-    invoking this script — see the usage note in the module docstring.
+    Precedence for the token: ``SQUAD_AUTH_TOKEN`` env > bare ``SQUAD_AUTH_TOKEN=``
+    (file), matching the bash chain in ``skills/squad/shared.md``.
     """
     result: dict[str, str] = {}
     for f in (pathlib.Path.home() / ".squad" / "auth",
@@ -83,16 +77,8 @@ def load_squad_auth() -> dict[str, str]:
                 result.setdefault(key.strip(), value.strip())
         except OSError:
             pass
-    # Per-org promotion: if SQUAD_ORG (env) names a per-org line, promote
-    # SQUAD_AUTH_TOKEN_<org> → SQUAD_AUTH_TOKEN — overriding any bare default read
-    # from the file (mirrors the bash chain: per-org is tried before the bare
-    # default). Done BEFORE the env override so precedence stays
-    # env > per-org > bare default. The env (SQUAD_AUTH_TOKEN) still wins below.
-    org = os.environ.get("SQUAD_ORG")
-    if org and not os.environ.get("SQUAD_AUTH_TOKEN"):
-        per_org = result.get(f"SQUAD_AUTH_TOKEN_{org}")
-        if per_org:
-            result["SQUAD_AUTH_TOKEN"] = per_org
+    # Env override: SQUAD_AUTH_TOKEN / SQUAD_BASE_URL from the environment win
+    # over the bare values read from the file.
     for key in ("SQUAD_AUTH_TOKEN", "SQUAD_BASE_URL"):
         if os.environ.get(key):
             result[key] = os.environ[key]
