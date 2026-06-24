@@ -179,7 +179,7 @@ Relations: `extends`, `serves`, `depends_on`, `shares_data`.
 
 ## Setup & Web Board
 
-Run `/squad-init` first to register this project — it writes `.squadrc` (`SQUAD_PROJECT=…`, plus an optional `SQUAD_ORG=<label>` org selector) at the repo root, committed so your whole team's agents target the same board project. The token never goes in a project file — it's an org-scoped API key resolved as `SQUAD_AUTH_TOKEN` env > `SQUAD_AUTH_TOKEN_<SQUAD_ORG>` > bare `SQUAD_AUTH_TOKEN=` from `~/.squad/auth` (see `shared.md`).
+Run `/squad-init` first to register this project — it writes `.squadrc` (`SQUAD_PROJECT=…`, plus an optional `SQUAD_ORG=<label>` org selector) at the repo root, committed so your whole team's agents target the same board project. The token never goes in a project file — it's a **Personal Access Token** resolved as `SQUAD_AUTH_TOKEN` env > bare `SQUAD_AUTH_TOKEN=` from `~/.squad/auth` (see `shared.md`).
 
 Open the deployed board at `https://squad.steloit.com/?project=<PROJECT>` (or via the configured `SQUAD_BASE_URL`).
 Features: 7-column pipeline, drag-and-drop (valid transitions only), card lifecycle modal, agent log viewer, 10s auto-refresh.

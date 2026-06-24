@@ -21,9 +21,9 @@ Scan all active projects (or a single project) for tasks that have had no agent 
 ```
 ① Auth & Argument Setup
 
-   Load credentials using the standard shared.md pattern (org-scoped: env > per-org line > bare default).
+   Load credentials using the standard shared.md pattern (single token: env > bare `SQUAD_AUTH_TOKEN=`).
    This is a maintainer tool with no per-repo `.squadrc`, so SQUAD_ORG comes from the env only;
-   set `SQUAD_ORG` before running to target a specific org's key:
+   set `SQUAD_ORG` before running to target a specific org (the `/api/orgs/<org>/` path):
 
    SQUAD_ORG="${SQUAD_ORG:-}"
    if [ -z "$SQUAD_ORG" ]; then
@@ -33,14 +33,8 @@ Scan all active projects (or a single project) for tasks that have had no agent 
    fi
    AUTH_TOKEN="${SQUAD_AUTH_TOKEN:-}"; AUTH_SOURCE=$([ -n "$AUTH_TOKEN" ] && echo env || echo none)
    if [ -z "$AUTH_TOKEN" ] && [ -f "$HOME/.squad/auth" ]; then
-     if [ -n "$SQUAD_ORG" ]; then
-       AUTH_TOKEN=$(grep "^SQUAD_AUTH_TOKEN_${SQUAD_ORG}=" "$HOME/.squad/auth" | cut -d= -f2-)
-       [ -n "$AUTH_TOKEN" ] && AUTH_SOURCE="org:$SQUAD_ORG"
-     fi
-     if [ -z "$AUTH_TOKEN" ]; then
-       AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$HOME/.squad/auth" | cut -d= -f2-)
-       [ -n "$AUTH_TOKEN" ] && AUTH_SOURCE=default
-     fi
+     AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$HOME/.squad/auth" | cut -d= -f2-)
+     [ -n "$AUTH_TOKEN" ] && AUTH_SOURCE=file
    fi
    BASE_URL="${SQUAD_BASE_URL:-}"
    [ -z "$BASE_URL" ] && [ -f "$HOME/.squad/config" ] && BASE_URL=$(grep '^SQUAD_BASE_URL=' "$HOME/.squad/config" | cut -d= -f2-)
@@ -168,7 +162,7 @@ Scan all active projects (or a single project) for tasks that have had no agent 
 
 The executing agent should run this as a single Python script for reliability.
 
-> **SQUAD_ORG export contract:** this script reads `SQUAD_ORG` from the **env only** (no `.squadrc` — it's a maintainer tool). To target a specific org's key, `export SQUAD_ORG=<label>` before running; with none set it uses the bare `SQUAD_AUTH_TOKEN=` default (back-compat).
+> **SQUAD_ORG export contract:** this script reads `SQUAD_ORG` from the **env only** (no `.squadrc` — it's a maintainer tool). To target a specific org (the `/api/orgs/<org>/` path), `export SQUAD_ORG=<slug>` before running. The token is the single `SQUAD_AUTH_TOKEN` (env > bare `SQUAD_AUTH_TOKEN=` in `~/.squad/auth`).
 
 ```bash
 python3 - "$@" <<'PYEOF'
@@ -191,14 +185,13 @@ while i < len(args):
     else:
         i += 1
 
-# ── Auth setup (org-scoped: env > per-org line > bare default) ────
+# ── Auth setup (single token: env > bare `SQUAD_AUTH_TOKEN=`) ─────
 # SQUAD_ORG must be in the ENV (this tool has no per-repo .squadrc); the caller
 # resolves .squadrc and exports SQUAD_ORG before launching this script.
 import pathlib, os
 base_url = os.environ.get("SQUAD_BASE_URL", "")
 auth_token = os.environ.get("SQUAD_AUTH_TOKEN", "")
 squad_org = os.environ.get("SQUAD_ORG", "")
-per_org_token = ""
 
 auth_file = pathlib.Path.home() / ".squad" / "auth"
 config_file = pathlib.Path.home() / ".squad" / "config"
@@ -206,15 +199,11 @@ for f in (auth_file, config_file):
     if not f.exists():
         continue
     for line in f.read_text().splitlines():
-        if squad_org and line.startswith(f"SQUAD_AUTH_TOKEN_{squad_org}="):
-            per_org_token = per_org_token or line.split("=", 1)[1].strip()
-        elif not auth_token and line.startswith("SQUAD_AUTH_TOKEN="):
+        if not auth_token and line.startswith("SQUAD_AUTH_TOKEN="):
             auth_token = line.split("=", 1)[1].strip()
         elif not base_url and line.startswith("SQUAD_BASE_URL="):
             base_url = line.split("=", 1)[1].strip()
-# env wins; else per-org (SQUAD_ORG) line; else bare default already in auth_token.
-if not os.environ.get("SQUAD_AUTH_TOKEN") and per_org_token:
-    auth_token = per_org_token
+# env wins; else the bare `SQUAD_AUTH_TOKEN=` line read above.
 base_url = base_url or "https://squad-api-285415501393.asia-south1.run.app"
 
 # Every board call is org-scoped (/api/orgs/<org>/...). SQUAD_ORG is REQUIRED.

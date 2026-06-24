@@ -171,8 +171,12 @@ def test_load_squad_auth_env_overrides_file(plan_batch, tmp_path, monkeypatch):
     assert plan_batch.load_squad_auth().get("SQUAD_AUTH_TOKEN") == "envtok"
 
 
-# ── Org-scoped resolution (env > per-org line > bare default) ─────────────────
-def test_load_squad_auth_per_org_line(plan_batch, tmp_path, monkeypatch):
+# ── Single-token resolution (env > bare file line; no per-org promotion) ──────
+def test_load_squad_auth_ignores_per_org_lines(plan_batch, tmp_path, monkeypatch):
+    """SQD-889: there is a SINGLE SQUAD_AUTH_TOKEN. A legacy per-org line in the
+    file is never promoted — even when SQUAD_ORG matches it — the bare
+    SQUAD_AUTH_TOKEN is what resolves.
+    """
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("SQUAD_AUTH_TOKEN", raising=False)
     (tmp_path / ".squad").mkdir()
@@ -180,50 +184,36 @@ def test_load_squad_auth_per_org_line(plan_batch, tmp_path, monkeypatch):
         "SQUAD_AUTH_TOKEN=baretok\nSQUAD_AUTH_TOKEN_acme=acmetok\n"
     )
     monkeypatch.setenv("SQUAD_ORG", "acme")
-    assert plan_batch.load_squad_auth().get("SQUAD_AUTH_TOKEN") == "acmetok"
+    assert plan_batch.load_squad_auth().get("SQUAD_AUTH_TOKEN") == "baretok"
 
 
-def test_load_squad_auth_env_overrides_per_org(plan_batch, tmp_path, monkeypatch):
+def test_load_squad_auth_env_overrides_file(plan_batch, tmp_path, monkeypatch):
+    """Env SQUAD_AUTH_TOKEN wins over the bare file line regardless of SQUAD_ORG."""
     monkeypatch.setenv("HOME", str(tmp_path))
     (tmp_path / ".squad").mkdir()
-    (tmp_path / ".squad" / "auth").write_text("SQUAD_AUTH_TOKEN_acme=acmetok\n")
+    (tmp_path / ".squad" / "auth").write_text("SQUAD_AUTH_TOKEN=filetok\n")
     monkeypatch.setenv("SQUAD_ORG", "acme")
     monkeypatch.setenv("SQUAD_AUTH_TOKEN", "envtok")
     assert plan_batch.load_squad_auth().get("SQUAD_AUTH_TOKEN") == "envtok"
 
 
-def test_load_squad_auth_unknown_org_falls_back_to_default(plan_batch, tmp_path, monkeypatch):
+def test_load_squad_auth_org_irrelevant_to_token(plan_batch, tmp_path, monkeypatch):
+    """SQUAD_ORG no longer affects token resolution — same bare token resolves
+    whether SQUAD_ORG is set or not.
+    """
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("SQUAD_AUTH_TOKEN", raising=False)
     (tmp_path / ".squad").mkdir()
-    (tmp_path / ".squad" / "auth").write_text(
-        "SQUAD_AUTH_TOKEN=baretok\nSQUAD_AUTH_TOKEN_acme=acmetok\n"
-    )
+    (tmp_path / ".squad" / "auth").write_text("SQUAD_AUTH_TOKEN=baretok\n")
+
     monkeypatch.setenv("SQUAD_ORG", "ghost")
     assert plan_batch.load_squad_auth().get("SQUAD_AUTH_TOKEN") == "baretok"
 
-
-def test_load_squad_auth_no_org_uses_default(plan_batch, tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("SQUAD_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("SQUAD_ORG", raising=False)
-    (tmp_path / ".squad").mkdir()
-    (tmp_path / ".squad" / "auth").write_text(
-        "SQUAD_AUTH_TOKEN=baretok\nSQUAD_AUTH_TOKEN_acme=acmetok\n"
-    )
     assert plan_batch.load_squad_auth().get("SQUAD_AUTH_TOKEN") == "baretok"
 
 
-def test_load_squad_auth_hyphenated_org(plan_batch, tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("SQUAD_AUTH_TOKEN", raising=False)
-    (tmp_path / ".squad").mkdir()
-    (tmp_path / ".squad" / "auth").write_text("SQUAD_AUTH_TOKEN_acme-eu=eutok\n")
-    monkeypatch.setenv("SQUAD_ORG", "acme-eu")
-    assert plan_batch.load_squad_auth().get("SQUAD_AUTH_TOKEN") == "eutok"
-
-
-def test_load_squad_auth_bare_only_backcompat(plan_batch, tmp_path, monkeypatch):
+def test_load_squad_auth_bare_file_read(plan_batch, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("SQUAD_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("SQUAD_ORG", raising=False)
@@ -234,53 +224,34 @@ def test_load_squad_auth_bare_only_backcompat(plan_batch, tmp_path, monkeypatch)
 
 # ── Graceful no-token cases ───────────────────────────────────────────────────
 
-def test_load_squad_auth_org_set_no_match_no_bare_default_is_absent(plan_batch, tmp_path, monkeypatch):
-    """SQUAD_ORG set but file has no matching per-org line AND no bare default.
+def test_load_squad_auth_no_bare_token_is_absent(plan_batch, tmp_path, monkeypatch):
+    """File has only a legacy per-org line and no bare SQUAD_AUTH_TOKEN.
 
-    load_squad_auth must return gracefully with no SQUAD_AUTH_TOKEN key —
-    no KeyError, no crash.  This is the 'wrong org label' user error case.
-    """
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("SQUAD_AUTH_TOKEN", raising=False)
-    (tmp_path / ".squad").mkdir()
-    # Only the acme org key; no bare default; SQUAD_ORG points at a different org
-    (tmp_path / ".squad" / "auth").write_text("SQUAD_AUTH_TOKEN_acme=acmetok\n")
-    monkeypatch.setenv("SQUAD_ORG", "ghost")
-    result = plan_batch.load_squad_auth()
-    assert result.get("SQUAD_AUTH_TOKEN") is None
-
-
-def test_load_squad_auth_per_org_not_promoted_without_squad_org(plan_batch, tmp_path, monkeypatch):
-    """A per-org line present in the file must NOT be silently promoted when
-    SQUAD_ORG is unset — the bare default (or nothing) must be used instead.
-
-    Guards the invariant that per-org promotion is gated strictly on the
-    SQUAD_ORG env var, not on a file scan.
+    Since per-org lines are no longer promoted, load_squad_auth returns
+    gracefully with no SQUAD_AUTH_TOKEN key — no KeyError, no crash.
     """
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("SQUAD_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("SQUAD_ORG", raising=False)
     (tmp_path / ".squad").mkdir()
-    # Only a per-org key; no SQUAD_ORG in env; no bare default
+    # Only a legacy per-org key; no bare default
     (tmp_path / ".squad" / "auth").write_text("SQUAD_AUTH_TOKEN_acme=acmetok\n")
     result = plan_batch.load_squad_auth()
     assert result.get("SQUAD_AUTH_TOKEN") is None
 
 
-def test_load_squad_auth_base_url_from_config_alongside_org_token(plan_batch, tmp_path, monkeypatch):
-    """SQUAD_BASE_URL from ~/.squad/config is returned alongside the per-org
-    token — verifies config-file resolution still works when the auth block runs.
+def test_load_squad_auth_base_url_from_config(plan_batch, tmp_path, monkeypatch):
+    """SQUAD_BASE_URL from ~/.squad/config is returned alongside the bare token —
+    verifies config-file resolution still works when the auth block runs.
     """
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("SQUAD_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("SQUAD_BASE_URL", raising=False)
+    monkeypatch.delenv("SQUAD_ORG", raising=False)
     squad_dir = tmp_path / ".squad"
     squad_dir.mkdir()
-    (squad_dir / "auth").write_text(
-        "SQUAD_AUTH_TOKEN=baretok\nSQUAD_AUTH_TOKEN_acme=acmetok\n"
-    )
+    (squad_dir / "auth").write_text("SQUAD_AUTH_TOKEN=baretok\n")
     (squad_dir / "config").write_text("SQUAD_BASE_URL=https://my.board.example\n")
-    monkeypatch.setenv("SQUAD_ORG", "acme")
     result = plan_batch.load_squad_auth()
-    assert result.get("SQUAD_AUTH_TOKEN") == "acmetok"
+    assert result.get("SQUAD_AUTH_TOKEN") == "baretok"
     assert result.get("SQUAD_BASE_URL") == "https://my.board.example"

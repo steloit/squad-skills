@@ -21,16 +21,15 @@ npx skills update                            # update
 
 ## Configure
 
-All skills talk to the Squad board over HTTP and authenticate with an **org-scoped, scoped API key** (minted in the board UI → Settings → API Keys). One machine can serve multiple orgs:
+All skills talk to the Squad board over HTTP and authenticate with a **Personal Access Token (PAT)** scoped to the user (minted in the board UI → Settings → Personal Access Tokens). The tenant is selected separately via `SQUAD_ORG`:
 
 ```bash
 SQUAD_BASE_URL=https://<your-squad-board>      # optional; defaults to the deployed board
-SQUAD_AUTH_TOKEN=<org-scoped key>              # single-org bare default (env or ~/.squad/auth)
-# Multi-org: ~/.squad/auth holds per-org SQUAD_AUTH_TOKEN_<label>= lines + an optional bare default,
-# each repo selecting its org via SQUAD_ORG=<label> in .squadrc.
+SQUAD_AUTH_TOKEN=<your Personal Access Token>  # single PAT (env or bare line in ~/.squad/auth)
+# Each repo selects its org with a non-secret SQUAD_ORG=<slug> line in .squadrc (env wins over .squadrc).
 ```
 
-Resolution: `SQUAD_AUTH_TOKEN` env > `SQUAD_AUTH_TOKEN_<SQUAD_ORG>` (`~/.squad/auth`) > bare `SQUAD_AUTH_TOKEN=` (`~/.squad/auth`); `SQUAD_ORG` = env > `.squadrc`. **Secret-safe:** skills never echo/cat/Read the token or `~/.squad/auth`, never use `curl -v`, and resolve the token straight into the `Authorization` header. The mint UI is the only place the token is shown/stored.
+Resolution: token = `SQUAD_AUTH_TOKEN` env > bare `SQUAD_AUTH_TOKEN=` (`~/.squad/auth`); `SQUAD_ORG` = env > `.squadrc` (**required** — every board call is org-scoped `/api/orgs/<org>/...`). **Secret-safe:** skills never echo/cat/Read the token or `~/.squad/auth`, never use `curl -v`, and resolve the token straight into the `Authorization` header. The mint UI (Settings → Personal Access Tokens) is the only place the token is shown/stored.
 
 ## Develop
 

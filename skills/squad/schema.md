@@ -144,6 +144,10 @@ Comment shape as returned by the API: `{"id": "<uuid>", "task_id": "SQD-42", "au
 
 (The **Coach** is not an activity actor — it writes to the run-audit store + files friction cards, never `/task/:id/activity`.)
 
+### Optional `actor` on the task PATCH
+
+`PATCH /api/orgs/:org/task/:id` accepts an optional `actor` field — a **display ROLE** from the actor vocabulary above (`Planner` / `Critic` / `Builder` / `Shield` / `Inspector` / `Ranger` / `Refiner` / `Orchestrator` / `Heartbeat`) that attributes the resulting status-move event. It is server-validated: an unknown value → **400**. It is a role label, **never a credential** — auth is always the `Authorization: Bearer` PAT. The orchestrator (squad-run) sends `actor:"Orchestrator"` on every status-move PATCH. A PATCH with no `actor` is back-compatible (the field is optional; a pre-PAT API ignores it as an unknown field).
+
 ### Appending an event (orchestrator)
 
 After each agent completes, the orchestrator appends ONE signed event — a single atomic POST, no read-modify-write:
