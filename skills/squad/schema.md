@@ -80,6 +80,7 @@ This makes every card field self-documenting — you can see at a glance who wro
 ```
 `status` must be `"approved"` or `"changes_requested"`.
 `reviewer` must be the agent's **nickname** (e.g. `"Inspector"`, `"Critic"`).
+The verdict POSTs (`/plan-review`, `/review`) also accept an optional `correlation_id` — the client-supplied per-step grouping token (see below); omit when not threading a step.
 
 ### test_results
 ```json
@@ -98,6 +99,7 @@ This makes every card field self-documenting — you can see at a glance who wro
 ```
 `status` must be `"pass"` or `"fail"`.
 `tester` must be the agent's **nickname** (`"Ranger"`).
+The test-result POST (`/test-result`) also accepts an optional `correlation_id` — the client-supplied per-step grouping token (see below); omit when not threading a step.
 
 ## Table: task_activities
 
@@ -113,7 +115,8 @@ The immutable machine **event stream** for a task — one append-only event per 
 - `actor` is the squad actor (see actor vocabulary below); `model` is the resolved provider model from `models.json` (or `system` for `Orchestrator`/`Heartbeat`) — it may be `null`.
 - `tokens` is optional/`null` — estimated total tokens (input + output) for the step; omit when unknown (missing counts as 0 in stats).
 - `created_at` is server-set — clients do **not** send a timestamp.
-- **Clients send only** `{actor, model?, message, tokens?}` on append. The board classifies each event internally (whether it was written by a human, an agent, or the system, and the kind of event); those classifications are NOT part of the append body or the returned shape — do not send or expect them.
+- **Clients send only** `{actor, model?, message, tokens?, correlation_id?}` on append. The board classifies each event internally (whether it was written by a human, an agent, or the system, and the kind of event); those classifications are NOT part of the append body or the returned shape — do not send or expect them.
+- `correlation_id` is optional — a **client-supplied uuid grouping token**. squad-run mints one fresh id per agent step and sends the SAME value on (a) the step's record-results write (task PATCH / verdict POST) and (b) this activity append, so the board can group the step's writes and its activity event into one timeline entry. Omit when not threading a step.
 
 ## Table: task_comments
 
@@ -125,7 +128,7 @@ Comment shape as returned by the API: `{"id": "<uuid>", "task_id": "SQD-42", "au
 
 | Endpoint | Purpose |
 |----------|---------|
-| `POST /api/task/:id/activity?project=` | Append one event `{actor, message, model?, tokens?}` → `{success, event}`. Single atomic INSERT, no read-modify-write; `actor` + `message` are required non-empty strings, `model` optional non-empty, `tokens` if present finite, else 400. `actor` must be a known actor (see vocabulary). |
+| `POST /api/task/:id/activity?project=` | Append one event `{actor, message, model?, tokens?, correlation_id?}` → `{success, event}`. Single atomic INSERT, no read-modify-write; `actor` + `message` are required non-empty strings, `model` optional non-empty, `tokens` if present finite, `correlation_id` optional client-supplied grouping token, else 400. `actor` must be a known actor (see vocabulary). |
 | `GET /api/task/:id/activity?project=` | Reader, **newest-first** (`ORDER BY created_at DESC`), `?limit` (≤500), `?before=<id>` (returns events older than that cursor id). |
 | `GET /api/activity/stats?project=[&task_id=]` | Per-actor aggregate `{success, stats:[{actor, events, tokens}], totals}` via one `GROUP BY`. |
 | `POST /api/task/:id/comment?project=` | Human comment `{content}` (optional `author`). |
@@ -148,6 +151,10 @@ Comment shape as returned by the API: `{"id": "<uuid>", "task_id": "SQD-42", "au
 
 `PATCH /api/orgs/:org/task/:id` accepts an optional `actor` field — a **display ROLE** from the actor vocabulary above (`Planner` / `Critic` / `Builder` / `Shield` / `Inspector` / `Ranger` / `Refiner` / `Orchestrator` / `Heartbeat`) that attributes the resulting status-move event. It is server-validated: an unknown value → **400**. It is a role label, **never a credential** — auth is always the `Authorization: Bearer` PAT. The orchestrator (squad-run) sends `actor:"Orchestrator"` on every status-move PATCH. A PATCH with no `actor` is back-compatible (the field is optional; a pre-PAT API ignores it as an unknown field).
 
+### Optional `correlation_id` on writes
+
+`PATCH /api/orgs/:org/task/:id`, `POST /api/task/:id/activity`, and the three verdict endpoints (`/plan-review`, `/review`, `/test-result`) each accept an optional `correlation_id` field — a **client-supplied uuid grouping token**. squad-run mints one fresh id per agent step occurrence (a reject re-run gets a new id) and sends the SAME value on that step's record-results write (the agent's PATCH or verdict POST) AND on the orchestrator's `/activity` event for the step. The board uses it to group the step's writes + agent_log into one timeline entry. It is optional and back-compatible: a PATCH/POST with no `correlation_id` is unaffected (a pre-feature API ignores it as an unknown field).
+
 ### Appending an event (orchestrator)
 
 After each agent completes, the orchestrator appends ONE signed event — a single atomic POST, no read-modify-write:
@@ -158,6 +165,9 @@ import subprocess, json
 body = {'actor': 'NICKNAME', 'model': 'MODEL', 'message': 'MESSAGE'}
 # Optional: include 'tokens' (estimated input+output), omit when unknown.
 # body['tokens'] = TOKENS
+# Optional: include 'correlation_id' = the step's grouping uuid (same id the agent's
+# record-results write carried) so the board groups them into one timeline entry.
+# body['correlation_id'] = CORRELATION_ID
 subprocess.run(['curl','-sL',*auth_header,'-X','POST',f'{base_url}/api/orgs/{org}/task/{task_id}/activity?project={project}','-H','Content-Type: application/json','-d',json.dumps(body)], capture_output=True)
 "
 ```

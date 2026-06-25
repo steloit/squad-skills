@@ -367,6 +367,20 @@ Template files are at `../squad/templates/`.
    Extract only the fields listed above for each agent
 
 ② Enter the agent's column + mark it active — ONE level-aware PATCH
+   Mint a FRESH per-step correlation id for THIS dispatch occurrence — never cache or
+   reuse one across the loop. Every dispatch gets a new id, including every reject
+   re-dispatch (plan_review→plan, impl_review→impl, test→impl): each occurrence is a
+   distinct step and gets its own id.
+   ```bash
+   CORRELATION_ID=$(python3 -c 'import uuid;print(uuid.uuid4())')
+   ```
+   This SAME `$CORRELATION_ID` is threaded into BOTH the agent template (step ④,
+   `--set correlation_id=`) AND the orchestrator's activity POST for this step (step ⑥),
+   so the board groups the step's record-results write + the agent_log into one timeline
+   entry. (For the impl step, Builder and Shield are two writes within one logical step —
+   the single impl-step `$CORRELATION_ID` covers the Builder PATCH, the Shield PATCH, and
+   the orchestrator's impl-step activity event.)
+
    The entry status move and current_agent assignment are a SINGLE PATCH (never a
    separate/third call). Pick the body by the agent being dispatched:
      • Planner from `todo` (L1): not applicable — L1 dispatches Builder, see below.
@@ -398,6 +412,7 @@ Template files are at `../squad/templates/`.
      <dependencies_context>   → per-agent dep context from step ⓪ʙ (empty string if none)
      <critic_feedback>        → latest plan_review_comments comment (empty if first run)
      <inspector_feedback>     → latest review_comments comment (empty if first run)
+     <correlation_id>         → $CORRELATION_ID (the fresh per-step id minted in step ②)
      <TIMESTAMP>              → current UTC time (ISO 8601)
      <MODEL_PLANNER>          → $MODEL_PLANNER
      <MODEL_CRITIC>           → $MODEL_CRITIC
@@ -457,6 +472,7 @@ Template files are at `../squad/templates/`.
      --set dependencies_context="$DEPS_CONTEXT" \
      --set critic_feedback="$CRITIC_FEEDBACK" \
      --set inspector_feedback="$INSPECTOR_FEEDBACK" \
+     --set correlation_id="$CORRELATION_ID" \
      --set TIMESTAMP="$TIMESTAMP")
    ```
    If a field is missing, pass empty string (`--set key=""`).
@@ -479,8 +495,11 @@ Template files are at `../squad/templates/`.
    )
 
 ⑥ After Task completes — append one signed activity event
-   POST /api/task/$ID/activity {actor:<Nickname>, model:<model>, message:<summary>, tokens?:<est>}
+   POST /api/task/$ID/activity {actor:<Nickname>, model:<model>, message:<summary>, tokens?:<est>, correlation_id:$CORRELATION_ID}
    (use schema.md › "Appending an event (orchestrator)" snippet — single atomic POST, no read-modify-write)
+   `correlation_id` is the SAME `$CORRELATION_ID` minted in step ② and passed to the
+   agent template in step ④ — the agent's record-results write and this activity event
+   carry one id, so the board groups them into a single timeline entry for the step.
 ```
 
 Builder and Shield each RETURN their output (no self-move). Once both complete, the orchestrator
