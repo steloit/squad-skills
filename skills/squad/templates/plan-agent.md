@@ -79,5 +79,7 @@ TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 # Do NOT set status — write plan / decision_log / done_when + current_agent:null only.
 curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
-  -d "{\"plan\": \"> **Planner** \`<MODEL_PLANNER>\` · $TIMESTAMP\n\n<PLAN_MARKDOWN>\", \"decision_log\": \"<DECISION_TABLE_MARKDOWN>\", \"done_when\": \"<DONE_WHEN_CHECKLIST>\", \"current_agent\": null}"
+  -d "{\"plan\": \"> **Planner** \`<MODEL_PLANNER>\` · $TIMESTAMP\n\n<PLAN_MARKDOWN>\", \"decision_log\": \"<DECISION_TABLE_MARKDOWN>\", \"done_when\": \"<DONE_WHEN_CHECKLIST>\", \"correlation_id\": \"<correlation_id>\", \"current_agent\": null}"
 ```
+
+`correlation_id` is filled by the orchestrator (the `<correlation_id>` placeholder) — it is the per-step grouping token that ties this write to the orchestrator's activity event for this step. Leave the placeholder as-is; do not generate or change it.

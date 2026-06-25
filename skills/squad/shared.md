@@ -222,23 +222,27 @@ curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task" \
 # count), bumps `version`, and returns the recorded verdict. They do NOT change
 # `status`. The orchestrator reads the recorded verdict and issues any status move
 # separately via the generic PATCH above.
+# All three verdict POSTs + the /activity append + the generic task PATCH accept an
+# optional `correlation_id` — a client-supplied uuid grouping token. squad-run threads
+# ONE fresh id per agent step through the step's record-results write AND its /activity
+# event, so the board groups them into a single timeline entry. Omit when not threading.
 
 # Plan review result (record-only)
 curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/plan-review?project=$PROJECT" \
   -H 'Content-Type: application/json' \
-  -d '{"reviewer": "Critic", "model": "<MODEL_CRITIC>", "status": "approved", "comment": "..."}'
+  -d '{"reviewer": "Critic", "model": "<MODEL_CRITIC>", "status": "approved", "comment": "...", "correlation_id": "<correlation_id>"}'
 # → {"success":true,"comment":{...},"version":<int>} — verdict recorded; status unchanged.
 
 # Impl review result (record-only)
 curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/review?project=$PROJECT" \
   -H 'Content-Type: application/json' \
-  -d '{"reviewer": "Inspector", "model": "<MODEL_INSPECTOR>", "status": "approved", "comment": "..."}'
+  -d '{"reviewer": "Inspector", "model": "<MODEL_INSPECTOR>", "status": "approved", "comment": "...", "correlation_id": "<correlation_id>"}'
 # → {"success":true,"comment":{...},"version":<int>} — verdict recorded; status unchanged.
 
 # Test result (record-only)
 curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/test-result?project=$PROJECT" \
   -H 'Content-Type: application/json' \
-  -d '{"tester": "test-runner", "status": "pass", "lint": "...", "build": "...", "tests": "...", "comment": "..."}'
+  -d '{"tester": "test-runner", "status": "pass", "lint": "...", "build": "...", "tests": "...", "comment": "...", "correlation_id": "<correlation_id>"}'
 # → {"success":true,"result":{...},"version":<int>} — verdict recorded; status unchanged.
 
 # Append an activity event (machine event stream — see "Activity vs Comments" below)
@@ -246,6 +250,8 @@ curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/act
   -H 'Content-Type: application/json' \
   -d '{"actor": "Orchestrator", "model": "system", "message": "Committed abc1234: <subject> [squad #'$ID']"}'
 # → {"success":true,"event":{...}}
+# (the per-step orchestrator activity event also carries "correlation_id": the step's id;
+#  this commit-record event is the Orchestrator's own and may omit it.)
 
 # Read a task's activity events (chronological reader)
 curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/activity?project=$PROJECT&limit=50"
@@ -381,14 +387,15 @@ A task has two distinct append-only channels, backed by the `task_activities` an
 
 #### Append an event — `POST /api/task/:id/activity?project=`
 
-The single atomic append path (no read-modify-write). Body `{actor, model, message, tokens?}`:
+The single atomic append path (no read-modify-write). Body `{actor, model, message, tokens?, correlation_id?}`:
 
 ```json
-{"actor": "Builder", "model": "<MODEL_BUILDER>", "message": "Implementation complete.", "tokens": 25000}
+{"actor": "Builder", "model": "<MODEL_BUILDER>", "message": "Implementation complete.", "tokens": 25000, "correlation_id": "<correlation_id>"}
 ```
 
 - `actor`, `model`, `message` — required, must be **non-empty strings**.
 - `tokens` — optional; if present must be a **finite number** (omit the key when unknown — never send `tokens: null`).
+- `correlation_id` — optional; a client-supplied uuid grouping token. squad-run sends the step's id here (matching the agent's record-results write) so the board groups them into one timeline entry. Omit when not threading a step.
 - **No client timestamp** — the server sets `created_at`.
 - On success → `{"success": true, "event": {id, project, task_id, actor, model, message, tokens, created_at}}` and the task `version` is bumped.
 - Invalid body → **400** and nothing is written.

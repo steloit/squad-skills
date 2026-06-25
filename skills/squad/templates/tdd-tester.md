@@ -59,7 +59,9 @@ EXISTING=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/<ID>
 
 curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/<ID>?project=<PROJECT>" \
   -H 'Content-Type: application/json' \
-  -d "{\"implementation_notes\": \"$EXISTING$SHIELD_NOTES\", \"current_agent\": null}"
+  -d "{\"implementation_notes\": \"$EXISTING$SHIELD_NOTES\", \"correlation_id\": \"<correlation_id>\", \"current_agent\": null}"
 ```
+
+`correlation_id` is filled by the orchestrator (the `<correlation_id>` placeholder) — it is the per-step grouping token that ties this write to the orchestrator's activity event for this (impl) step. Leave the placeholder as-is; do not generate or change it.
 
 Do NOT change the status — the orchestrator moves to `impl_review` after both Builder and Shield complete.
