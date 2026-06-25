@@ -15,7 +15,7 @@ addressed by their **display id** `<KEY>-<seq>` (e.g. `SQD-42`) in every API pat
 | `priority` | string | `urgent` / `high` / `medium` / `low` |
 | `card_type` | string | `task` (runnable) or `epic` (container) |
 | `description` | string\|null | The human's **original request** — immutable; agents NEVER overwrite it. The refined, testable requirements live in **`spec`**. |
-| `spec` | object\|null | The Refiner's structured spec `{goal, requirements[], qa[], version}` (null until refined). Written ONLY via `POST /task/:id/spec`. |
+| `spec` | object\|null | The Refiner's structured spec `{goal, requirements[], qa[], version}` (null until refined). Written ONLY via `POST /task/:id/spec` — which also accepts an optional client-supplied `correlation_id` grouping uuid (omit when not grouping; see below). |
 | `spec_version` | number | `0` = no spec yet; bumped on each spec write (under the task-`version` CAS) |
 | `plan` | string\|null | Implementation plan in markdown (Planner) |
 | `implementation_notes` | string\|null | Implementation log in markdown (Builder + Shield) |
@@ -153,7 +153,7 @@ Comment shape as returned by the API: `{"id": "<uuid>", "task_id": "SQD-42", "au
 
 ### Optional `correlation_id` on writes
 
-`PATCH /api/orgs/:org/task/:id`, `POST /api/task/:id/activity`, and the three verdict endpoints (`/plan-review`, `/review`, `/test-result`) each accept an optional `correlation_id` field — a **client-supplied uuid grouping token**. squad-run mints one fresh id per agent step occurrence (a reject re-run gets a new id) and sends the SAME value on that step's record-results write (the agent's PATCH or verdict POST) AND on the orchestrator's `/activity` event for the step. The board uses it to group the step's writes + agent_log into one timeline entry. It is optional and back-compatible: a PATCH/POST with no `correlation_id` is unaffected (a pre-feature API ignores it as an unknown field).
+`PATCH /api/orgs/:org/task/:id`, `POST /api/task/:id/activity`, `POST /api/task/:id/spec`, and the three verdict endpoints (`/plan-review`, `/review`, `/test-result`) each accept an optional `correlation_id` field — a **client-supplied uuid grouping token**. squad-run mints one fresh id per agent step occurrence (a reject re-run gets a new id) and sends the SAME value on that step's record-results write (the agent's PATCH or verdict POST) AND on the orchestrator's `/activity` event for the step. squad-refine mints one id at its step ⑦ Save and sends the SAME value on the `/spec` write AND the Refiner `/activity` note, so the board groups the spec snapshot + the Refiner note into one timeline stage (a re-refine mints a fresh id). The board uses it to group the step's writes + agent_log into one timeline entry. It is optional and back-compatible: a PATCH/POST with no `correlation_id` is unaffected (a pre-feature API ignores it as an unknown field).
 
 ### Appending an event (orchestrator)
 
