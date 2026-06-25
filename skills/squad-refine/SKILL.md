@@ -114,6 +114,14 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
 
 ⑦ Save
    If approved:
+   - **Mint ONE `correlation_id` for THIS save occasion**, before the spec write. The SAME
+     value tags both the `/spec` write AND the Refiner `/activity` note below, so the board
+     groups the spec snapshot + the Refiner note into one timeline stage. A re-refine is a
+     new save → mint a fresh id (never cache/reuse it across saves; a re-refine = new id = a
+     distinct grouped entry):
+     ```bash
+     CORRELATION_ID=$(python3 -c 'import uuid;print(uuid.uuid4())')
+     ```
    - **Write the SPEC via the dedicated endpoint** — the human `description` is NEVER touched.
      The CAS token is the TASK `version` (same token every write uses); read it immediately
      before writing. The endpoint writes `spec`, bumps `spec_version`, and emits the
@@ -127,10 +135,11 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
      RESP=$(curl -sL -w "\n%{http_code}" "${AUTH_HEADER[@]}" -X POST \
        "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/spec?project=$PROJECT" \
        -H 'Content-Type: application/json' \
-       -d "$(jq -n --argjson spec "$SPEC_JSON" --argjson ev "$VER" --arg model "$MODEL_REFINER" \
-             '{spec:$spec, expected_version:$ev, actor:"Refiner", model:$model}')")
+       -d "$(jq -n --argjson spec "$SPEC_JSON" --argjson ev "$VER" --arg model "$MODEL_REFINER" --arg cid "$CORRELATION_ID" \
+             '{spec:$spec, expected_version:$ev, actor:"Refiner", model:$model, correlation_id:$cid}')")
      # 200 → { success, version, spec_version }. On 412 (concurrent edit): re-read `version`
      # and retry ONCE; if it still 412s, surface to the user (don't loop). 400 = malformed spec.
+     # (On a 412 retry, KEEP the same $CORRELATION_ID — it's still the same save occasion.)
      ```
    - Update title/level/priority/tags ONLY if the interview changed them (PATCH — never `description`).
    - **Declare dependencies structurally**: if the interview surfaced that this task is blocked by
@@ -143,8 +152,10 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
        -d "$(jq -n --arg to "$ID" '{to:$to, type:"blocks"}')"
      ```
    - Append the short Refiner activity note (the `kind='spec'` row above carries the snapshot;
-     this records the round count). POST /api/task/$ID/activity:
-     { "actor": "Refiner", "model": "<MODEL_REFINER>", "message": "Requirements refined. N questions across M rounds." }
+     this records the round count). Carry the SAME `$CORRELATION_ID` minted at the top of this
+     step so the board threads this note with the spec snapshot into one timeline stage.
+     POST /api/task/$ID/activity:
+     { "actor": "Refiner", "model": "<MODEL_REFINER>", "message": "Requirements refined. N questions across M rounds.", "correlation_id": "$CORRELATION_ID" }
 ```
 
 ### Model Routing

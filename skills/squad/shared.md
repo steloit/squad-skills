@@ -222,10 +222,12 @@ curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task" \
 # count), bumps `version`, and returns the recorded verdict. They do NOT change
 # `status`. The orchestrator reads the recorded verdict and issues any status move
 # separately via the generic PATCH above.
-# All three verdict POSTs + the /activity append + the generic task PATCH accept an
-# optional `correlation_id` — a client-supplied uuid grouping token. squad-run threads
+# All three verdict POSTs + the /activity append + the generic task PATCH + the /spec write
+# accept an optional `correlation_id` — a client-supplied uuid grouping token. squad-run threads
 # ONE fresh id per agent step through the step's record-results write AND its /activity
-# event, so the board groups them into a single timeline entry. Omit when not threading.
+# event; squad-refine threads ONE id (minted at step ⑦ Save) through the `/spec` write AND the
+# Refiner `/activity` note — either way the board groups them into a single timeline entry.
+# Omit when not threading.
 
 # Plan review result (record-only)
 curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/plan-review?project=$PROJECT" \
@@ -395,7 +397,7 @@ The single atomic append path (no read-modify-write). Body `{actor, model, messa
 
 - `actor`, `model`, `message` — required, must be **non-empty strings**.
 - `tokens` — optional; if present must be a **finite number** (omit the key when unknown — never send `tokens: null`).
-- `correlation_id` — optional; a client-supplied uuid grouping token. squad-run sends the step's id here (matching the agent's record-results write) so the board groups them into one timeline entry. Omit when not threading a step.
+- `correlation_id` — optional; a client-supplied uuid grouping token. squad-run sends the step's id here (matching the agent's record-results write) so the board groups them into one timeline entry. squad-refine ALSO threads correlation_id: it mints one id at step ⑦ Save and sends the SAME id on the spec write (`POST /task/:id/spec`) AND this Refiner activity note, grouping the spec snapshot + note into one stage. Omit when not threading a step.
 - **No client timestamp** — the server sets `created_at`.
 - On success → `{"success": true, "event": {id, project, task_id, actor, model, message, tokens, created_at}}` and the task `version` is bumped.
 - Invalid body → **400** and nothing is written.
