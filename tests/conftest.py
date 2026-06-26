@@ -25,5 +25,10 @@ def render_mod():
 
 
 @pytest.fixture(scope="session")
+def api_mod():
+    return _load("skills/squad/scripts/api.py", "api")
+
+
+@pytest.fixture(scope="session")
 def repo_root():
     return ROOT
