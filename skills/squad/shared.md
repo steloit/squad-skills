@@ -277,7 +277,7 @@ curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/reo
   -d '{"reason": "regression found in prod"}'
 # → {"success":true,"status":"todo","version":<int>}
 
-# Upload an image attachment (base64 over JSON; stored in R2, served from a public URL)
+# Upload an image attachment (base64 over JSON; stored in a private bucket; the returned url is a presigned download link)
 DATA=$(base64 < "$IMG_PATH" | tr -d '\n')
 curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/attachment?project=$PROJECT" \
   -H 'Content-Type: application/json' \
@@ -294,7 +294,7 @@ curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/attachment?
   | while IFS=$'\t' read -r url fn; do curl -s "$url" -o "$DIR/$fn"; done   # files now in $DIR
 ```
 
-`GET /task/:id/attachment` returns a JSON array of `{filename, stored_name, url, size, uploaded_at}` — the `url` is a public R2 link, and the web board renders it for humans. Accepted: png, jpg/jpeg, gif, webp, svg. Deleting a task removes its R2 objects.
+`GET /task/:id/attachment` returns a JSON array of `{filename, stored_name, url, size, uploaded_at}` — the `url` is an absolute, short-TTL **presigned download URL** (private bucket): fetch it directly with a plain `curl` — it is self-authenticating, so **no `Authorization` header is needed on the per-file fetch**. It **expires** — if a `url` is stale, re-list via `GET /task/:id/attachment` for a fresh one. Note the `GET /task/:id/attachment` **list** call itself requires the PAT (`attachment:read`); only the per-file presigned `url` does not. Accepted: png, jpg/jpeg, gif, webp, svg. Deleting a task removes its stored objects.
 
 **Viewing an attachment as an agent is host-dependent**:
 - **Claude Code**: download it (above), then `Read` the local file — it renders as vision. ✅
