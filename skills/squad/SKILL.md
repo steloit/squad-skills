@@ -12,7 +12,7 @@ license: MIT
 ### `/squad` or `/squad list` — View Board
 
 ```bash
-BOARD=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=$PROJECT&summary=true")
+BOARD=$(api GET /board?summary=true)
 ```
 
 Output: markdown table with ID, Status, Priority, Title.
@@ -25,7 +25,7 @@ Output: markdown table with ID, Status, Priority, Title.
 Implementing / Plan Review / Impl Review / Testing / Recently Done / Next Todo.
 
 ```bash
-BOARD=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=$PROJECT&summary=true")
+BOARD=$(api GET /board?summary=true)
 ```
 
 ### `/squad add <title>` — Add Task
@@ -50,7 +50,7 @@ Ask user which fields to modify, then PATCH via API. To attach an image to an ex
 ### `/squad remove <ID>` — Delete Task
 
 ```bash
-curl -sL "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT"
+api DELETE /task/$ID
 ```
 
 ### `/squad stats` — Statistics
@@ -59,8 +59,8 @@ Column counts come from the board summary; per-actor token/event totals come fro
 `GET /api/activity/stats` call (server-side `GROUP BY actor` — no per-task loop, no board fetch for tokens).
 
 ```bash
-export BOARD=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=$PROJECT&summary=true")
-export STATS=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/activity/stats?project=$PROJECT")
+export BOARD=$(api GET /board?summary=true)
+export STATS=$(api GET /activity/stats)
 python3 << 'PY'
 import json, os
 
@@ -98,7 +98,7 @@ PY
 Fetch the current project's context from the projects table. Use this at the start of a session to load project purpose, stack, brief, relationships, and task counts in one call.
 
 ```bash
-PROJECT_DATA=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT")
+PROJECT_DATA=$(api GET /projects/$PROJECT)
 ```
 
 Output: formatted project context including:
@@ -116,7 +116,7 @@ If the project is not registered, suggest running `/squad-init` to register it.
 Fetch all projects grouped by category. Useful for understanding the full project landscape.
 
 ```bash
-ALL_PROJECTS=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/projects")
+ALL_PROJECTS=$(api GET /projects)
 ```
 
 Output: projects grouped by category (e.g. personal, tools, skills) with names and purposes.
@@ -127,14 +127,12 @@ The **brief** is a compressed context summary (200–500 chars) that agents cons
 
 **View current brief:**
 ```bash
-curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT" | jq -r '.brief // "No brief set"'
+api GET /projects/$PROJECT | jq -r '.brief // "No brief set"'
 ```
 
 **Set brief directly:**
 ```bash
-curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"brief": "..."}'
+api PATCH /projects/$PROJECT --json '{"brief": "..."}'
 ```
 
 **AI-assisted update (`/squad project brief update`):**
@@ -149,14 +147,10 @@ Update any project field via PATCH:
 
 ```bash
 # Update purpose
-curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"purpose": "new purpose"}'
+api PATCH /projects/$PROJECT --json '{"purpose": "new purpose"}'
 
 # Archive project
-curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"status": "archived"}'
+api PATCH /projects/$PROJECT --json '{"status": "archived"}'
 ```
 
 Supported fields: `name`, `purpose`, `stack`, `brief`, `status`, `category`, `repo_url`.
@@ -165,14 +159,10 @@ Supported fields: `name`, `purpose`, `stack`, `brief`, `status`, `category`, `re
 
 ```bash
 # Add relationship
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT/links" \
-  -H 'Content-Type: application/json' \
-  -d '{"target_id": "other-project", "relation": "depends_on"}'
+api POST /projects/$PROJECT/links --json '{"target_id": "other-project", "relation": "depends_on"}'
 
 # Remove relationship
-curl -sL "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT/links" \
-  -H 'Content-Type: application/json' \
-  -d '{"target_id": "other-project", "relation": "depends_on"}'
+api DELETE /projects/$PROJECT/links --json '{"target_id": "other-project", "relation": "depends_on"}'
 ```
 
 Relations: `extends`, `serves`, `depends_on`, `shares_data`.
