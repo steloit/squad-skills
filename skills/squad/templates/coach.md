@@ -87,7 +87,7 @@ For each rubric row that cleared the materiality bar (Step 2), file a card follo
 
 **3b — ALWAYS POST the full run audit (every run, clean AND friction).**
 Build a single JSON body with Python (so the JSON fields are real JSON, not text) and POST it
-best-effort to `POST /api/run-audit?project=squad` (documented in shared.md → **Run Audit**):
+best-effort to `POST /api/orgs/{org}/run-audit?project=squad` (documented in shared.md → **Run Audit**):
 
 ```bash
 # Resolve run context (shell vars — NOT template placeholders, to keep render --strict clean).
