@@ -76,7 +76,8 @@ Use the Write tool to create `.squadrc` with **both** the `SQUAD_PROJECT=` and t
 The token is resolved via the shared.md chain (env > bare `SQUAD_AUTH_TOKEN=`). squad-init **never** stores a token, **never** echoes/cats it, and **never** asks for a pasted one — the token-store command lives **only** at the web mint UI — Settings → Personal Access Tokens (the single place the real token exists). On no token, squad-init just prints a one-line POINTER to that UI:
 
 ```bash
-# Resolve the token (env > bare `SQUAD_AUTH_TOKEN=`) straight into the header — never echo it.
+# Detect whether a token is configured (env > bare `SQUAD_AUTH_TOKEN=`) to decide the warning
+# below — never echo it. The board call itself goes through api.py, which owns the header.
 SQUAD_ORG="${SQUAD_ORG:-}"
 [ -z "$SQUAD_ORG" ] && [ -f .squadrc ] && SQUAD_ORG=$(grep '^SQUAD_ORG=' .squadrc | cut -d= -f2-)
 AUTH_TOKEN="${SQUAD_AUTH_TOKEN:-}"; AUTH_SOURCE=$([ -n "$AUTH_TOKEN" ] && echo env || echo none)
@@ -84,7 +85,6 @@ if [ -z "$AUTH_TOKEN" ] && [ -f "$HOME/.squad/auth" ]; then
   AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$HOME/.squad/auth" | cut -d= -f2-)
   [ -n "$AUTH_TOKEN" ] && AUTH_SOURCE=file
 fi
-AUTH_HEADER=(); [ -n "$AUTH_TOKEN" ] && AUTH_HEADER=(-H "Authorization: Bearer $AUTH_TOKEN")
 
 if [ -z "$AUTH_TOKEN" ]; then
   echo "No Squad Personal Access Token configured — mint one in your Squad board's web UI (Settings → Personal Access Tokens) and run the store command it shows."
@@ -124,9 +124,7 @@ PROJ_PAYLOAD=$(jq -n \
     purpose:  (if $purpose  == "" then null else $purpose  end),
     stack:    (if $stack    == "" then null else $stack    end),
     repo_url: (if $repo_url == "" then null else $repo_url end)}')
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/projects" \
-  -H 'Content-Type: application/json' \
-  -d "$PROJ_PAYLOAD" > /dev/null 2>&1 || true
+api POST /projects --json "$PROJ_PAYLOAD" > /dev/null 2>&1 || true
 ```
 
 This is best-effort — if the API call fails (e.g., board unreachable), init still succeeds.

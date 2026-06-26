@@ -82,23 +82,23 @@ Fall back to conservative inference from phase, tags, title, and description whe
 ### 0. Pre-flight checks
 
 ```bash
-curl -sLf "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=$PROJECT&summary=true" > /dev/null
+api GET /board?summary=true > /dev/null   # non-zero exit (auth/transport) → stop
 ```
 
-- If the board is unreachable: report the error (check `base_url` / auth) and stop.
+- If the board is unreachable: report the error (api.py prints it on stderr; check auth) and stop.
 - If `plan_batch.py` fails: report error and stop.
 
 ### 1. Resolve project
 
-Read the project name from `.squadrc` (`SQUAD_PROJECT=`) — see `squad/shared.md` for the full resolution. The same resolution also reads `SQUAD_ORG` (env → `.squadrc`) and resolves the PAT (`AUTH_TOKEN`).
+Read the project name from `.squadrc` (`SQUAD_PROJECT=`) — see `squad/shared.md` for the full resolution (it sources the `api()` wrapper and reads `SQUAD_ORG` env → `.squadrc`; `api.py` owns the PAT internally).
 
 ### 2. Plan
 
-**SQUAD_ORG export contract:** `plan_batch.py` reads `SQUAD_ORG` from the **env only** (it does not parse `.squadrc`). Resolve `.squadrc` and `export SQUAD_ORG` before launching it (the shared.md resolution already sets `SQUAD_ORG`) — it selects the tenant via the `/api/orgs/<org>/` path. Passing `--auth-token "$AUTH_TOKEN"` (the PAT resolved via shared.md) makes the script use it directly; exporting `SQUAD_ORG` keeps the org path correct too.
+**SQUAD_ORG export contract:** `plan_batch.py` reads `SQUAD_ORG` from the **env only** (it does not parse `.squadrc`). Resolve `.squadrc` and `export SQUAD_ORG` before launching it (the shared.md resolution already sets `SQUAD_ORG`) — it selects the tenant via the `/api/orgs/<org>/` path. `plan_batch.py` resolves its own auth + base URL the same way `api.py` does (env `SQUAD_AUTH_TOKEN` / `SQUAD_BASE_URL` > `~/.squad/*`), so no token need be passed on the command line.
 
 ```bash
 export SQUAD_ORG   # exported from the shared.md resolution (env → .squadrc); selects the tenant via the org path
-python3 scripts/plan_batch.py --project "$PROJECT" --tasks "<selector>" --base-url "$BASE_URL" --auth-token "$AUTH_TOKEN"
+python3 scripts/plan_batch.py --project "$PROJECT" --tasks "<selector>"
 ```
 
 ### 3. Read plan
@@ -146,7 +146,7 @@ B. Implement(N)
 
 C. Verify(N)
    - Check actual implementation: git diff, created/modified files, test results
-   - Record an activity event: curl POST /api/task/$ID/activity {actor:"Orchestrator", model:"system", message:"Verified: [confirmed interface/schema]"}
+   - Record an activity event: api POST /task/$ID/activity --json '{actor:"Orchestrator", model:"system", message:"Verified: [confirmed interface/schema]"}'
    - Note anything that will affect N+1's refinement scope
 
 → Move to N+1
@@ -244,7 +244,7 @@ In default mode, L2/L3 tasks pause for user confirmation at review checkpoints.
 ### Result verification
 
 ```bash
-STATUS=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT&fields=status" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
+STATUS=$(api GET /task/$ID?fields=status -q status)
 ```
 
 | Status | Interpretation | Action |

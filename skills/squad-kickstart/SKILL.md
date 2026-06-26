@@ -10,7 +10,7 @@ metadata:
 
 Runs the complete project lifecycle from idea to rolling implementation.
 
-> Shared context: read `../squad/shared.md` for auth resolution (**Personal Access Token**: `SQUAD_AUTH_TOKEN` env > bare `SQUAD_AUTH_TOKEN=` from `~/.squad/auth`; `SQUAD_ORG` = env > `.squadrc`; `Authorization: Bearer` header), `$BASE_URL`, API endpoints, pipeline levels, and the JSON-safety rule. Resolve `PROJECT` / `BASE_URL` / `AUTH_HEADER` from there before any API call.
+> Shared context: read `../squad/shared.md` for auth resolution (**Personal Access Token**: `SQUAD_AUTH_TOKEN` env > bare `SQUAD_AUTH_TOKEN=` from `~/.squad/auth`; `SQUAD_ORG` = env > `.squadrc`), the `api` helper, API endpoints, pipeline levels, and the JSON-safety rule. Source the `api()` wrapper and resolve `PROJECT` from there before any API call.
 
 **Default mode: Rolling Wave Planning**
 ```
@@ -113,8 +113,7 @@ EPIC_PAYLOAD=$(jq -n --arg title "<epic title>" --arg project "$PROJECT" \
   --arg description "$(printf '## Epic\nContainer for the <name> epic.')" \
   --arg tags "phase:1" \
   '{title:$title, project:$project, card_type:"epic", priority:"high", description:$description, tags: ($tags | split(",") | map(gsub("^ +| +$";"")))}')
-EPIC_ID=$(curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task" \
-  -H 'Content-Type: application/json' -d "$EPIC_PAYLOAD" | jq -r '.id')
+EPIC_ID=$(api POST /task --json "$EPIC_PAYLOAD" | jq -r '.id')
 ```
 
 Minimum fields per child task:
@@ -129,13 +128,10 @@ PAYLOAD=$(jq -n --arg title "<task title>" --arg project "$PROJECT" \
   --arg description "$(printf '## Goal\nOne-line goal\n\n## Scope\n- In: ...\n- Out: ...')" \
   --arg tags "phase:1" \
   '{title:$title, project:$project, priority:"high", level:2, description:$description, tags: ($tags | split(",") | map(gsub("^ +| +$";"")))}')
-CHILD_ID=$(curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task" \
-  -H 'Content-Type: application/json' -d "$PAYLOAD" | jq -r '.id')
+CHILD_ID=$(api POST /task --json "$PAYLOAD" | jq -r '.id')
 
 # Attach the child to its epic via a structured parent edge (single-parent → 400 on a second parent).
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$CHILD_ID/relationships?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -n --arg to "$EPIC_ID" '{to:$to, type:"parent"}')"
+api POST /task/$CHILD_ID/relationships --json "$(jq -n --arg to "$EPIC_ID" '{to:$to, type:"parent"}')"
 ```
 
 **Cross-card dependencies** (a child blocks another) are declared via a structured `blocks` edge —
@@ -143,9 +139,7 @@ NOT a `Depends on:` text line. The server enforces acyclicity and returns **409*
 no client pre-check):
 ```bash
 # BLOCKER blocks BLOCKED (BLOCKED is blocked_by BLOCKER). `to` is an opaque <KEY>-<seq> id string — use --arg.
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$BLOCKER_ID/relationships?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -n --arg to "$BLOCKED_ID" '{to:$to, type:"blocks"}')"
+api POST /task/$BLOCKER_ID/relationships --json "$(jq -n --arg to "$BLOCKED_ID" '{to:$to, type:"blocks"}')"
 ```
 
 **E2E test task**: add one E2E validation task at the end of each epic (required).
