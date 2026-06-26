@@ -56,11 +56,19 @@ def test_no_flat_orgscoped_board_call_remains(repo_root):
 
 
 def test_org_scoped_calls_use_org_path(repo_root):
-    """Sanity: the migrated calls actually use the org path (the rewrite happened, not just the
-    flat calls being deleted). At least one /api/orgs/$SQUAD_ORG/ curl exists in shared.md."""
+    """Sanity: the migrated calls actually use the api.py helper (the rewrite happened, not just the
+    flat calls being deleted). Board access now flows through `api()`, which owns the
+    /api/orgs/<org>/ prefix internally, so shared.md must define the wrapper and use it.
+
+    (Pre-migration this asserted the literal `/api/orgs/$SQUAD_ORG/` curl in shared.md; that string
+    moved into api.py's build_url with the curl→api.py migration. Org-scoping is still enforced —
+    by api.py internally — and a re-introduced raw board curl is caught by test_api_adoption.)"""
     text = (repo_root / "skills" / "squad" / "shared.md").read_text()
-    assert "/api/orgs/$SQUAD_ORG/" in text, (
-        "shared.md must issue org-scoped board curls (/api/orgs/$SQUAD_ORG/<resource>)"
+    assert "api() { python3 ../squad/scripts/api.py" in text, (
+        "shared.md must define the sourced api() wrapper for board access"
+    )
+    assert "api GET " in text and "api POST " in text, (
+        "shared.md must issue board calls through the api.py helper (api GET / api POST)"
     )
 
 
@@ -146,8 +154,9 @@ def test_squad_init_always_writes_squad_org(repo_root):
     assert "ERROR: SQUAD_ORG is not set" in text, (
         "squad-init must fail fast (id-free) when no slug is resolvable"
     )
-    assert "/api/orgs/$SQUAD_ORG/projects" in text, (
-        "squad-init's own POST /projects must be org-scoped"
+    assert "api POST /projects" in text, (
+        "squad-init's own project upsert must go through the api.py helper "
+        "(api POST /projects — api.py owns the /api/orgs/<org>/ prefix)"
     )
     # The old 'only when supplied / optional' contract must be gone.
     assert "OPTIONAL — only when the user supplies" not in text, (

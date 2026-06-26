@@ -17,7 +17,7 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
 
 ```
 ① Read the task
-   TASK = curl GET /api/task/$ID?project=$PROJECT
+   TASK = api GET /task/$ID
    Extract: title, description, priority, level, tags, card_type
 
    **Epic targets are containers** (`card_type:'epic'`): they hold child tasks, they are not runnable
@@ -28,11 +28,11 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
 
    a. Detect dependencies via the relationships API (NOT description text — the `Depends on:` convention
       is retired; see `../squad/shared.md` → **Task Relationships & Epics**):
-      REL = curl GET /api/task/$ID/relationships?project=$PROJECT
+      REL = api GET /task/$ID/relationships
       Dependency ids = `.blocked_by[].id`. Also check `.parent` for the containing epic.
 
    b. If a dependency found → fetch that card's implementation output:
-      PRIOR = curl GET /api/task/$NNN?project=$PROJECT&fields=title,implementation_notes,plan
+      PRIOR = api GET /task/$NNN?fields=title,implementation_notes,plan
       Also inspect the actual codebase: read files, interfaces, schemas confirmed in that card.
 
    c. If no explicit dependency → ask ONE question before the main interview:
@@ -131,15 +131,18 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
      SPEC_JSON=$(jq -n --arg goal "$GOAL" \
        --argjson reqs "$REQUIREMENTS_JSON_ARRAY" --argjson qa "$QA_JSON_ARRAY" \
        '{goal:$goal, requirements:$reqs, qa:$qa}')
-     VER=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT&fields=version" | jq -r '.version')
-     RESP=$(curl -sL -w "\n%{http_code}" "${AUTH_HEADER[@]}" -X POST \
-       "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/spec?project=$PROJECT" \
-       -H 'Content-Type: application/json' \
-       -d "$(jq -n --argjson spec "$SPEC_JSON" --argjson ev "$VER" --arg model "$MODEL_REFINER" --arg cid "$CORRELATION_ID" \
-             '{spec:$spec, expected_version:$ev, actor:"Refiner", model:$model, correlation_id:$cid}')")
-     # 200 → { success, version, spec_version }. On 412 (concurrent edit): re-read `version`
-     # and retry ONCE; if it still 412s, surface to the user (don't loop). 400 = malformed spec.
+     VER=$(api GET /task/$ID?fields=version -q version)
+     ERR=$(mktemp)
+     RESP=$(api POST /task/$ID/spec \
+       --json "$(jq -n --argjson spec "$SPEC_JSON" --argjson ev "$VER" --arg model "$MODEL_REFINER" --arg cid "$CORRELATION_ID" \
+             '{spec:$spec, expected_version:$ev, actor:"Refiner", model:$model, correlation_id:$cid}')" 2>"$ERR")
+     RC=$?
+     # RC 0 → RESP = { success, version, spec_version }. RC 4 → board rejected: the stderr body
+     # ($ERR) carries the board's 4xx — a 412 "Precondition failed" on a concurrent edit (re-read
+     # `version` and retry ONCE; if it still 412s, surface to the user — don't loop) or a 400
+     # malformed spec.
      # (On a 412 retry, KEEP the same $CORRELATION_ID — it's still the same save occasion.)
+     rm -f "$ERR"
      ```
    - Update title/level/priority/tags ONLY if the interview changed them (PATCH — never `description`).
    - **Declare dependencies structurally**: if the interview surfaced that this task is blocked by
@@ -147,9 +150,7 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
      ```bash
      # DEP blocks ID (ID is blocked_by DEP). `to` is an opaque <KEY>-<seq> id string — use --arg.
      # Server returns 409 on a cycle (surfaced, no pre-check).
-     curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$DEP/relationships?project=$PROJECT" \
-       -H 'Content-Type: application/json' \
-       -d "$(jq -n --arg to "$ID" '{to:$to, type:"blocks"}')"
+     api POST /task/$DEP/relationships --json "$(jq -n --arg to "$ID" '{to:$to, type:"blocks"}')"
      ```
    - Append the short Refiner activity note (the `kind='spec'` row above carries the snapshot;
      this records the round count). Carry the SAME `$CORRELATION_ID` minted at the top of this

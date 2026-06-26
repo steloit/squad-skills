@@ -168,7 +168,7 @@ body = {'actor': 'NICKNAME', 'model': 'MODEL', 'message': 'MESSAGE'}
 # Optional: include 'correlation_id' = the step's grouping uuid (same id the agent's
 # record-results write carried) so the board groups them into one timeline entry.
 # body['correlation_id'] = CORRELATION_ID
-subprocess.run(['curl','-sL',*auth_header,'-X','POST',f'{base_url}/api/orgs/{org}/task/{task_id}/activity?project={project}','-H','Content-Type: application/json','-d',json.dumps(body)], capture_output=True)
+subprocess.run(['python3','../squad/scripts/api.py','POST',f'/task/{task_id}/activity?project={project}','--json',json.dumps(body)], capture_output=True)
 "
 ```
 

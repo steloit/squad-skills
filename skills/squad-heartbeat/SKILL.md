@@ -21,9 +21,11 @@ Scan all active projects (or a single project) for tasks that have had no agent 
 ```
 ① Auth & Argument Setup
 
-   Load credentials using the standard shared.md pattern (single token: env > bare `SQUAD_AUTH_TOKEN=`).
-   This is a maintainer tool with no per-repo `.squadrc`, so SQUAD_ORG comes from the env only;
-   set `SQUAD_ORG` before running to target a specific org (the `/api/orgs/<org>/` path):
+   Board access goes through the `api.py` helper, which owns auth (single token: env
+   `SQUAD_AUTH_TOKEN` > bare `SQUAD_AUTH_TOKEN=` in `~/.squad/auth`), `BASE_URL`, the
+   `/api/orgs/<org>/` prefix, and `Content-Type`. This is a maintainer tool with no per-repo
+   `.squadrc`, so `SQUAD_ORG` comes from the env only and must be exported so the helper (a
+   subprocess) sees it; set `SQUAD_ORG` before running to target a specific org:
 
    SQUAD_ORG="${SQUAD_ORG:-}"
    if [ -z "$SQUAD_ORG" ]; then
@@ -31,15 +33,8 @@ Scan all active projects (or a single project) for tasks that have had no agent 
      echo "Export SQUAD_ORG=<slug> (from the mint dialog) before running the heartbeat." >&2
      exit 1
    fi
-   AUTH_TOKEN="${SQUAD_AUTH_TOKEN:-}"; AUTH_SOURCE=$([ -n "$AUTH_TOKEN" ] && echo env || echo none)
-   if [ -z "$AUTH_TOKEN" ] && [ -f "$HOME/.squad/auth" ]; then
-     AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$HOME/.squad/auth" | cut -d= -f2-)
-     [ -n "$AUTH_TOKEN" ] && AUTH_SOURCE=file
-   fi
-   BASE_URL="${SQUAD_BASE_URL:-}"
-   [ -z "$BASE_URL" ] && [ -f "$HOME/.squad/config" ] && BASE_URL=$(grep '^SQUAD_BASE_URL=' "$HOME/.squad/config" | cut -d= -f2-)
-   BASE_URL="${BASE_URL:-https://squad-api-285415501393.asia-south1.run.app}"
-   AUTH_HEADER=(); [ -n "$AUTH_TOKEN" ] && AUTH_HEADER=(-H "Authorization: Bearer $AUTH_TOKEN")
+   export SQUAD_ORG   # api.py (a subprocess) reads the org from the env
+   api() { python3 ../squad/scripts/api.py "$@"; }
 
    Parse CLI arguments:
    - --project X  → scan only project X (default: all active projects)
@@ -50,19 +45,19 @@ Scan all active projects (or a single project) for tasks that have had no agent 
 
    If --project X specified:
      Validate project exists:
-     curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$X"
+     api GET /projects/$X
      If 404 → print error "Project '$X' not found." and exit.
      PROJECTS=("$X")
 
    Else (all projects):
-     ALL=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/projects")
+     ALL=$(api GET /projects)
      Extract active projects:
      PROJECTS = jq '.projects[] | select(.status == "active") | .id' from ALL
 
 ③ Fetch Board per Project (full view)
 
    For each project P in PROJECTS:
-     BOARD=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=$P")
+     BOARD=$(api GET /board?project=$P)
 
      Collect tasks from columns: todo, plan, plan_review, impl, impl_review, test
      SKIP the done column entirely.
@@ -75,7 +70,7 @@ Scan all active projects (or a single project) for tasks that have had no agent 
    dedicated activity reader (newest event's `created_at`), falling back to `created_at`:
 
      # Newest event's created_at (events come back chronological ASC → take the last one).
-     curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/activity?project=$P"
+     api GET /task/$ID/activity?project=$P
 
      python3 -c "
      import json, sys
@@ -135,25 +130,21 @@ Scan all active projects (or a single project) for tasks that have had no agent 
      days = int(sys.argv[3])
      status = sys.argv[4]
      last_ts = sys.argv[5]
-     base_url = sys.argv[6]
-     auth_token = sys.argv[7]
-     org = sys.argv[8]
 
-     auth_header = ['-H', f'Authorization: Bearer {auth_token}'] if auth_token else []
+     # api.py owns auth + BASE_URL + the org prefix + Content-Type (SQUAD_ORG from the env).
      body = json.dumps({
          'actor': 'Heartbeat',
          'model': 'system',
          'message': f'⚠️ Stagnant {days} days in {status}. Last activity: {last_ts}',
      })
      subprocess.run(
-         ['curl', '-sL', *auth_header, '-X', 'POST',
-          f'{base_url}/api/orgs/{org}/task/{task_id}/activity?project={project}',
-          '-H', 'Content-Type: application/json',
-          '-d', body],
+         ['python3', '../squad/scripts/api.py', 'POST',
+          f'/task/{task_id}/activity?project={project}',
+          '--json', body],
          capture_output=True
      )
      print(f'  Heartbeat written to task #{task_id}')
-     " "$TASK_ID" "$PROJECT" "$DAYS" "$STATUS" "$LAST_TS" "$BASE_URL" "$AUTH_TOKEN" "$SQUAD_ORG"
+     " "$TASK_ID" "$PROJECT" "$DAYS" "$STATUS" "$LAST_TS"
 
    Print: "Heartbeat activity events written for X tasks."
 ```
@@ -185,52 +176,32 @@ while i < len(args):
     else:
         i += 1
 
-# ── Auth setup (single token: env > bare `SQUAD_AUTH_TOKEN=`) ─────
-# SQUAD_ORG must be in the ENV (this tool has no per-repo .squadrc); the caller
-# resolves .squadrc and exports SQUAD_ORG before launching this script.
-import pathlib, os
-base_url = os.environ.get("SQUAD_BASE_URL", "")
-auth_token = os.environ.get("SQUAD_AUTH_TOKEN", "")
-squad_org = os.environ.get("SQUAD_ORG", "")
-
-auth_file = pathlib.Path.home() / ".squad" / "auth"
-config_file = pathlib.Path.home() / ".squad" / "config"
-for f in (auth_file, config_file):
-    if not f.exists():
-        continue
-    for line in f.read_text().splitlines():
-        if not auth_token and line.startswith("SQUAD_AUTH_TOKEN="):
-            auth_token = line.split("=", 1)[1].strip()
-        elif not base_url and line.startswith("SQUAD_BASE_URL="):
-            base_url = line.split("=", 1)[1].strip()
-# env wins; else the bare `SQUAD_AUTH_TOKEN=` line read above.
-base_url = base_url or "https://squad-api-285415501393.asia-south1.run.app"
+# ── Board access via api.py (it owns auth, BASE_URL, the /api/orgs/<org>/ prefix, Content-Type) ──
+# SQUAD_ORG must be in the ENV (this tool has no per-repo .squadrc); the caller resolves .squadrc
+# and exports SQUAD_ORG before launching this script — api.py reads it (and the PAT) from the env.
+import os
 
 # Every board call is org-scoped (/api/orgs/<org>/...). SQUAD_ORG is REQUIRED.
-org = squad_org
+org = os.environ.get("SQUAD_ORG", "")
 if not org:
     raise SystemExit(
         "SQUAD_ORG is not set. Every board call is org-scoped (/api/orgs/<org>/...). "
         "Export SQUAD_ORG=<slug> (from the mint dialog) before running the heartbeat."
     )
 
-def curl_get(url):
-    cmd = ["curl", "-sL", url]
-    if auth_token:
-        cmd += ["-H", f"Authorization: Bearer {auth_token}"]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+API = ["python3", "../squad/scripts/api.py"]
+
+def api_get(path):
+    r = subprocess.run(API + ["GET", path], capture_output=True, text=True)
     return json.loads(r.stdout)
 
-def curl_post(url, payload):
-    cmd = ["curl", "-sL", "-X", "POST", url, "-H", "Content-Type: application/json", "-d", json.dumps(payload)]
-    if auth_token:
-        cmd += ["-H", f"Authorization: Bearer {auth_token}"]
-    subprocess.run(cmd, capture_output=True)
+def api_post(path, payload):
+    subprocess.run(API + ["POST", path, "--json", json.dumps(payload)], capture_output=True)
 
 # ── Fetch projects ───────────────────────────────────────────────
 if project_filter:
     try:
-        proj_data = curl_get(f"{base_url}/api/orgs/{org}/projects/{project_filter}")
+        proj_data = api_get(f"/projects/{project_filter}")
         if "error" in proj_data:
             print(f"Error: Project '{project_filter}' not found.")
             sys.exit(1)
@@ -239,7 +210,7 @@ if project_filter:
         print(f"Error: Project '{project_filter}' not found.")
         sys.exit(1)
 else:
-    all_proj = curl_get(f"{base_url}/api/orgs/{org}/projects")
+    all_proj = api_get("/projects")
     projects = [p["id"] for p in all_proj.get("projects", []) if p.get("status") == "active"]
 
 if not projects:
@@ -253,7 +224,7 @@ stagnant_tasks = []
 
 for proj in projects:
     try:
-        board = curl_get(f"{base_url}/api/orgs/{org}/board?project={proj}")
+        board = api_get(f"/board?project={proj}")
     except Exception:
         print(f"Warning: failed to fetch board for project '{proj}', skipping.", file=sys.stderr)
         continue
@@ -273,7 +244,7 @@ for proj in projects:
             last_ts = None
             read_error = False
             try:
-                resp = curl_get(f"{base_url}/api/orgs/{org}/task/{task_id}/activity?project={proj}")
+                resp = api_get(f"/task/{task_id}/activity?project={proj}")
                 events = resp.get("activity") if isinstance(resp, dict) else None
                 if isinstance(events, list) and events:
                     stamps = [e.get("created_at", "") for e in events if isinstance(e, dict)]
@@ -346,8 +317,8 @@ written = 0
 for t in stagnant_tasks:
     try:
         # One atomic POST per task \u2014 no read-modify-write.
-        curl_post(
-            f"{base_url}/api/orgs/{org}/task/{t['id']}/activity?project={t['project']}",
+        api_post(
+            f"/task/{t['id']}/activity?project={t['project']}",
             {
                 "actor": "Heartbeat",
                 "model": "system",

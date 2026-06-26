@@ -8,13 +8,20 @@ All projects share a single centralized DB on the deployed Squad board.
 Read the project name from `.squadrc` (`SQUAD_PROJECT=`, committed at the repo root, created by `/squad-init`).
 Auth is resolved tool-agnostically: the `SQUAD_AUTH_TOKEN` env var first, then the bare `SQUAD_AUTH_TOKEN=` line in the `~/.squad/auth` credential file (mode 600). `SQUAD_ORG` is read from the env, else from `.squadrc` (REQUIRED — tenant is the `/api/orgs/<org>/` path). The token is a **Personal Access Token (PAT)** scoped to the user; it is never echoed, cat'd, or Read.
 
+Every board call goes through the **`api.py` helper**, sourced once as `api`. The helper owns — internally and opaquely — auth (the PAT, env `SQUAD_AUTH_TOKEN` > bare `SQUAD_AUTH_TOKEN=` in `~/.squad/auth`), transport (`BASE_URL` resolution + the `/api/orgs/<org>/` path prefix + the `project=` query merge), JSON encode + `Content-Type`, and a fail-fast `SQUAD_ORG` pre-flight. Skills never assemble `curl`, headers, or the token by hand.
+
 ```bash
-# 1. Project name: .squadrc → directory name
+# Board access — sourced once, then call `api <GET|POST|PATCH|DELETE> <path> [--json …] [-q …]`.
+# Path is the resource AFTER the org prefix (api.py prepends /api/orgs/<org> and merges project=).
+api() { python3 ../squad/scripts/api.py "$@"; }
+
+# 1. Project name (the project a call targets, used in resource paths): .squadrc → directory name
 PROJECT=""
 [ -f .squadrc ] && PROJECT=$(grep '^SQUAD_PROJECT=' .squadrc | cut -d= -f2-)
 [ -z "$PROJECT" ] && PROJECT=$(basename "$(pwd)")
 
-# 2. Auth token — env > bare `SQUAD_AUTH_TOKEN=` (from ~/.squad/auth)
+# 2. Org / tenant — env > .squadrc. api.py resolves this itself for every call; resolve it in the
+#    shell too only to export it to a child tool that reads the env (e.g. plan_batch.py).
 SQUAD_ORG="${SQUAD_ORG:-}"
 [ -z "$SQUAD_ORG" ] && [ -f .squadrc ] && SQUAD_ORG=$(grep '^SQUAD_ORG=' .squadrc | cut -d= -f2-)
 if [ -z "$SQUAD_ORG" ]; then
@@ -23,25 +30,11 @@ if [ -z "$SQUAD_ORG" ]; then
   echo "(committed) or export SQUAD_ORG=<slug> for this shell. Resolution order: env > .squadrc." >&2
   exit 1
 fi
-AUTH_TOKEN="${SQUAD_AUTH_TOKEN:-}"; AUTH_SOURCE=$([ -n "$AUTH_TOKEN" ] && echo env || echo none)
-if [ -z "$AUTH_TOKEN" ] && [ -f "$HOME/.squad/auth" ]; then
-  AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$HOME/.squad/auth" | cut -d= -f2-)
-  [ -n "$AUTH_TOKEN" ] && AUTH_SOURCE=file
-fi
-
-# 3. Board URL — env → ~/.squad/config → deployed default
-BASE_URL="${SQUAD_BASE_URL:-}"
-[ -z "$BASE_URL" ] && [ -f "$HOME/.squad/config" ] && BASE_URL=$(grep '^SQUAD_BASE_URL=' "$HOME/.squad/config" | cut -d= -f2-)
-BASE_URL="${BASE_URL:-https://squad-api-285415501393.asia-south1.run.app}"
-AUTH_HEADER=()
-if [ -n "$AUTH_TOKEN" ]; then
-  AUTH_HEADER=(-H "Authorization: Bearer $AUTH_TOKEN")
-fi
 ```
 
 If `.squadrc` is absent, `PROJECT` falls back to the directory name — prompt the user to run `/squad-init` to register it explicitly.
 
-**Resolution:** token = `SQUAD_AUTH_TOKEN` env > bare `SQUAD_AUTH_TOKEN=` (`~/.squad/auth`); `SQUAD_ORG` = env > `.squadrc` (**required** — every board call is org-scoped `/api/orgs/<org>/...`; unset is a fail-fast pre-flight error pointing to the mint dialog's `SQUAD_ORG=<slug>` line / `.squadrc`); URL = `SQUAD_BASE_URL` env > `~/.squad/config` > deployed default; project = `.squadrc` (`SQUAD_PROJECT=`) > directory name.
+**Resolution:** `api.py` resolves the credential + transport internally — token = `SQUAD_AUTH_TOKEN` env > bare `SQUAD_AUTH_TOKEN=` (`~/.squad/auth`); URL = `SQUAD_BASE_URL` env > `~/.squad/config` > deployed default. The shell resolves identity for the call paths: `SQUAD_ORG` = env > `.squadrc` (**required** — every board call is org-scoped `/api/orgs/<org>/...`; unset is a fail-fast pre-flight error pointing to the mint dialog's `SQUAD_ORG=<slug>` line / `.squadrc`); project = `.squadrc` (`SQUAD_PROJECT=`) > directory name.
 
 ### Token store format
 
@@ -55,7 +48,7 @@ The store line is emitted **only** by the mint UI (Settings → Personal Access 
 
 ### Auth errors — 401 vs 403
 
-The token resolves straight into the `Authorization` header; **never** `echo`/`cat`/Read it or `~/.squad/auth`, and **never** use `curl -v`. Note: a missing `SQUAD_ORG` is a *pre-flight* failure — it stops before any request is even sent (no 401/403), with the actionable error above pointing to the mint dialog's `SQUAD_ORG=<slug>` line / `.squadrc`. Two distinct, scope-aware cases (plain text the agent relays — non-interactive):
+`api.py` resolves the token straight into the `Authorization` header internally; **never** `echo`/`cat`/Read it or `~/.squad/auth`, and **never** try to print or log it. Note: a missing `SQUAD_ORG` is a *pre-flight* failure — it stops before any request is even sent (no 401/403), with the actionable error above pointing to the mint dialog's `SQUAD_ORG=<slug>` line / `.squadrc`. Two distinct, scope-aware cases (plain text the agent relays — non-interactive):
 
 - **401 (no / invalid / expired token).** Board returned `401` — no valid token for `$SQUAD_ORG`/this board. The human mints or refreshes a **Personal Access Token** in the board's web UI (**Settings → Personal Access Tokens**) and runs the store command it prints — the bare `SQUAD_AUTH_TOKEN=…` line (mode 600). The token is **never pasted to the agent**. (Don't print a URL — the skill only knows the API `BASE_URL`, and the mint page lives in the web UI; just point at **Settings → Personal Access Tokens**.)
 - **403 FORBIDDEN (valid token, missing scope).** Board returned `403 FORBIDDEN` — the **PAT** is valid but **lacks the required scope/permission** for this action. The human mints a PAT **with the needed permissions** in the web UI (**Settings → Personal Access Tokens**). Do not retry until a wider-scoped PAT is stored.
@@ -66,10 +59,10 @@ Quick debug check before a failing request (value-free — never prints the toke
 
 ```bash
 echo "SQUAD_PROJECT=$PROJECT"
-echo "SQUAD_BASE_URL=$BASE_URL"
 echo "SQUAD_ORG=${SQUAD_ORG:-unset (REQUIRED — fail-fast; add SQUAD_ORG=<slug> to .squadrc)}"
-echo "SQUAD_AUTH_TOKEN=$([ -n "$AUTH_TOKEN" ] && echo configured || echo empty)"
-echo "SQUAD_AUTH_SOURCE=$AUTH_SOURCE"   # env | file | none
+# Token + BASE_URL live inside api.py and are never printed. To check connectivity + auth
+# without mutating the board, run the read-only smoke: python3 ../squad/scripts/api_smoke.py
+# A failing call surfaces an actionable auth/transport error on stderr (exit 3 auth, 6 network).
 ```
 
 ## Pipeline Levels
@@ -140,7 +133,7 @@ This protocol belongs to the orchestrator (`squad-run`). **Only the orchestrator
 **Step 1 — Check current state**
 
 ```bash
-TASK=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT&fields=status,level")
+TASK=$(api GET /task/$ID?fields=status,level)
 STATUS=$(echo "$TASK" | jq -r '.status')
 LEVEL=$(echo "$TASK" | jq -r '.level')
 ```
@@ -162,28 +155,26 @@ LEVEL=$(echo "$TASK" | jq -r '.level')
 **Step 3 — Execute the move**
 
 ```bash
-RESPONSE=$(curl -sL -w "\n%{http_code}" "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d "{\"status\": \"$NEXT_STATUS\"}")
-HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-BODY=$(echo "$RESPONSE" | head -1)
+ERR=$(mktemp)
+BODY=$(api PATCH /task/$ID --json "{\"status\": \"$NEXT_STATUS\"}" 2>"$ERR")
+RC=$?   # 0 ok · 4 rejected transition (4xx) · 3 auth · 5 server · 6 network
 ```
 
-**Self-correction on 400 (once)**
+**Self-correction on a rejected transition (exit 4, once)**
 
 ```bash
-if [ "$HTTP_CODE" = "400" ]; then
-  # Read a valid destination from the response's allowed[] array and retry
-  ALLOWED=$(echo "$BODY" | jq -r '.allowed[0]')
-  if [ -n "$ALLOWED" ] && [ "$ALLOWED" != "null" ]; then
-    curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT" \
-      -H 'Content-Type: application/json' \
-      -d "{\"status\": \"$ALLOWED\"}"
+if [ "$RC" -eq 4 ]; then
+  # api.py prints the board's 4xx body to stderr (after its "ERROR: board returned HTTP <code>." line).
+  # Read a valid destination from the response's allowed[] array and retry.
+  ALLOWED=$(grep -v '^ERROR:' "$ERR" | jq -r '.allowed[0] // empty' 2>/dev/null)
+  if [ -n "$ALLOWED" ]; then
+    api PATCH /task/$ID --json "{\"status\": \"$ALLOWED\"}"
   else
     # If allowed is also empty: keep status, record the failure via POST /activity, notify the user
-    echo "ERROR: cannot move task $ID from $STATUS — API returned: $BODY"
+    echo "ERROR: cannot move task $ID from $STATUS — API returned: $(cat "$ERR")"
   fi
 fi
+rm -f "$ERR"
 ```
 
 On 2 consecutive failures: keep status, record the failure via `POST /api/task/:id/activity` (actor=`Orchestrator`), notify the user.
@@ -196,26 +187,22 @@ All DB operations go through the deployed Squad board HTTP API (`$BASE_URL`).
 
 ```bash
 # Board — full (web UI, task detail views)
-curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=$PROJECT"
+api GET /board
 
 # Board — summary (list/stats/context — excludes large TEXT fields)
-curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=$PROJECT&summary=true"
+api GET /board?summary=true
 
 # Read task — full
-curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT"
+api GET /task/$ID
 
 # Read task — agent-specific fields only (always includes id, project, status)
-curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT&fields=title,description,plan"
+api GET /task/$ID?fields=title,description,plan
 
 # Update task fields / status
-curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"plan": "...", "status": "plan_review"}'
+api PATCH /task/$ID --json '{"plan": "...", "status": "plan_review"}'
 
 # Create task
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task" \
-  -H 'Content-Type: application/json' \
-  -d "{\"title\": \"...\", \"project\": \"$PROJECT\", \"priority\": \"medium\", \"level\": 3, \"description\": \"...\"}"
+api POST /task --json "{\"title\": \"...\", \"project\": \"$PROJECT\", \"priority\": \"medium\", \"level\": 3, \"description\": \"...\"}"
 
 # The next three endpoints are RECORD-ONLY: each appends its verdict object to the
 # matching comments/results array (and /plan-review, /review also bump their review
@@ -230,68 +217,52 @@ curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task" \
 # Omit when not threading.
 
 # Plan review result (record-only)
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/plan-review?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"reviewer": "Critic", "model": "<MODEL_CRITIC>", "status": "approved", "comment": "...", "correlation_id": "<correlation_id>"}'
+api POST /task/$ID/plan-review --json '{"reviewer": "Critic", "model": "<MODEL_CRITIC>", "status": "approved", "comment": "...", "correlation_id": "<correlation_id>"}'
 # → {"success":true,"comment":{...},"version":<int>} — verdict recorded; status unchanged.
 
 # Impl review result (record-only)
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/review?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"reviewer": "Inspector", "model": "<MODEL_INSPECTOR>", "status": "approved", "comment": "...", "correlation_id": "<correlation_id>"}'
+api POST /task/$ID/review --json '{"reviewer": "Inspector", "model": "<MODEL_INSPECTOR>", "status": "approved", "comment": "...", "correlation_id": "<correlation_id>"}'
 # → {"success":true,"comment":{...},"version":<int>} — verdict recorded; status unchanged.
 
 # Test result (record-only)
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/test-result?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"tester": "test-runner", "status": "pass", "lint": "...", "build": "...", "tests": "...", "comment": "...", "correlation_id": "<correlation_id>"}'
+api POST /task/$ID/test-result --json '{"tester": "test-runner", "status": "pass", "lint": "...", "build": "...", "tests": "...", "comment": "...", "correlation_id": "<correlation_id>"}'
 # → {"success":true,"result":{...},"version":<int>} — verdict recorded; status unchanged.
 
 # Append an activity event (machine event stream — see "Activity vs Comments" below)
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/activity?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"actor": "Orchestrator", "model": "system", "message": "Committed abc1234: <subject> [squad #'$ID']"}'
+api POST /task/$ID/activity --json '{"actor": "Orchestrator", "model": "system", "message": "Committed abc1234: <subject> [squad #'$ID']"}'
 # → {"success":true,"event":{...}}
 # (the per-step orchestrator activity event also carries "correlation_id": the step's id;
 #  this commit-record event is the Orchestrator's own and may omit it.)
 
 # Read a task's activity events (chronological reader)
-curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/activity?project=$PROJECT&limit=50"
+api GET /task/$ID/activity?limit=50
 
 # Add a human comment (human-only channel — skills NEVER write this)
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/comment?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"content": "Looks good to ship."}'
+api POST /task/$ID/comment --json '{"content": "Looks good to ship."}'
 
 # Reorder
-curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/reorder?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"status": "plan", "after_id": null, "before_id": null}'
+api PATCH /task/$ID/reorder --json '{"status": "plan", "after_id": null, "before_id": null}'
 
 # Delete
-curl -sL "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT"
+api DELETE /task/$ID
 
 # Reopen a completed task (done → todo). Optional reason is recorded as an activity event.
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/reopen?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"reason": "regression found in prod"}'
+api POST /task/$ID/reopen --json '{"reason": "regression found in prod"}'
 # → {"success":true,"status":"todo","version":<int>}
 
 # Upload an image attachment (base64 over JSON; stored in a private bucket; the returned url is a presigned download link)
 DATA=$(base64 < "$IMG_PATH" | tr -d '\n')
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/attachment?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -n --arg filename "$(basename "$IMG_PATH")" --arg data "$DATA" '{filename: $filename, data: $data}')"
+api POST /task/$ID/attachment --json "$(jq -n --arg filename "$(basename "$IMG_PATH")" --arg data "$DATA" '{filename: $filename, data: $data}')"
 # → {"success":true,"attachment":{"filename","stored_name","url","size","uploaded_at"}}
 
 # Delete an attachment (stored_name from the task's attachments array)
-curl -sL "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/attachment/$STORED_NAME?project=$PROJECT"
+api DELETE /task/$ID/attachment/$STORED_NAME
 
 # Download a task's attachments to local files (host-agnostic; temp dir, no repo pollution)
 DIR="${TMPDIR:-/tmp}/squad-attachments/$ID"; mkdir -p "$DIR"
-curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/attachment?project=$PROJECT" \
+api GET /task/$ID/attachment \
   | jq -r '.[] | "\(.url)\t\(.filename)"' \
-  | while IFS=$'\t' read -r url fn; do curl -s "$url" -o "$DIR/$fn"; done   # files now in $DIR
+  | while IFS=$'\t' read -r url fn; do curl -s "$url" -o "$DIR/$fn"; done   # presigned fetch stays raw; files now in $DIR
 ```
 
 `GET /task/:id/attachment` returns a JSON array of `{filename, stored_name, url, size, uploaded_at}` — the `url` is an absolute, short-TTL **presigned download URL** (private bucket): fetch it directly with a plain `curl` — it is self-authenticating, so **no `Authorization` header is needed on the per-file fetch**. It **expires** — if a `url` is stale, re-list via `GET /task/:id/attachment` for a fresh one. Note the `GET /task/:id/attachment` **list** call itself requires the PAT (`attachment:read`); only the per-file presigned `url` does not. Accepted: png, jpg/jpeg, gif, webp, svg. Deleting a task removes its stored objects.
@@ -301,8 +272,6 @@ curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/attachment?
 - **Codex**: a URL in the prompt is treated as *text* (not fetched); Codex sees images only when attached at launch via `--image <path>`. So download first then pass `--image`, or just cite the `url`.
 
 Don't assume an agent auto-sees an attachment — surface the `url`/local path and use the host's image tool where available.
-
-If `AUTH_TOKEN` is set, keep using the shared `AUTH_HEADER` array so every request can target the same protected board deployment without repeating conditional header logic.
 
 Only a `done` task can be reopened; reopening clears its lifecycle timestamps and `current_agent`, preserves prior work (plan, comments, counts, results), and records the action as an activity event (server-side). Reopening any non-`done` task returns `409 {"error":"only a done task can be reopened","status":"<current>"}` and changes nothing.
 
@@ -315,14 +284,11 @@ To make a conditional (compare-and-set) write, echo that version back on the gen
 - `If-Match: "<version>"` header (preferred), or
 - `"expected_version": <version>` in the JSON body (curl-friendly fallback; the header wins if both are present).
 
-If the supplied version no longer matches the row, the PATCH is rejected with **412** `{"error":"Precondition failed: version mismatch","currentVersion":<int>}` and nothing is written — re-read the task and retry. Omit the precondition for an unconditional write (back-compatible default). A successful PATCH returns `{"success":true,"version":<new version>}` — except a bare same-status no-op PATCH (no field actually changes), which returns the **full task row** instead of `{success, version}`.
+`api.py` sets headers internally and forwards no custom `If-Match` header, so a conditional write through the helper uses the **`expected_version` body form** (the example below). If the supplied version no longer matches the row, the PATCH is rejected with **412** `{"error":"Precondition failed: version mismatch","currentVersion":<int>}` and nothing is written — re-read the task and retry. Omit the precondition for an unconditional write (back-compatible default). A successful PATCH returns `{"success":true,"version":<new version>}` — except a bare same-status no-op PATCH (no field actually changes), which returns the **full task row** instead of `{success, version}`.
 
 ```bash
 # Conditional update: only applies if the row is still at version 7
-curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -H 'If-Match: "7"' \
-  -d '{"status": "plan_review"}'
+api PATCH /task/$ID --json '{"expected_version": 7, "status": "plan_review"}'
 # → {"success":true,"version":8}   (or 412 {"error":"Precondition failed: version mismatch","currentVersion":<int>})
 ```
 
@@ -344,36 +310,28 @@ The orchestrator reads these to get each stage's verdict directly, instead of pa
 
 ```bash
 # List all projects with links
-curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/projects"
+api GET /projects
 
 # Get single project with task counts and links
-curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT"
+api GET /projects/$PROJECT
 
 # Create/upsert project
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/projects" \
-  -H 'Content-Type: application/json' \
-  -d '{"id": "my-project", "name": "My Project", "purpose": "...", "stack": "...", "category": "personal"}'
+api POST /projects --json '{"id": "my-project", "name": "My Project", "purpose": "...", "stack": "...", "category": "personal"}'
 
 # Update project fields (purpose, stack, brief, status, category, repo_url)
-curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"brief": "Current state + direction + recent decisions"}'
+api PATCH /projects/$PROJECT --json '{"brief": "Current state + direction + recent decisions"}'
 
 # Delete project
-curl -sL "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT"
+api DELETE /projects/$PROJECT
 
 # List project links
-curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT/links"
+api GET /projects/$PROJECT/links
 
 # Create project link
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT/links" \
-  -H 'Content-Type: application/json' \
-  -d '{"target_id": "other-project", "relation": "depends_on"}'
+api POST /projects/$PROJECT/links --json '{"target_id": "other-project", "relation": "depends_on"}'
 
 # Delete project link
-curl -sL "${AUTH_HEADER[@]}" -X DELETE "$BASE_URL/api/orgs/$SQUAD_ORG/projects/$PROJECT/links" \
-  -H 'Content-Type: application/json' \
-  -d '{"target_id": "other-project", "relation": "depends_on"}'
+api DELETE /projects/$PROJECT/links --json '{"target_id": "other-project", "relation": "depends_on"}'
 ```
 
 > For full schema, column descriptions, and JSON field formats, read `schema.md`.
@@ -471,7 +429,7 @@ The card description is this structured body (Markdown is fine; keep the field l
 # Open friction cards (not done), id+title from the summary.
 # The summary is an object keyed by status (todo/plan/plan_review/impl/impl_review/test/done),
 # each an array of cards; flatten the non-done buckets so `done` cards are excluded by construction.
-curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/board?project=squad&summary=true" \
+api GET /board?project=squad&summary=true \
   | jq -r '[ .todo, .plan, .plan_review, .impl, .impl_review, .test ] | add // []
            | .[]
            | select((.tags // "") | test("friction"))
@@ -486,7 +444,6 @@ forced to `project=squad`, `priority=low`, with the two tags as a JSON array. Bu
 with jq or Python (see JSON Safety) so newlines/quotes in `evidence` can't break the JSON:
 
 ```bash
-SQUAD_BASE_URL_FOR_REPORTS="${SQUAD_BASE_URL:-https://squad-api-285415501393.asia-south1.run.app}"
 BODY=$(jq -n \
   --arg area "board-api" \
   --arg severity "med" \
@@ -502,14 +459,15 @@ BODY=$(jq -n \
       + "\n**suggestion:** " + $suggestion
       + "\n**source_project:** " + $source_project
       + "\n**source_task:** " + $source_task)}')
-curl -sL "${AUTH_HEADER[@]}" -X POST "$SQUAD_BASE_URL_FOR_REPORTS/api/orgs/$SQUAD_ORG/task" \
-  -H 'Content-Type: application/json' -d "$BODY"
+api POST /task?project=squad --json "$BODY"
 # → {"success":true,"id":<NNN>} — a todo card tagged `friction, triage` on project squad.
+# project=squad is forced in the query (api.py won't override an explicit project=); the body
+# also carries "project":"squad" — both agree, so the report lands on project squad regardless.
 ```
 
-> Reports always target **project `squad`**, even when you are working on a different project. The board
-> URL is the same `$BASE_URL` you already resolved and the same org path `/api/orgs/$SQUAD_ORG/...`;
-> only the `project` field changes to `squad`. The reporting org (`$SQUAD_ORG`) must own project `squad`
+> Reports always target **project `squad`**, even when you are working on a different project. `api.py`
+> resolves the same board URL and the same org path `/api/orgs/<org>/...`; only the targeted project
+> changes to `squad` (`?project=squad`). The reporting org must own project `squad`
 > (single-DB reality; a dedicated reports-org override is a noted follow-up, not in scope).
 
 ## Run Audit
@@ -625,9 +583,9 @@ echo hi
 to display   ```   in prose, type a 4-backtick span around it:   ```` ``` ````
 ~~~
 
-## JSON Safety in curl
+## JSON Safety
 
-When passing user-supplied text (titles, descriptions) to curl, use `jq` or Python to build the JSON — never embed raw text in shell strings, as literal newlines and quotes break JSON:
+When passing user-supplied text (titles, descriptions) to a board write, use `jq` or Python to build the JSON body — never embed raw text in shell strings, as literal newlines and quotes break JSON:
 
 ```bash
 # Safe: use jq
@@ -637,12 +595,11 @@ PAYLOAD=$(jq -n \
   --arg description "$DESCRIPTION" \
   --argjson level 2 \
   '{title: $title, project: $project, priority: "medium", level: $level, description: $description}')
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task" \
-  -H 'Content-Type: application/json' \
-  -d "$PAYLOAD"
+api POST /task --json "$PAYLOAD"
 ```
 
-Or use Python `json.dumps()` to serialize the body safely.
+Or use Python `json.dumps()` to serialize the body safely. `api.py` re-encodes the body it
+receives, so the safe-build pattern above stays the right way to assemble user-supplied text.
 
 ## Error Handling
 
@@ -715,13 +672,11 @@ The server **enforces acyclicity at write time** (in-transaction CTE) and single
 
 ```bash
 # Declare a blocks dependency: DEP blocks ID (ID is blocked_by DEP)
-# `to` is an opaque <KEY>-<seq> display id string (e.g. SQD-12) — use --arg, never --argjson
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$DEP/relationships?project=$PROJECT" \
-  -H 'Content-Type: application/json' -d "$(jq -n --arg to "$ID" '{to:$to, type:"blocks"}')"
+# `to` is an opaque <KEY>-<seq> display id string — use --arg, never --argjson
+api POST /task/$DEP/relationships --json "$(jq -n --arg to "$ID" '{to:$to, type:"blocks"}')"
 
 # Attach a child to its epic: CHILD's parent is EPIC
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$CHILD/relationships?project=$PROJECT" \
-  -H 'Content-Type: application/json' -d "$(jq -n --arg to "$EPIC" '{to:$to, type:"parent"}')"
+api POST /task/$CHILD/relationships --json "$(jq -n --arg to "$EPIC" '{to:$to, type:"parent"}')"
 ```
 
 ### Resolving dependencies (squad-run ⓪ʙ)
@@ -732,7 +687,7 @@ Read `blocks` edges via `GET /api/task/:id/relationships` → `.blocked_by` (NOT
 
 **Context injection**: take dep ids from `.blocked_by[].id`, then fetch each dep's context fields:
 ```bash
-curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$DEP_ID?project=$PROJECT&fields=title,status,decision_log,implementation_notes"
+api GET /task/$DEP_ID?fields=title,status,decision_log,implementation_notes
 ```
 All fields are fetched once and cached. Per-agent filtering happens at context assembly time.
 

@@ -55,11 +55,9 @@ TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 SHIELD_NOTES="\n\n---\n> **Shield** \`<MODEL_SHIELD>\` · $TIMESTAMP\n\n<TEST_NOTES_MARKDOWN>"
 
 # Append Shield's notes to existing implementation_notes
-EXISTING=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/<ID>?project=<PROJECT>" | jq -r '.implementation_notes // ""')
+EXISTING=$(api GET /task/<ID> | jq -r '.implementation_notes // ""')
 
-curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/<ID>?project=<PROJECT>" \
-  -H 'Content-Type: application/json' \
-  -d "{\"implementation_notes\": \"$EXISTING$SHIELD_NOTES\", \"correlation_id\": \"<correlation_id>\", \"current_agent\": null}"
+api PATCH /task/<ID> --json "{\"implementation_notes\": \"$EXISTING$SHIELD_NOTES\", \"correlation_id\": \"<correlation_id>\", \"current_agent\": null}"
 ```
 
 `correlation_id` is filled by the orchestrator (the `<correlation_id>` placeholder) — it is the per-step grouping token that ties this write to the orchestrator's activity event for this (impl) step. Leave the placeholder as-is; do not generate or change it.

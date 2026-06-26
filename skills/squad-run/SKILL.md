@@ -113,7 +113,7 @@ EFFORT_RANGER=$(read_effort ranger)
 ```bash
 # 1. Read current task state (status + level + card_type).
 # Stateless: re-read (status, level) every loop; NEVER cache status across a gate.
-TASK=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT&fields=status,level,card_type")
+TASK=$(api GET /task/$ID?fields=status,level,card_type)
 STATUS=$(echo "$TASK" | jq -r '.status')
 LEVEL=$(echo "$TASK" | jq -r '.level')
 CARD_TYPE=$(echo "$TASK" | jq -r '.card_type // "task"')
@@ -121,7 +121,7 @@ CARD_TYPE=$(echo "$TASK" | jq -r '.card_type // "task"')
 # 1a. Pipeline-exclusion: an epic is a CONTAINER, not runnable. Refuse and list its children.
 #     (See ../squad/shared.md → Task Relationships & Epics.)
 if [ "$CARD_TYPE" = "epic" ]; then
-  REL=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/relationships?project=$PROJECT")
+  REL=$(api GET /task/$ID/relationships)
   KIDS=$(echo "$REL" | jq -r '(.children // []) | if length == 0 then "(no children yet)" else (.[] | "  #\(.id) \(.title) [\(.status)]") end')
   PROG=$(echo "$REL" | jq -r '"\(.children_progress.done)/\(.children_progress.total)"')
   echo "Epic #$ID is a container — run its children ($PROG done):"
@@ -132,7 +132,7 @@ fi
 # 1b. Sub-task readiness nudge (SOFT — NOT a block; the dep hard-block in ⓪ʙ takes precedence).
 #     A `task` with incomplete .children → warn "usually run those first".
 #     Default mode: AskUserQuestion confirm/cancel. --auto: proceed + log an Orchestrator activity note.
-REL=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/relationships?project=$PROJECT")
+REL=$(api GET /task/$ID/relationships)
 OPEN_KIDS=$(echo "$REL" | jq -r '[(.children // [])[] | select(.status != "done")] | length')
 if [ "$OPEN_KIDS" -gt 0 ]; then
   echo "Task #$ID has $OPEN_KIDS open sub-task(s) — usually run those first (nudge, not a block)."
@@ -191,7 +191,7 @@ case "$STATUS" in
   impl_review) VFIELD=last_review_status ;;
   test)        VFIELD=last_test_status ;;
 esac
-VERDICT=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT&fields=$VFIELD" \
+VERDICT=$(api GET /task/$ID?fields=$VFIELD \
   | VFIELD="$VFIELD" python3 -c "import sys,json,os; print(json.load(sys.stdin).get(os.environ['VFIELD']) or '')")
 ```
 
@@ -255,7 +255,7 @@ Template files are at `../squad/templates/`.
 
 ```
 ⓪ Fetch project brief (once per pipeline run, cache for all agents)
-   PROJECT_DATA = curl GET /api/projects/$PROJECT
+   PROJECT_DATA = api GET /projects/$PROJECT
    PROJECT_BRIEF = extract .brief field (empty string if null or project not found)
    This is injected into every agent template via <project_brief> placeholder.
 
@@ -267,7 +267,7 @@ Template files are at `../squad/templates/`.
    endpoint are both retired — see `../squad/shared.md`.)
    ```bash
    # Read structured blocks edges; .blocked_by = the deps this task is blocked by.
-   REL=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/relationships?project=$PROJECT")
+   REL=$(api GET /task/$ID/relationships)
    DEP_IDS=$(echo "$REL" | jq -r '.blocked_by[]?.id')
    ```
 
@@ -292,7 +292,7 @@ Template files are at `../squad/templates/`.
    A `404` warns + skips that dep and continues.
    ```bash
    for DEP_ID in $DEP_IDS; do
-     DEP_TASK=$(curl -sL "${AUTH_HEADER[@]}" "$BASE_URL/api/orgs/$SQUAD_ORG/task/$DEP_ID?project=$PROJECT&fields=title,status,decision_log,implementation_notes")
+     DEP_TASK=$(api GET /task/$DEP_ID?fields=title,status,decision_log,implementation_notes)
      if [ -z "$(echo "$DEP_TASK" | jq -r '.id // empty')" ]; then
        echo "WARNING: dependency #$DEP_ID not found (404), skipping"
        continue
@@ -353,17 +353,17 @@ Template files are at `../squad/templates/`.
 
 ① Read task fields (use per-agent fields to minimize token usage)
    # Planner
-   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,spec,plan_review_comments
+   TASK = api GET /task/$ID?fields=title,description,spec,plan_review_comments
    # Critic
-   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,spec,plan,decision_log,done_when
+   TASK = api GET /task/$ID?fields=title,description,spec,plan,decision_log,done_when
    # Builder
-   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,spec,plan,done_when,plan_review_comments,review_comments
+   TASK = api GET /task/$ID?fields=title,description,spec,plan,done_when,plan_review_comments,review_comments
    # Shield
-   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,spec,implementation_notes
+   TASK = api GET /task/$ID?fields=title,description,spec,implementation_notes
    # Inspector
-   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,description,spec,plan,done_when,implementation_notes
+   TASK = api GET /task/$ID?fields=title,description,spec,plan,done_when,implementation_notes
    # Ranger
-   TASK = curl GET /api/task/$ID?project=$PROJECT&fields=title,implementation_notes
+   TASK = api GET /task/$ID?fields=title,implementation_notes
    Extract only the fields listed above for each agent
 
 ② Enter the agent's column + mark it active — ONE level-aware PATCH
@@ -391,7 +391,7 @@ Template files are at `../squad/templates/`.
        plan→plan is illegal; idempotent re-dispatch)
      • Any agent already in its own column (Critic@plan_review, Inspector@impl_review,
        Ranger@test, Shield@impl): { "current_agent": "<Nickname>" }  (no status change)
-   curl PATCH /api/task/$ID  →  <body above>
+   api PATCH /task/$ID --json <body above>
 
 ③ Read template file
    Read tool: ../squad/templates/<agent>.md
@@ -505,9 +505,7 @@ Template files are at `../squad/templates/`.
 Builder and Shield each RETURN their output (no self-move). Once both complete, the orchestrator
 issues the impl→impl_review **commit** move:
 ```bash
-curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"status": "impl_review", "current_agent": null, "actor": "Orchestrator"}'
+api PATCH /task/$ID --json '{"status": "impl_review", "current_agent": null, "actor": "Orchestrator"}'
 ```
 
 **Default mode**: at `plan_review`, `impl_review`, and `test` (the L3 Ranger gate), the contract order is explicit — the agent
@@ -521,9 +519,7 @@ PRECEDES the move PATCH; the move is always the generic PATCH, never the verdict
 ```bash
 # 1. Move to done (single validated generic PATCH) — clears current_agent.
 #    Re-issuing when already done is a safe no-op.
-curl -sL "${AUTH_HEADER[@]}" -X PATCH "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d '{"status": "done", "current_agent": null, "actor": "Orchestrator"}'
+api PATCH /task/$ID --json '{"status": "done", "current_agent": null, "actor": "Orchestrator"}'
 
 # 2. Side-effects AFTER the state commit — commit pending changes.
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
@@ -536,9 +532,7 @@ COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "no-git")
 SUBJECT=$(git log -1 --format=%s 2>/dev/null || echo "no-git")
 BODY=$(jq -n --arg msg "Committed $COMMIT_HASH: $SUBJECT [squad #$ID]" \
   '{actor: "Orchestrator", model: "system", message: $msg}')
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/$ID/activity?project=$PROJECT" \
-  -H 'Content-Type: application/json' \
-  -d "$BODY"
+api POST /task/$ID/activity --json "$BODY"
 ```
 
 If no commits yet, skip the event or record `message:"Committed (none) [squad #$ID]"`.
