@@ -476,7 +476,7 @@ Every squad run records its full Coach audit to an append-only run-audits store 
 so triage and eval both derive from one lossless log. The Coach POSTs this **every run** (clean and
 friction); material rows are ALSO surfaced as `friction, triage` cards (see Squad Friction Reports).
 
-### POST /api/run-audit?project=squad  (append-only, Bearer-gated → `{ "id": <int> }`)
+### POST /api/orgs/{org}/run-audit?project=squad  (append-only, Bearer-gated → `{ "id": <int> }`)
 
 Body (JSON). `rubric`, `signals`, `filed_card_ids` MUST be valid JSON values — the endpoint returns
 **400** (`"<field> must be valid JSON"`) on bare text. `overall_status` must be `clean` or `friction`.
@@ -493,7 +493,7 @@ Body (JSON). `rubric`, `signals`, `filed_card_ids` MUST be valid JSON values —
 | `signals` | yes | JSON array/object | friction signals as a JSON array or object (never a bare string scalar) — MUST be valid JSON |
 | `filed_card_ids` | yes | JSON array | ids of the `friction, triage` cards filed this run (`[]` on a clean run) — MUST be valid JSON |
 
-### GET /api/run-audits?project=&since=&status=&skill=  →  `{ "audits": [ … ] }`
+### GET /api/orgs/{org}/run-audits?project=&since=&status=&skill=  →  `{ "audits": [ … ] }`
 
 Read-back / verification. Optional filters: `since` (ISO), `status` (clean|friction), `skill`.
 Each row echoes the POST fields plus `id` and `created_at`.
