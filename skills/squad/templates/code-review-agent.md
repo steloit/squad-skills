@@ -74,9 +74,7 @@ Score the implementation on **6 dimensions (1–5 each)**:
 
 ```bash
 # Submit signed code review
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/<ID>/review?project=<PROJECT>" \
-  -H 'Content-Type: application/json' \
-  -d '{
+api POST /task/<ID>/review --json '{
     "reviewer": "Inspector",
     "model": "<MODEL_INSPECTOR>",
     "status": "approved",

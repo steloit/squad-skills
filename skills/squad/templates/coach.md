@@ -126,12 +126,12 @@ print(json.dumps({
 PY
 )
 # Best-effort POST — observability must NOT break the run or block triage.
-RESP=$(curl -sL -w "\n%{http_code}" "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/run-audit?project=squad" \
-  -H 'Content-Type: application/json' -d "$BODY")
-CODE=$(printf '%s' "$RESP" | tail -1)
-if [ "$CODE" != "200" ]; then
-  echo "WARN: run-audit POST failed (HTTP $CODE) — logged, continuing. body: $(printf '%s' "$RESP" | head -1)"
+ERR=$(mktemp)
+RESP=$(api POST /run-audit?project=squad --json "$BODY" 2>"$ERR")
+if [ $? -ne 0 ]; then
+  echo "WARN: run-audit POST failed — logged, continuing. error: $(cat "$ERR")"
 fi
+rm -f "$ERR"
 ```
 
 - `overall_status=friction` iff `ANY_MATERIAL=1` (set in Step 2) — decoupled from the N=3 card cap, so a

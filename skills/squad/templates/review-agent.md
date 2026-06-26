@@ -63,9 +63,7 @@ Score Planner's plan on **3 dimensions (1–5 each)**:
 
 ```bash
 # Submit signed plan review
-curl -sL "${AUTH_HEADER[@]}" -X POST "$BASE_URL/api/orgs/$SQUAD_ORG/task/<ID>/plan-review?project=<PROJECT>" \
-  -H 'Content-Type: application/json' \
-  -d '{
+api POST /task/<ID>/plan-review --json '{
     "reviewer": "Critic",
     "model": "<MODEL_CRITIC>",
     "status": "approved",
