@@ -146,6 +146,81 @@ def _classify(ref_segs, spec_keys, vocabulary):
 
 
 # ---------------------------------------------------------------------------
+# Executable consumer surface: the `api <METHOD> <resource-path>` calls.
+#
+# Post-919 the skills issue board calls through the api.py helper rather than raw
+# curl, e.g. `api GET /task/$ID/spec`. api.py's build_url prepends the org mount
+# (`<base>/api/orgs/<org>` + resource-path) and merges project=<project> into the
+# query, so the SERVER path is `/api/orgs/<org>/task/<id>/spec`. After the `/api`
+# mount is stripped (the spec keys are server-relative) the comparison shape is
+# `/orgs/{}/task/{}/spec`. We mirror build_url EXACTLY here: ensure the leading
+# slash it adds, strip the query string (project is a query param, not a path
+# segment), collapse param segments to PARAM, and prepend ('orgs', PARAM).
+#
+# Unlike the prose check there is NO "ignore" tier: every api() call is a real
+# intended endpoint, so an unresolved call is always a failure — including the
+# EDGE case of an api() call to a genuinely non-org-scoped endpoint, which api.py
+# still org-scopes and so resolves to a path absent from the spec (a real 404).
+# ---------------------------------------------------------------------------
+
+# `api <METHOD> <token>`. `\bapi ` + a METHOD word excludes the `api()` wrapper
+# DEFINITION line in shared.md (`api() { … }` — no METHOD follows). The token runs
+# to the first whitespace; its query string + trailing prose punctuation (e.g. the
+# closing paren in `api GET /projects)`) are stripped in _normalize_call.
+_API_CALL_RE = re.compile(r"\bapi (GET|POST|PATCH|DELETE) (\S+)")
+
+
+def _normalize_call(resource_path: str):
+    """A raw api.py resource-path → collapsed SERVER-relative segment tuple, mirroring
+    api.py build_url (`/api/orgs/<org>` + resource-path). Strips the query string and
+    trailing prose punctuation, applies the leading slash build_url adds, collapses
+    params to PARAM, and prepends ('orgs', PARAM) for the org mount.
+
+    `/task/$ID/spec` → ('orgs', '{}', 'task', '{}', 'spec')
+    """
+    s = resource_path.split("?", 1)[0].split("#", 1)[0]  # drop query / fragment
+    s = s.rstrip("`\"'.,;:)/ \t")                         # drop trailing prose punctuation
+    if not s.startswith("/"):
+        s = "/" + s                                       # build_url prepends the slash
+    return ("orgs", PARAM) + _collapse(s)
+
+
+def _iter_api_calls(files):
+    """Yield (file, line_no, method, raw_path, normalized_segs) for every executable
+    `api <METHOD> <resource-path>` call across `files`."""
+    for f in files:
+        for i, line in enumerate(f.read_text().splitlines(), 1):
+            for m in _API_CALL_RE.finditer(line):
+                method, raw = m.group(1), m.group(2)
+                yield f, i, method, raw, _normalize_call(raw)
+
+
+def _api_call_offenders(files, spec_keys, repo_root):
+    """List of 'skill:line: api METHOD raw (normalized …)' for executable calls whose
+    normalized server path is absent from the snapshot."""
+    offenders = []
+    for f, i, method, raw, segs in _iter_api_calls(files):
+        if not _matches_spec(segs, spec_keys):
+            try:
+                rel = f.relative_to(repo_root)
+            except ValueError:
+                rel = f
+            offenders.append(f"{rel}:{i}: api {method} {raw}  (normalized /{'/'.join(segs)})")
+    return offenders
+
+
+def build_consumer_contract(repo_root):
+    """The deduped, sorted {method, path} consumer surface the skills call — the
+    bi-directional-CT 'consumer publishes its subset' artifact (tests/fixtures/
+    consumer-contract.json). `path` is the server-relative shape (params → `{}`).
+    Regenerate the committed file with scripts/refresh-consumer-contract.py."""
+    seen = set()
+    for _f, _i, method, _raw, segs in _iter_api_calls(_doc_files(repo_root)):
+        seen.add((method, "/" + "/".join(segs)))
+    return [{"method": m, "path": p} for m, p in sorted(seen)]
+
+
+# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
@@ -246,3 +321,54 @@ def test_run_audit_contract(repo_root):
     assert _classify(_normalize_ref("/api/orgs/$ORG/board?project=p"), spec_keys, vocab) == "valid"
     # The illustrative non-board example is ignored, not failed.
     assert _classify(_normalize_ref("/api/items"), spec_keys, vocab) == "ignore"
+
+
+def test_executable_api_calls_match_openapi(repo_root):
+    """Every executable `api <METHOD> <resource-path>` call in the skills resolves to a path
+    in the OpenAPI snapshot once normalized through api.py's org mount. This is the real
+    runtime surface (post-919) the prose check was blind to. Fails naming skill:line + the
+    resolved server path."""
+    spec_keys = _load_spec_keys(repo_root)
+    files = _doc_files(repo_root)
+    calls = list(_iter_api_calls(files))
+    assert len(calls) >= 50, (
+        f"the api() extractor found only {len(calls)} calls — it looks broken (a vacuous "
+        "guard); the migrated skills issue ~100 `api <METHOD> <path>` calls"
+    )
+    offenders = _api_call_offenders(files, spec_keys, repo_root)
+    assert not offenders, (
+        "an executable `api <METHOD> <path>` call resolves to a path not in the OpenAPI "
+        "snapshot (tests/fixtures/openapi.json) — fix the call or refresh the snapshot "
+        "(scripts/refresh-openapi.sh):\n" + "\n".join(offenders)
+    )
+
+
+def test_negative_control_executable_guard(repo_root, tmp_path):
+    """Proves the executable extractor is LIVE, not vacuous: a bogus `api GET /tsak/{}`
+    (typo of `task`) must turn the guard RED, while the real migrated tree stays GREEN."""
+    spec_keys = _load_spec_keys(repo_root)
+
+    bogus = tmp_path / "BOGUS_skill.md"
+    bogus.write_text("Example call:\n\n    api GET /tsak/{}\n")
+    red = _api_call_offenders([bogus], spec_keys, tmp_path)
+    assert red, "negative control failed: bogus `api GET /tsak/{}` was NOT caught by the guard"
+
+    green = _api_call_offenders(_doc_files(repo_root), spec_keys, repo_root)
+    assert not green, "the real migrated tree must pass clean:\n" + "\n".join(green)
+
+
+def test_consumer_contract_in_sync(repo_root):
+    """The committed consumer-contract.json (the published consumer subset) stays in sync with
+    the api() surface — regenerate-and-diff, exactly like the OpenAPI snapshot. If the skills'
+    api() calls change, regenerate with scripts/refresh-consumer-contract.py."""
+    expected = build_consumer_contract(repo_root)
+    path = repo_root / "tests" / "fixtures" / "consumer-contract.json"
+    assert path.is_file(), (
+        "tests/fixtures/consumer-contract.json is missing — generate it with "
+        "scripts/refresh-consumer-contract.py"
+    )
+    committed = json.loads(path.read_text())
+    assert committed == expected, (
+        "consumer-contract.json is stale (the api() surface changed) — regenerate it with "
+        "scripts/refresh-consumer-contract.py and commit the diff"
+    )
