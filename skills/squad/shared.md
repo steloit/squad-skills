@@ -151,7 +151,7 @@ LEVEL=$(echo "$TASK" | jq -r '.level')
 | `done`      | (reopen → todo) | (reopen → todo) | (reopen → todo)    |
 | `cancelled` | (reopen → todo) | (reopen → todo) | (reopen → todo)    |
 
-> `done` has no forward transition — it is reached only by normal moves and left only by the explicit `POST /api/task/:id/reopen` action (done → todo).
+> `done` has no forward transition — it is reached by normal pipeline moves **and**, from **any non-terminal** status, via the explicit `POST /api/task/:id/complete` action (administrative completion → `done`, in addition to the gated pipeline path); it is left only by the explicit `POST /api/task/:id/reopen` action (done → todo, unchanged).
 > `cancelled` is **terminal** and reachable from **ANY** status via `POST /api/task/:id/cancel` (it is not a column the matrix walks *into*); it too is left only by `POST /api/task/:id/reopen` (cancelled → todo).
 > So `done` AND `cancelled` are the **two reopenable terminal statuses** — both reachable only as described, neither has a forward transition.
 
@@ -249,6 +249,12 @@ api PATCH /task/$ID/reorder --json '{"status": "plan", "after_id": null, "before
 # Delete
 api DELETE /task/$ID
 
+# Complete a task administratively (ANY non-terminal status → done). Optional completion_note is recorded.
+api POST /task/$ID/complete --json '{"completion_note": "shipped manually"}'
+# → {"success":true,"status":"done","version":<int>}
+# completion_note is optional (omit/empty → '{}'); re-completing an already-done task is a safe no-op;
+# a cancelled target returns 409 (reopen first). The card records completed_via:"admin" (vs "pipeline" for a gated finalize).
+
 # Cancel a task (ANY status → cancelled). Optional cancel_reason is recorded.
 api POST /task/$ID/cancel --json '{"cancel_reason": "superseded by new approach"}'
 # → {"success":true,"status":"cancelled","version":<int>}
@@ -281,7 +287,7 @@ api GET /task/$ID/attachment \
 
 Don't assume an agent auto-sees an attachment — surface the `url`/local path and use the host's image tool where available.
 
-A `done` **OR** `cancelled` task can be reopened (`reopen` is the uncancel path too); reopening clears its lifecycle timestamps, `current_agent`, and `cancel_reason`, preserves prior work (plan, comments, counts, results), and records the action as an activity event (server-side). Reopening any non-terminal task (a status other than `done`/`cancelled`) returns `409` with the current status and changes nothing. Cancel is the mirror action: `POST /task/:id/cancel` moves a task from **any** status to `cancelled` (history-preserving, optional `cancel_reason`); re-cancelling an already-cancelled task is a safe no-op.
+A `done` **OR** `cancelled` task can be reopened (`reopen` is both the un-cancel and the un-complete path); reopening clears its lifecycle timestamps, `current_agent`, `cancel_reason`, `completion_note`, **and** `completed_via`, preserves prior work (plan, comments, counts, results), and records the action as an activity event (server-side). Reopening any non-terminal task (a status other than `done`/`cancelled`) returns `409` with the current status and changes nothing. Cancel and complete are the mirror actions: `POST /task/:id/cancel` moves a task from **any** status to `cancelled` (history-preserving, optional `cancel_reason`); `POST /task/:id/complete` moves a task from **any non-terminal** status to the `done` terminal (history-preserving, optional `completion_note`, sets `completed_via:"admin"`, `409` on a cancelled target — reopen first); re-cancelling/re-completing an already-terminal task in the same state is a safe no-op.
 
 ### Optimistic Concurrency (version / ETag / If-Match)
 
@@ -677,6 +683,8 @@ The server **enforces acyclicity at write time** (in-transaction CTE) and single
 
 `/api/board` emits an **`epics` aggregate** (each with `children_progress`); board/context summaries group by it (and the embedded `parent`/`children`), not by tag parsing.
 
+> The `epics` aggregate also exposes a derived **`complete`** boolean per epic (true when `children_progress.done == total > 0`). It is **DISPLAY / REPORTING only** — a progress rollup, **NOT** a dependency-satisfaction signal. An epic used as a blocker is unblocked by explicitly `/complete`-ing it (its status → `done`, recording `completed_via:"admin"`), never by this derived flag; readiness stays status-based.
+
 ### Declaring edges
 
 ```bash
@@ -692,7 +700,7 @@ api POST /task/$CHILD/relationships --json "$(jq -n --arg to "$EPIC" '{to:$to, t
 
 Read `blocks` edges via `GET /api/task/:id/relationships` → `.blocked_by` (NOT description text).
 
-**Readiness gate (hard block)**: a dep is **resolved** when its status is `done` **or** `cancelled` (the two terminal statuses). If any `.blocked_by[].status` is not in `{done, cancelled}` → default mode `AskUserQuestion` confirm; `--auto` → refuse `"blocked by incomplete dependency #N"` and abort. This precedes (and overrides) the soft sub-task nudge.
+**Readiness gate (hard block)**: a dep is **resolved** when its status is `done` **or** `cancelled` (the two terminal statuses). If any `.blocked_by[].status` is not in `{done, cancelled}` → default mode `AskUserQuestion` confirm; `--auto` → refuse `"blocked by incomplete dependency #N"` and abort. This precedes (and overrides) the soft sub-task nudge. An **epic** used as a blocker should be `/complete`'d (→ `done`) to unblock its dependents; readiness is **status-based** — the derived epic `complete` rollup is display-only and does NOT satisfy a dependency (the resolved set is unchanged: `{done, cancelled}`).
 
 **Context injection**: take dep ids from `.blocked_by[].id`, then fetch each dep's context fields:
 ```bash

@@ -137,6 +137,15 @@ if [ "$STATUS" = "cancelled" ]; then
   exit 0   # abort before dispatch
 fi
 
+# 1a-ter. Done is a TERMINAL status — not runnable. Refuse before dispatch; reopen to re-run.
+#         A `done` card is terminal regardless of HOW it got there — a gated pipeline finalize OR an
+#         administrative POST /task/:id/complete both land on the same `done`, so one branch covers both.
+#         (See ../squad/shared.md → Move Protocol: done has no forward transition; left only via reopen.)
+if [ "$STATUS" = "done" ]; then
+  echo "Task #$ID is done (terminal) — reopen to re-run."
+  exit 0   # abort before dispatch
+fi
+
 # 1b. Sub-task readiness nudge (SOFT — NOT a block; the dep hard-block in ⓪ʙ takes precedence).
 #     A `task` with incomplete .children → warn "usually run those first".
 #     Default mode: AskUserQuestion confirm/cancel. --auto: proceed + log an Orchestrator activity note.
@@ -285,6 +294,9 @@ Template files are at `../squad/templates/`.
    - **Default mode**: `AskUserQuestion` — surface the incomplete dep(s) and confirm before proceeding.
    - **`--auto` mode**: refuse with `"blocked by incomplete dependency #N"` and abort the pipeline.
    This is the **hard block** and takes precedence over the soft sub-task nudge (① below).
+   An **epic** used as a blocker is unblocked by `/complete`-ing it (→ `done`); readiness stays
+   **status-based** — the derived epic `complete` rollup is display-only and does NOT satisfy a dep.
+   The jq below is **unchanged** — `done` is already in the resolved set `{done, cancelled}`.
    ```bash
    BLOCKERS=$(echo "$REL" | jq -r '.blocked_by[]? | select(.status != "done" and .status != "cancelled") | "#\(.id) (\(.status))"')
    if [ -n "$BLOCKERS" ]; then
