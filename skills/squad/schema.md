@@ -11,7 +11,8 @@ addressed by their **display id** `<KEY>-<seq>` (e.g. `SQD-42`) in every API pat
 | `id` | string | Display id `<KEY>-<seq>` (e.g. `SQD-42`) — used in all API paths and as activity `task_id` |
 | `project` | string | Project key/name (matches `.squadrc` `SQUAD_PROJECT`) |
 | `title` | string | Task title |
-| `status` | string | `todo` / `plan` / `plan_review` / `impl` / `impl_review` / `test` / `done` |
+| `status` | string | `todo` / `plan` / `plan_review` / `impl` / `impl_review` / `test` / `done` / `cancelled` |
+| `cancel_reason` | string\|null | Optional free-text reason recorded when a task is **cancelled** (set via `POST /task/:id/cancel`); `null` unless cancelled, and **cleared on reopen**. |
 | `priority` | string | `urgent` / `high` / `medium` / `low` |
 | `card_type` | string | `task` (runnable) or `epic` (container) |
 | `description` | string\|null | The human's **original request** — immutable; agents NEVER overwrite it. The refined, testable requirements live in **`spec`**. |
@@ -34,6 +35,14 @@ addressed by their **display id** `<KEY>-<seq>` (e.g. `SQD-42`) in every API pat
 A **projected read** (`?fields=a,b,c`) returns only the requested fields (plus `id`,
 `project`, `status`); a **full read** (no `?fields=`) additionally embeds `activity`,
 `comments`, and `relationships`.
+
+> **`cancelled` (terminal, reopenable).** A task can be cancelled from **any** status
+> via `POST /api/orgs/{org}/task/{id}/cancel` (optional `{cancel_reason}`). `cancelled`
+> is a **terminal** status — it has no forward pipeline transition; it is left **only**
+> via the explicit `POST /api/orgs/{org}/task/{id}/reopen` action (`cancelled → todo`).
+> Cancelling is **history-preserving** (plan, notes, comments, counts, results are kept)
+> and re-cancelling an already-cancelled task is a safe no-op. Reopening clears
+> `cancel_reason`. Both `done` and `cancelled` are the two terminal, reopenable statuses.
 
 > **Attachments** are not part of the task JSON — they live behind their own endpoints:
 > list `GET /task/:id/attachment` → array of `{filename, stored_name, url, size, uploaded_at}`;

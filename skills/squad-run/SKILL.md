@@ -129,11 +129,19 @@ if [ "$CARD_TYPE" = "epic" ]; then
   exit 0   # abort before dispatch
 fi
 
+# 1a-bis. Cancelled is a TERMINAL status — not runnable. Refuse before dispatch; reopen to run.
+#         (See ../squad/shared.md → Move Protocol: cancelled is reachable from any status and is
+#          left only via POST /task/:id/reopen — cancelled → todo.)
+if [ "$STATUS" = "cancelled" ]; then
+  echo "Task #$ID is cancelled (terminal) — reopen to run."
+  exit 0   # abort before dispatch
+fi
+
 # 1b. Sub-task readiness nudge (SOFT — NOT a block; the dep hard-block in ⓪ʙ takes precedence).
 #     A `task` with incomplete .children → warn "usually run those first".
 #     Default mode: AskUserQuestion confirm/cancel. --auto: proceed + log an Orchestrator activity note.
 REL=$(api GET /task/$ID/relationships)
-OPEN_KIDS=$(echo "$REL" | jq -r '[(.children // [])[] | select(.status != "done")] | length')
+OPEN_KIDS=$(echo "$REL" | jq -r '[(.children // [])[] | select(.status != "done" and .status != "cancelled")] | length')
 if [ "$OPEN_KIDS" -gt 0 ]; then
   echo "Task #$ID has $OPEN_KIDS open sub-task(s) — usually run those first (nudge, not a block)."
   # --auto: proceed and log:
@@ -272,12 +280,13 @@ Template files are at `../squad/templates/`.
    ```
 
    **Readiness gate (HARD BLOCK):**
-   If any `.blocked_by[].status != "done"`, the task is not ready:
+   A dep is **resolved** when its status is `done` **or** `cancelled` (the two terminal statuses).
+   If any `.blocked_by[].status` is not in `{done, cancelled}`, the task is not ready:
    - **Default mode**: `AskUserQuestion` — surface the incomplete dep(s) and confirm before proceeding.
    - **`--auto` mode**: refuse with `"blocked by incomplete dependency #N"` and abort the pipeline.
    This is the **hard block** and takes precedence over the soft sub-task nudge (① below).
    ```bash
-   BLOCKERS=$(echo "$REL" | jq -r '.blocked_by[]? | select(.status != "done") | "#\(.id) (\(.status))"')
+   BLOCKERS=$(echo "$REL" | jq -r '.blocked_by[]? | select(.status != "done" and .status != "cancelled") | "#\(.id) (\(.status))"')
    if [ -n "$BLOCKERS" ]; then
      # --auto: refuse + abort. default: AskUserQuestion confirm/cancel.
      echo "blocked by incomplete dependency $BLOCKERS"
@@ -309,7 +318,8 @@ Template files are at `../squad/templates/`.
    - **Inspector**: `decision_log` (300 chars)
 
    Truncation: if field length > limit, take first N chars + `...[truncated]`.
-   If dep status != `done`: prepend `[IN PROGRESS]` warning to that dep's block.
+   If dep status is not in `{done, cancelled}`: prepend `[IN PROGRESS]` warning to that dep's block.
+   A `done` **OR** `cancelled` dep is resolved — no `[IN PROGRESS]` marker.
    If no dependencies: `DEPS_CONTEXT=""` (empty string — placeholder removed cleanly).
 
    Format per dependency:

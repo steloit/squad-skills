@@ -24,6 +24,11 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
    and have no acceptance-criteria/plan of their own. If the target is an epic, do NOT run the refine
    interview — point the user at its children (`GET /api/task/$ID/relationships` → `.children`) and stop.
 
+   **Terminal targets are not runnable** (`status` is `cancelled` or `done`): a cancelled (or done)
+   task is a non-runnable terminal — there is nothing to refine until it re-enters the pipeline. Do NOT
+   run the interview; warn the user (e.g. `"Task #$ID is cancelled (terminal) — reopen it before refining"`)
+   and point them at `POST /api/task/$ID/reopen` (which restores `cancelled`/`done` → `todo`), then stop.
+
 ① ½. Look for prior implementation context (always run this before the interview)
 
    a. Detect dependencies via the relationships API (NOT description text — the `Depends on:` convention
