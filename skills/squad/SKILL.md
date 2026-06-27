@@ -1,6 +1,6 @@
 ---
 name: squad
-description: Manage tasks on the Squad board. Supports task CRUD (add, edit, move, cancel, reopen, remove), board viewing, session context persistence, and statistics. For pipeline orchestration use /squad-run, for requirements refinement use /squad-refine. Run /squad-init first to register the project.
+description: Manage tasks on the Squad board. Supports task CRUD (add, edit, move, complete, cancel, reopen, remove), board viewing, session context persistence, and statistics. For pipeline orchestration use /squad-run, for requirements refinement use /squad-refine. Run /squad-init first to register the project.
 license: MIT
 ---
 
@@ -47,6 +47,28 @@ BOARD=$(api GET /board?summary=true)
 
 Ask user which fields to modify, then PATCH via API. To attach an image to an existing task, upload a local image file via the attachment API (shared.md → "Upload an image attachment").
 
+### `/squad complete <ID> [note]` — Complete Task (administrative completion)
+
+Mark a task **done** from **any non-terminal** status. This is **non-interactive** — no
+`AskUserQuestion`, no confirmation prompt; completing is history-preserving and reversible, so just do it.
+
+```bash
+NOTE="$*"   # everything after the ID; may be empty
+# omit/empty note → send {} ; otherwise send {"completion_note": "<note>"}
+if [ -n "$NOTE" ]; then
+  api POST /task/$ID/complete --json "$(jq -n --arg n "$NOTE" '{completion_note:$n}')"
+else
+  api POST /task/$ID/complete --json '{}'
+fi
+# → {"success":true,"status":"done","version":<int>}
+```
+
+Complete is the **paired twin** of `/squad cancel`: complete = **finished**, cancel = **won't-do**. Both
+are **history-preserving** (plan, notes, comments, counts, results are kept) and **reversible** via
+`/squad reopen`, unlike the irreversible `/squad remove` (a hard DELETE). Re-completing an already-done
+task is a safe no-op; a **cancelled** target returns `409` — reopen it first. The card records
+`completed_via:"admin"` (vs `"pipeline"` for a gated pipeline finalize) plus the optional `completion_note`.
+
 ### `/squad cancel <ID> [reason]` — Cancel Task (preferred abandon verb)
 
 Cancel a task from **any** status. This is **non-interactive** — no `AskUserQuestion`, no
@@ -68,10 +90,11 @@ comments, counts, results are kept) and **reversible** via `/squad reopen`. Re-c
 already-cancelled task is a safe no-op. Use it for won't-do / superseded / deprioritized work
 instead of `/squad remove`.
 
-### `/squad reopen <ID>` — Reopen Task (the uncancel path)
+### `/squad reopen <ID>` — Reopen Task (the un-cancel / un-complete path)
 
-Restore a terminal task (`cancelled` **OR** `done`) back to `todo`. This is the uncancel path —
-reopening clears lifecycle timestamps, `current_agent`, and `cancel_reason`, and preserves prior work.
+Restore a terminal task (`cancelled` **OR** `done`) back to `todo`. This is the un-cancel **and**
+un-complete path — reopening clears lifecycle timestamps, `current_agent`, `cancel_reason`,
+`completion_note`, and `completed_via`, and preserves prior work.
 
 ```bash
 api POST /task/$ID/reopen --json '{"reason": "<why reopening>"}'

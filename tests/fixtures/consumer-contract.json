@@ -97,6 +97,10 @@
   },
   {
     "method": "POST",
+    "path": "/orgs/{}/task/{}/complete"
+  },
+  {
+    "method": "POST",
     "path": "/orgs/{}/task/{}/plan-review"
   },
   {

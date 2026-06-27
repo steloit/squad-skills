@@ -28,6 +28,10 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
    task is a non-runnable terminal — there is nothing to refine until it re-enters the pipeline. Do NOT
    run the interview; warn the user (e.g. `"Task #$ID is cancelled (terminal) — reopen it before refining"`)
    and point them at `POST /api/task/$ID/reopen` (which restores `cancelled`/`done` → `todo`), then stop.
+   (A `done` target may have been reached via the gated pipeline OR an administrative
+   `POST /api/task/$ID/complete`; both land on the same `done` terminal, so this one branch covers both.)
+   An **epic** used as a blocker is unblocked by `/complete`-ing it (→ `done`); readiness is status-based,
+   and the derived epic `complete` rollup is display-only (NOT a dependency-satisfaction signal).
 
 ① ½. Look for prior implementation context (always run this before the interview)
 

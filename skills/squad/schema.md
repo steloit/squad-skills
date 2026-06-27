@@ -13,6 +13,8 @@ addressed by their **display id** `<KEY>-<seq>` (e.g. `SQD-42`) in every API pat
 | `title` | string | Task title |
 | `status` | string | `todo` / `plan` / `plan_review` / `impl` / `impl_review` / `test` / `done` / `cancelled` |
 | `cancel_reason` | string\|null | Optional free-text reason recorded when a task is **cancelled** (set via `POST /task/:id/cancel`); `null` unless cancelled, and **cleared on reopen**. |
+| `completion_note` | string\|null | Optional free-text note recorded when a task is administratively **completed** (set via `POST /task/:id/complete`); `null` unless completed via `/complete`, and **cleared on reopen**. |
+| `completed_via` | string\|null | HOW the card reached `done`: `null` until done, `"pipeline"` = gated pipeline finalize, `"admin"` = `POST /task/:id/complete`; **cleared on reopen**. |
 | `priority` | string | `urgent` / `high` / `medium` / `low` |
 | `card_type` | string | `task` (runnable) or `epic` (container) |
 | `description` | string\|null | The human's **original request** — immutable; agents NEVER overwrite it. The refined, testable requirements live in **`spec`**. |
@@ -43,6 +45,22 @@ A **projected read** (`?fields=a,b,c`) returns only the requested fields (plus `
 > Cancelling is **history-preserving** (plan, notes, comments, counts, results are kept)
 > and re-cancelling an already-cancelled task is a safe no-op. Reopening clears
 > `cancel_reason`. Both `done` and `cancelled` are the two terminal, reopenable statuses.
+
+> **`/complete` (administrative completion → the `done` terminal).** A task can be completed from
+> **any non-terminal** status via `POST /api/orgs/{org}/task/{id}/complete` (optional `{completion_note}`).
+> It lands on the existing **`done`** terminal — `done` has no forward pipeline transition; it is left
+> **only** via the explicit `POST /api/orgs/{org}/task/{id}/reopen` action (`done → todo`). Completing is
+> **history-preserving** (plan, notes, comments, counts, results are kept) and re-completing an already-done
+> task is a safe no-op; a **cancelled** target returns `409` (reopen first). Reopening clears
+> `completion_note` **and** `completed_via`. `/complete` is the symmetric twin of `/cancel`: complete =
+> **finished**, cancel = **won't-do** — both reachable from any (non-terminal) status, both reversible via
+> reopen, both history-preserving.
+
+> **Derived epic `complete` flag (display / reporting only).** The board's `epics` aggregate exposes a
+> derived `complete` boolean per epic (true when its children are all `done` — `done == total > 0`). It is
+> **DISPLAY / REPORTING only** — a rolled-up progress indicator, **NOT** a dependency-satisfaction signal.
+> Readiness stays status-based: an epic used as a blocker is unblocked by explicitly `/complete`-ing it
+> (its status → `done`), never by this derived rollup.
 
 > **Attachments** are not part of the task JSON — they live behind their own endpoints:
 > list `GET /task/:id/attachment` → array of `{filename, stored_name, url, size, uploaded_at}`;
