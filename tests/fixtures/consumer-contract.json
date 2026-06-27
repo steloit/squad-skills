@@ -1,0 +1,118 @@
+[
+  {
+    "method": "DELETE",
+    "path": "/orgs/{}/projects/{}"
+  },
+  {
+    "method": "DELETE",
+    "path": "/orgs/{}/projects/{}/links"
+  },
+  {
+    "method": "DELETE",
+    "path": "/orgs/{}/task/{}"
+  },
+  {
+    "method": "DELETE",
+    "path": "/orgs/{}/task/{}/attachment/{}"
+  },
+  {
+    "method": "GET",
+    "path": "/orgs/{}/activity/stats"
+  },
+  {
+    "method": "GET",
+    "path": "/orgs/{}/board"
+  },
+  {
+    "method": "GET",
+    "path": "/orgs/{}/projects"
+  },
+  {
+    "method": "GET",
+    "path": "/orgs/{}/projects/{}"
+  },
+  {
+    "method": "GET",
+    "path": "/orgs/{}/projects/{}/links"
+  },
+  {
+    "method": "GET",
+    "path": "/orgs/{}/task/{}"
+  },
+  {
+    "method": "GET",
+    "path": "/orgs/{}/task/{}/activity"
+  },
+  {
+    "method": "GET",
+    "path": "/orgs/{}/task/{}/attachment"
+  },
+  {
+    "method": "GET",
+    "path": "/orgs/{}/task/{}/relationships"
+  },
+  {
+    "method": "PATCH",
+    "path": "/orgs/{}/projects/{}"
+  },
+  {
+    "method": "PATCH",
+    "path": "/orgs/{}/task/{}"
+  },
+  {
+    "method": "PATCH",
+    "path": "/orgs/{}/task/{}/reorder"
+  },
+  {
+    "method": "POST",
+    "path": "/orgs/{}/projects"
+  },
+  {
+    "method": "POST",
+    "path": "/orgs/{}/projects/{}/links"
+  },
+  {
+    "method": "POST",
+    "path": "/orgs/{}/run-audit"
+  },
+  {
+    "method": "POST",
+    "path": "/orgs/{}/task"
+  },
+  {
+    "method": "POST",
+    "path": "/orgs/{}/task/{}/activity"
+  },
+  {
+    "method": "POST",
+    "path": "/orgs/{}/task/{}/attachment"
+  },
+  {
+    "method": "POST",
+    "path": "/orgs/{}/task/{}/comment"
+  },
+  {
+    "method": "POST",
+    "path": "/orgs/{}/task/{}/plan-review"
+  },
+  {
+    "method": "POST",
+    "path": "/orgs/{}/task/{}/relationships"
+  },
+  {
+    "method": "POST",
+    "path": "/orgs/{}/task/{}/reopen"
+  },
+  {
+    "method": "POST",
+    "path": "/orgs/{}/task/{}/review"
+  },
+  {
+    "method": "POST",
+    "path": "/orgs/{}/task/{}/spec"
+  },
+  {
+    "method": "POST",
+    "path": "/orgs/{}/task/{}/test-result"
+  }
+]
