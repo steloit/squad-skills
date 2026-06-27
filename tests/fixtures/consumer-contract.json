@@ -89,6 +89,10 @@
   },
   {
     "method": "POST",
+    "path": "/orgs/{}/task/{}/cancel"
+  },
+  {
+    "method": "POST",
     "path": "/orgs/{}/task/{}/comment"
   },
   {

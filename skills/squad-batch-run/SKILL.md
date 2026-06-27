@@ -66,7 +66,7 @@ Resume a stopped batch from the given task ID. Skips all tasks before `<start-ID
 **Dependencies are structural**, read from the relationships API — NOT text-parsed from descriptions
 (the `Depends on:` convention is retired; see `../squad/shared.md` → **Task Relationships & Epics**):
 
-- `GET /api/task/:id/relationships` → `.blocked_by` (the deps that must be `done` first)
+- `GET /api/task/:id/relationships` → `.blocked_by` (the deps that must be `done` (or `cancelled`) first)
 
 Other strong signals still come from task descriptions:
 

@@ -149,8 +149,11 @@ LEVEL=$(echo "$TASK" | jq -r '.level')
 | `impl_review` | —      | `done` / `impl`   | `test` / `impl`        |
 | `test`      | —        | —                 | `done` / `impl`        |
 | `done`      | (reopen → todo) | (reopen → todo) | (reopen → todo)    |
+| `cancelled` | (reopen → todo) | (reopen → todo) | (reopen → todo)    |
 
-> `done` has no forward transition — it is reached only by normal moves and left only by the explicit `POST /api/task/:id/reopen` action (done → todo). It is reopenable, not strictly terminal.
+> `done` has no forward transition — it is reached only by normal moves and left only by the explicit `POST /api/task/:id/reopen` action (done → todo).
+> `cancelled` is **terminal** and reachable from **ANY** status via `POST /api/task/:id/cancel` (it is not a column the matrix walks *into*); it too is left only by `POST /api/task/:id/reopen` (cancelled → todo).
+> So `done` AND `cancelled` are the **two reopenable terminal statuses** — both reachable only as described, neither has a forward transition.
 
 **Step 3 — Execute the move**
 
@@ -246,7 +249,12 @@ api PATCH /task/$ID/reorder --json '{"status": "plan", "after_id": null, "before
 # Delete
 api DELETE /task/$ID
 
-# Reopen a completed task (done → todo). Optional reason is recorded as an activity event.
+# Cancel a task (ANY status → cancelled). Optional cancel_reason is recorded.
+api POST /task/$ID/cancel --json '{"cancel_reason": "superseded by new approach"}'
+# → {"success":true,"status":"cancelled","version":<int>}
+# cancel_reason is optional (omit/empty → '{}'); re-cancelling an already-cancelled task is a safe no-op.
+
+# Reopen a terminal task (done OR cancelled → todo). Optional reason is recorded as an activity event.
 api POST /task/$ID/reopen --json '{"reason": "regression found in prod"}'
 # → {"success":true,"status":"todo","version":<int>}
 
@@ -273,7 +281,7 @@ api GET /task/$ID/attachment \
 
 Don't assume an agent auto-sees an attachment — surface the `url`/local path and use the host's image tool where available.
 
-Only a `done` task can be reopened; reopening clears its lifecycle timestamps and `current_agent`, preserves prior work (plan, comments, counts, results), and records the action as an activity event (server-side). Reopening any non-`done` task returns `409 {"error":"only a done task can be reopened","status":"<current>"}` and changes nothing.
+A `done` **OR** `cancelled` task can be reopened (`reopen` is the uncancel path too); reopening clears its lifecycle timestamps, `current_agent`, and `cancel_reason`, preserves prior work (plan, comments, counts, results), and records the action as an activity event (server-side). Reopening any non-terminal task (a status other than `done`/`cancelled`) returns `409` with the current status and changes nothing. Cancel is the mirror action: `POST /task/:id/cancel` moves a task from **any** status to `cancelled` (history-preserving, optional `cancel_reason`); re-cancelling an already-cancelled task is a safe no-op.
 
 ### Optimistic Concurrency (version / ETag / If-Match)
 
@@ -426,9 +434,10 @@ The card description is this structured body (Markdown is fine; keep the field l
 ### Dedup check (before filing)
 
 ```bash
-# Open friction cards (not done), id+title from the summary.
-# The summary is an object keyed by status (todo/plan/plan_review/impl/impl_review/test/done),
-# each an array of cards; flatten the non-done buckets so `done` cards are excluded by construction.
+# Open friction cards (not terminal), id+title from the summary.
+# The summary is an object keyed by status (todo/plan/plan_review/impl/impl_review/test/done/cancelled),
+# each an array of cards; flatten only the non-terminal buckets so `done` AND `cancelled` cards are
+# excluded by construction (both are terminal — neither is an active-context bucket).
 api GET /board?project=squad&summary=true \
   | jq -r '[ .todo, .plan, .plan_review, .impl, .impl_review, .test ] | add // []
            | .[]
@@ -639,7 +648,7 @@ Agents write only their own domain field above; they do **not** append to the ac
 
 Tasks relate through **two typed, structured edges** stored on the board (not encoded in text or tags):
 
-- **`blocks`** — a dependency DAG. `A blocks B` ⟺ B is `blocked_by` A; B is not ready until A is `done`.
+- **`blocks`** — a dependency DAG. `A blocks B` ⟺ B is `blocked_by` A; B is not ready until A is **resolved** — i.e. `done` (or `cancelled`, the other terminal status).
 - **`parent`** — a single-parent hierarchy tree. A child's `parent` is its containing **epic** card.
 
 > **REMOVED — legacy conventions.** The `Depends on: #ID` description-text convention is **retired** (dependencies are `blocks` edges). The `epic:<name>` **tag-as-hierarchy** convention is **retired** (hierarchy is `card_type:'epic'` cards + `parent` edges). Skills must NOT parse `Depends on:` text or write `epic:` tags. `phase:` tags remain valid free labels.
@@ -683,7 +692,7 @@ api POST /task/$CHILD/relationships --json "$(jq -n --arg to "$EPIC" '{to:$to, t
 
 Read `blocks` edges via `GET /api/task/:id/relationships` → `.blocked_by` (NOT description text).
 
-**Readiness gate (hard block)**: if any `.blocked_by[].status != "done"` → default mode `AskUserQuestion` confirm; `--auto` → refuse `"blocked by incomplete dependency #N"` and abort. This precedes (and overrides) the soft sub-task nudge.
+**Readiness gate (hard block)**: a dep is **resolved** when its status is `done` **or** `cancelled` (the two terminal statuses). If any `.blocked_by[].status` is not in `{done, cancelled}` → default mode `AskUserQuestion` confirm; `--auto` → refuse `"blocked by incomplete dependency #N"` and abort. This precedes (and overrides) the soft sub-task nudge.
 
 **Context injection**: take dep ids from `.blocked_by[].id`, then fetch each dep's context fields:
 ```bash
@@ -702,7 +711,7 @@ Truncation format: first N chars + `...[truncated]` suffix when the field exceed
 Context format per dependency:
 ```
 ### #<DEP_ID>: <title> [<status>]
-[IN PROGRESS] ← only if status != done
+[IN PROGRESS] ← only if status not in {done, cancelled} (a done OR cancelled dep is resolved — no marker)
 
 **Decision Log:**
 <decision_log truncated per agent rule>
@@ -714,12 +723,12 @@ Fields not applicable to the current agent are omitted entirely.
 
 ### Sub-task readiness nudge (soft)
 
-`squad-run` on a `task` with incomplete `.children` → warn `"Task #N has M open sub-task(s) — usually run those first"`; default `AskUserQuestion` confirm, `--auto` proceeds + logs an `Orchestrator` activity note. This is a **nudge, not a block** — the message distinguishes it from the dep hard-block. If a task is BOTH blocked by an incomplete dep AND has open sub-tasks, the **hard dep block wins** (abort); the nudge is never reached.
+`squad-run` on a `task` with incomplete `.children` → warn `"Task #N has M open sub-task(s) — usually run those first"`; default `AskUserQuestion` confirm, `--auto` proceeds + logs an `Orchestrator` activity note. **Open** counts only **non-terminal** children — a child whose status is `done` or `cancelled` is resolved and does not count. This is a **nudge, not a block** — the message distinguishes it from the dep hard-block. If a task is BOTH blocked by an incomplete dep AND has open sub-tasks, the **hard dep block wins** (abort); the nudge is never reached.
 
 ### Error handling
 
 - **404 on a dep context fetch**: warn in orchestrator log, skip that dependency, continue pipeline
-- **Dep status != `done`**: prepend `[IN PROGRESS]` to that dep's context block (the readiness gate already handled the block decision)
+- **Dep status not in `{done, cancelled}`**: prepend `[IN PROGRESS]` to that dep's context block (the readiness gate already handled the block decision). A `done` **OR** `cancelled` dep is resolved — no `[IN PROGRESS]` marker.
 - **No dependencies / no children**: context resolves to empty string; no behavioral change
 - **Cycle / second parent / missing edge**: surfaced as 409 / 400 / 404 from the write path
 

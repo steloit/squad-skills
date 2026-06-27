@@ -1,6 +1,6 @@
 ---
 name: squad
-description: Manage tasks on the Squad board. Supports task CRUD (add, edit, move, remove), board viewing, session context persistence, and statistics. For pipeline orchestration use /squad-run, for requirements refinement use /squad-refine. Run /squad-init first to register the project.
+description: Manage tasks on the Squad board. Supports task CRUD (add, edit, move, cancel, reopen, remove), board viewing, session context persistence, and statistics. For pipeline orchestration use /squad-run, for requirements refinement use /squad-refine. Run /squad-init first to register the project.
 license: MIT
 ---
 
@@ -47,11 +47,48 @@ BOARD=$(api GET /board?summary=true)
 
 Ask user which fields to modify, then PATCH via API. To attach an image to an existing task, upload a local image file via the attachment API (shared.md → "Upload an image attachment").
 
+### `/squad cancel <ID> [reason]` — Cancel Task (preferred abandon verb)
+
+Cancel a task from **any** status. This is **non-interactive** — no `AskUserQuestion`, no
+confirmation prompt; cancelling is history-preserving and reversible, so just do it.
+
+```bash
+REASON="$*"   # everything after the ID; may be empty
+# omit/empty reason → send {} ; otherwise send {"cancel_reason": "<reason>"}
+if [ -n "$REASON" ]; then
+  api POST /task/$ID/cancel --json "$(jq -n --arg r "$REASON" '{cancel_reason:$r}')"
+else
+  api POST /task/$ID/cancel --json '{}'
+fi
+# → {"success":true,"status":"cancelled","version":<int>}
+```
+
+Cancel is the **preferred** way to abandon work: it is **history-preserving** (plan, notes,
+comments, counts, results are kept) and **reversible** via `/squad reopen`. Re-cancelling an
+already-cancelled task is a safe no-op. Use it for won't-do / superseded / deprioritized work
+instead of `/squad remove`.
+
+### `/squad reopen <ID>` — Reopen Task (the uncancel path)
+
+Restore a terminal task (`cancelled` **OR** `done`) back to `todo`. This is the uncancel path —
+reopening clears lifecycle timestamps, `current_agent`, and `cancel_reason`, and preserves prior work.
+
+```bash
+api POST /task/$ID/reopen --json '{"reason": "<why reopening>"}'
+# → {"success":true,"status":"todo","version":<int>}
+```
+
+Reopening a non-terminal task (anything other than `cancelled`/`done`) returns `409` and changes nothing.
+
 ### `/squad remove <ID>` — Delete Task
 
 ```bash
 api DELETE /task/$ID
 ```
+
+> `remove` is a hard `DELETE` — **irreversible** (the card and its attachments are gone). Reserve it
+> for never-started mistakes / duplicates. For won't-do or superseded work, prefer **`/squad cancel`**
+> (history-preserving and reversible).
 
 ### `/squad stats` — Statistics
 
@@ -66,7 +103,7 @@ import json, os
 
 board = json.loads(os.environ['BOARD'])
 stats = json.loads(os.environ['STATS'])
-columns = ['todo', 'plan', 'plan_review', 'impl', 'impl_review', 'test', 'done']
+columns = ['todo', 'plan', 'plan_review', 'impl', 'impl_review', 'test', 'done', 'cancelled']
 
 # Column counts (summary is keyed by status, each an array of cards)
 counts = {col: len(board.get(col, [])) for col in columns}
