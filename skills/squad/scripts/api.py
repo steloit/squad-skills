@@ -65,7 +65,11 @@ def _read_keyed_line(path, key):
 
 
 def resolve_project():
-    # Match shared.md exactly: .squadrc SQUAD_PROJECT= > current-directory name.
+    # env > .squadrc SQUAD_PROJECT= > current-directory name (symmetric with
+    # resolve_org: env overrides the committed file, then a built-in default).
+    proj = os.environ.get("SQUAD_PROJECT", "")
+    if proj:
+        return proj
     proj = _read_keyed_line(pathlib.Path(".squadrc"), "SQUAD_PROJECT=")
     if proj:
         return proj
@@ -298,21 +302,41 @@ def main():
         data = json.dumps(parsed).encode("utf-8")
 
     # --- pre-flight: SQUAD_ORG required (no request issued if unset) -----------
+    # Runbook-style error: name the missing value, every place it can be set, the
+    # precedence among them, and a copy-pasteable fix — not a bare "export it".
     org = resolve_org()
     if not org:
         print(
-            "ERROR: SQUAD_ORG is not set. Every board call is org-scoped "
-            "(/api/orgs/<org>/...).",
+            "ERROR: SQUAD_ORG could not be resolved — every board call is "
+            "org-scoped (/api/orgs/<org>/...), so no request was sent.",
             file=sys.stderr,
         )
         print(
-            "Set it from the mint dialog's `SQUAD_ORG=<slug>` line — add "
-            "`SQUAD_ORG=<slug>` to .squadrc",
+            "Resolution order (first match wins): env SQUAD_ORG  >  committed "
+            ".squadrc (SQUAD_ORG=<slug>).",
+            file=sys.stderr,
+        )
+        print("Set it in ANY of:", file=sys.stderr)
+        print(
+            "  • committed .squadrc (team-shared default):   "
+            "echo 'SQUAD_ORG=<slug>' >> .squadrc",
             file=sys.stderr,
         )
         print(
-            "(committed) or export SQUAD_ORG=<slug> for this shell. Resolution "
-            "order: env > .squadrc.",
+            "  • this shell only (no tracked-file edit):      "
+            "export SQUAD_ORG=<slug>",
+            file=sys.stderr,
+        )
+        print(
+            "A committed .squadrc that omits SQUAD_ORG is recoverable "
+            "non-interactively via `export SQUAD_ORG=<slug>` — no edit to the "
+            "tracked file is required.",
+            file=sys.stderr,
+        )
+        print(
+            "The <slug> is the tenant from the mint dialog's `SQUAD_ORG=<slug>` "
+            "line; it is NOT derivable from the token (the PAT is user-scoped and "
+            "valid across multiple orgs, so it cannot disambiguate the tenant).",
             file=sys.stderr,
         )
         return 2
