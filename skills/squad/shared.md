@@ -15,9 +15,9 @@ Every board call goes through the **`api.py` helper**, sourced once as `api`. Th
 # Path is the resource AFTER the org prefix (api.py prepends /api/orgs/<org> and merges project=).
 api() { python3 ../squad/scripts/api.py "$@"; }
 
-# 1. Project name (the project a call targets, used in resource paths): .squadrc → directory name
-PROJECT=""
-[ -f .squadrc ] && PROJECT=$(grep '^SQUAD_PROJECT=' .squadrc | cut -d= -f2-)
+# 1. Project name (the project a call targets, used in resource paths): env > .squadrc → directory name
+PROJECT="${SQUAD_PROJECT:-}"
+[ -z "$PROJECT" ] && [ -f .squadrc ] && PROJECT=$(grep '^SQUAD_PROJECT=' .squadrc | cut -d= -f2-)
 [ -z "$PROJECT" ] && PROJECT=$(basename "$(pwd)")
 
 # 2. Org / tenant — env > .squadrc. api.py resolves this itself for every call; resolve it in the
@@ -34,7 +34,19 @@ fi
 
 If `.squadrc` is absent, `PROJECT` falls back to the directory name — prompt the user to run `/squad-init` to register it explicitly.
 
-**Resolution:** `api.py` resolves the credential + transport internally — token = `SQUAD_AUTH_TOKEN` env > bare `SQUAD_AUTH_TOKEN=` (`~/.squad/auth`); URL = `SQUAD_BASE_URL` env > `~/.squad/config` > deployed default. The shell resolves identity for the call paths: `SQUAD_ORG` = env > `.squadrc` (**required** — every board call is org-scoped `/api/orgs/<org>/...`; unset is a fail-fast pre-flight error pointing to the mint dialog's `SQUAD_ORG=<slug>` line / `.squadrc`); project = `.squadrc` (`SQUAD_PROJECT=`) > directory name.
+**Per-key resolution** (first match wins; `api.py` is the single resolver):
+
+| Key            | Precedence (high → low)                                              |
+|----------------|---------------------------------------------------------------------|
+| Base URL       | env `SQUAD_BASE_URL` > `~/.squad/config` > deployed default          |
+|                | (default = `https://squad-api-285415501393.asia-south1.run.app`)    |
+| Org (tenant)   | env `SQUAD_ORG` > committed `.squadrc` — **required, no default**    |
+| Project        | env `SQUAD_PROJECT` > committed `.squadrc` > current-directory name  |
+| Auth token     | env `SQUAD_AUTH_TOKEN` > `~/.squad/auth` — **never `.squadrc`**      |
+
+The token is **never** read from `.squadrc` (secrets stay out of the committed file), and the org is **not** token-derivable (the PAT is user-scoped and valid across multiple orgs, so it cannot disambiguate the tenant).
+
+**Resolution:** `api.py` resolves the credential + transport internally — token = `SQUAD_AUTH_TOKEN` env > bare `SQUAD_AUTH_TOKEN=` (`~/.squad/auth`); URL = `SQUAD_BASE_URL` env > `~/.squad/config` > deployed default. The shell resolves identity for the call paths: `SQUAD_ORG` = env > `.squadrc` (**required** — every board call is org-scoped `/api/orgs/<org>/...`; unset is a fail-fast pre-flight error pointing to the mint dialog's `SQUAD_ORG=<slug>` line / `.squadrc`); project = env `SQUAD_PROJECT` > `.squadrc` (`SQUAD_PROJECT=`) > directory name.
 
 ### Token store format
 

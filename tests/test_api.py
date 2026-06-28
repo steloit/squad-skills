@@ -103,12 +103,14 @@ def _run(
     token=SENTINEL_TOKEN,
     home=None,
     cwd=None,
+    project=None,
 ):
     """Run api.py as a subprocess; returns (returncode, stdout, stderr).
 
     - token=None   → SQUAD_AUTH_TOKEN not set (no-token-configured path)
     - org="" / org=None → SQUAD_ORG not set (triggers exit 2 pre-flight)
     - home=<path>  → HOME override so no ~/.squad/auth is consulted
+    - project=<str> → inject SQUAD_PROJECT into env (env-override layer test)
     """
     import os
 
@@ -117,6 +119,7 @@ def _run(
     e.pop("SQUAD_AUTH_TOKEN", None)
     e.pop("SQUAD_ORG", None)
     e.pop("SQUAD_BASE_URL", None)
+    e.pop("SQUAD_PROJECT", None)  # isolation: prevent ambient SQUAD_PROJECT leaking in
 
     e["SQUAD_BASE_URL"] = base_url
     if org:  # empty string or None → leave SQUAD_ORG unset
@@ -125,6 +128,8 @@ def _run(
         e["SQUAD_AUTH_TOKEN"] = token
     if home is not None:
         e["HOME"] = str(home)
+    if project is not None:
+        e["SQUAD_PROJECT"] = project
 
     res = subprocess.run(
         [sys.executable, str(API_SCRIPT)] + list(args),
@@ -564,3 +569,129 @@ def test_no_token_cli_arg_in_help():
     )
     combined = res.stdout + res.stderr
     assert "--token" not in combined
+
+
+# ── subprocess: SQUAD_PROJECT env > .squadrc on the wire ──────────────────────
+
+
+def test_squad_project_env_beats_squadrc_on_wire(tmp_path):
+    """env SQUAD_PROJECT wins over a .squadrc value: the wire project= must be from env.
+
+    This is the SQD-957 REQ: env-overridable project layer closes the resolution
+    asymmetry (org has env > file; project now does too).
+    """
+    # Place a competing project name in the committed .squadrc
+    (tmp_path / ".squadrc").write_text("SQUAD_PROJECT=from_file\n")
+    with _StubServer() as srv:
+        srv._stub_responses.append({"status": 200, "body": b'{"ok":true}'})
+        _run(
+            ["GET", "/task/T-1"],
+            base_url=srv.base_url,
+            cwd=str(tmp_path),
+            project="from_env",  # injects SQUAD_PROJECT=from_env into subprocess env
+        )
+        req = srv._stub_requests[0]
+    qs = urllib.parse.parse_qs(urllib.parse.urlparse(req["path"]).query)
+    # env value must win
+    assert qs.get("project") == ["from_env"], (
+        f"expected project=from_env on the wire but got {qs.get('project')!r}"
+    )
+    # file value must not appear
+    assert "from_file" not in req["path"]
+
+
+# ── unit: resolve_project() — all three precedence layers ─────────────────────
+
+
+def test_resolve_project_env_wins_over_squadrc(api_mod, tmp_path, monkeypatch):
+    """Layer 1: env SQUAD_PROJECT overrides a .squadrc value (env > file)."""
+    (tmp_path / ".squadrc").write_text("SQUAD_PROJECT=from_file\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SQUAD_PROJECT", "from_env")
+    assert api_mod.resolve_project() == "from_env"
+
+
+def test_resolve_project_squadrc_wins_over_cwd_name(api_mod, tmp_path, monkeypatch):
+    """Layer 2: no env SQUAD_PROJECT → .squadrc value beats cwd directory name."""
+    (tmp_path / ".squadrc").write_text("SQUAD_PROJECT=from_file\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SQUAD_PROJECT", raising=False)
+    assert api_mod.resolve_project() == "from_file"
+
+
+def test_resolve_project_cwd_name_fallback(api_mod, tmp_path, monkeypatch):
+    """Layer 3: no env and no .squadrc → cwd directory name is the built-in default."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SQUAD_PROJECT", raising=False)
+    # no .squadrc file in tmp_path
+    assert api_mod.resolve_project() == tmp_path.name
+
+
+# ── subprocess: SQUAD_ORG runbook content — one assertion per element ──────────
+
+
+def test_squad_org_unset_runbook_names_missing_value(tmp_path):
+    """Runbook must explicitly name 'SQUAD_ORG' as the missing value."""
+    with _StubServer() as srv:
+        _, _, err = _run(
+            ["GET", "/task/T-1"],
+            base_url=srv.base_url,
+            org="",
+            cwd=str(tmp_path),
+        )
+    assert "SQUAD_ORG" in err
+
+
+def test_squad_org_unset_runbook_states_precedence(tmp_path):
+    """Runbook must state the resolution precedence (env > .squadrc)."""
+    with _StubServer() as srv:
+        _, _, err = _run(
+            ["GET", "/task/T-1"],
+            base_url=srv.base_url,
+            org="",
+            cwd=str(tmp_path),
+        )
+    # The precedence line reads: "env SQUAD_ORG  >  committed .squadrc"
+    assert "env SQUAD_ORG" in err
+    assert ">" in err
+    assert ".squadrc" in err
+
+
+def test_squad_org_unset_runbook_has_copy_paste_squadrc_fix(tmp_path):
+    """Runbook must include a copy-pasteable .squadrc fix (echo 'SQUAD_ORG=...')."""
+    with _StubServer() as srv:
+        _, _, err = _run(
+            ["GET", "/task/T-1"],
+            base_url=srv.base_url,
+            org="",
+            cwd=str(tmp_path),
+        )
+    assert "echo" in err
+    assert "SQUAD_ORG=" in err
+
+
+def test_squad_org_unset_runbook_has_export_fix(tmp_path):
+    """Runbook must include 'export SQUAD_ORG' as the shell-only (no file edit) fix."""
+    with _StubServer() as srv:
+        _, _, err = _run(
+            ["GET", "/task/T-1"],
+            base_url=srv.base_url,
+            org="",
+            cwd=str(tmp_path),
+        )
+    assert "export SQUAD_ORG" in err
+
+
+def test_squad_org_unset_runbook_states_noninteractive_recovery(tmp_path):
+    """Runbook must state that a .squadrc missing SQUAD_ORG is recoverable via export
+    without editing the tracked file — the EDGE non-interactive recovery path."""
+    with _StubServer() as srv:
+        _, _, err = _run(
+            ["GET", "/task/T-1"],
+            base_url=srv.base_url,
+            org="",
+            cwd=str(tmp_path),
+        )
+    # The runbook should say something about non-interactive recovery without editing
+    # the tracked file (e.g. "no edit to the tracked file is required")
+    assert "tracked file" in err or "non-interactively" in err
