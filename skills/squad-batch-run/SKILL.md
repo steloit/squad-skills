@@ -92,6 +92,12 @@ api GET /board?summary=true > /dev/null   # non-zero exit (auth/transport) → s
 
 Read the project name from `.squadrc` (`SQUAD_PROJECT=`) — see `squad/shared.md` for the full resolution (it sources the `api()` wrapper and reads `SQUAD_ORG` env → `.squadrc`; `api.py` owns the PAT internally).
 
+**Observation gate-seam (SQD-936).** Resolve the consent gate ONCE for the whole batch and cache it, so any post-Verify steering emit (step 6C) is consent-gated and best-effort (see `squad/shared.md` → **Abstraction Rubric**):
+
+```bash
+python3 ../squad/scripts/observe.py gate >/dev/null 2>&1; OBSERVE_OK=$?   # 0 = emit, non-zero = skip
+```
+
 ### 2. Plan
 
 **SQUAD_ORG export contract:** `plan_batch.py` reads `SQUAD_ORG` from the **env only** (it does not parse `.squadrc`). Resolve `.squadrc` and `export SQUAD_ORG` before launching it (the shared.md resolution already sets `SQUAD_ORG`) — it selects the tenant via the `/api/orgs/<org>/` path. `plan_batch.py` resolves its own auth + base URL the same way `api.py` does (env `SQUAD_AUTH_TOKEN` / `SQUAD_BASE_URL` > `~/.squad/*`), so no token need be passed on the command line.
@@ -155,7 +161,12 @@ C. Verify(N)
 **Loop exceptions:**
 - Split triggered during Refine → insert sub-cards, continue
 - Circuit breaker or blocker during Implement → stop, report resume point
-- Unexpected design change during Verify → queue a re-refine for downstream tasks (writes a new spec; never patch their `description`); report to user
+- Unexpected design change during Verify → queue a re-refine for downstream tasks (writes a new spec; never patch their `description`); report to user. Also emit ONE abstracted `user_steering` event for the deviation (consent-gated by the cached `OBSERVE_OK`, best-effort; enums per `squad/shared.md` → **Abstraction Rubric**, the batch-run post-Verify row):
+  ```bash
+  [ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$ID" --modality corrective \
+    --valence negative --target scope --severity major --attributability violated_constraint \
+    --comment "verify found a design deviation" || true
+  ```
 
 ### 6b. Execute — Big Bang mode (`--big-bang`)
 

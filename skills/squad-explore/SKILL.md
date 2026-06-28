@@ -18,6 +18,11 @@ This skill explores first, reports direction, then seeds the squad board with ph
 ### Procedure
 
 ```
+⓪ Resolve the observation gate ONCE (SQD-936 seam — see ../squad/shared.md → Abstraction Rubric)
+   python3 ../squad/scripts/observe.py gate >/dev/null 2>&1; OBSERVE_OK=$?
+   # 0 = emit corrections, non-zero = skip. Cache it; the emit at ④ reuses it (best-effort, || true).
+   # Mint one correlation_id for this explore run: CID=$(python3 -c 'import uuid;print(uuid.uuid4())')
+
 ① Receive and validate topic
 
    If topic is missing (no argument):
@@ -164,6 +169,19 @@ This skill explores first, reports direction, then seeds the squad board with ph
    - "Cancel — save report only, don't create tasks"
 
    If user selects Cancel → jump to ⑥-Cancel.
+
+   Steering emit (SQD-936, best-effort): choosing the Plan agent's RECOMMENDED direction emits
+   nothing. If the user picks a NON-recommended direction, OR "Cancel", emit one abstracted
+   user_steering event (enums per ../squad/shared.md → Abstraction Rubric: the explore rows).
+   # non-recommended direction:
+   [ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$ID" --modality corrective \
+     --valence negative --target planning --severity moderate --attributability latent_preference \
+     --comment "chose a non-recommended direction" --correlation-id "$CID" || true
+   # Cancel:
+   [ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$ID" --modality corrective \
+     --valence negative --target planning --severity trivial --attributability ambiguous \
+     --comment "cancelled before creating tasks" --correlation-id "$CID" || true
+   ($ID = the report/epic id once known, else the topic's anchor; reuse the run's $CID.)
 
 ⑤ Generate phased squad tasks
 

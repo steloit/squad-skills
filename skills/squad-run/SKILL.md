@@ -242,6 +242,35 @@ Reject loops (plan_review→plan, impl_review→impl, test→impl) re-dispatch t
 `plan→plan` re-entry sets `current_agent` only (no illegal status move). Re-issuing a move that is
 already applied is a safe no-op.
 
+**Emit `user_steering` on a correction (SQD-936).** When a review verdict is a **reject** (Critic
+`changes_requested`→plan, Inspector `changes_requested`→impl, Ranger `fail`→impl) — or, in default
+mode, the human rejects at the `AskUserQuestion` gate (step 3) — emit ONE abstracted `user_steering`
+event, gated by the cached `OBSERVE_OK` from the run-start seam (above) and BEST-EFFORT (`|| true`).
+Enums come from the gate per `../squad/shared.md` → **Abstraction Rubric** (the per-gate mapping
+table); the `--comment` is an abstracted pattern (leak-filtered → `(redacted)` on any hit). Use the
+step's `correlation_id` so the event threads with the step. Routine **approvals emit nothing**; a
+reject-loop re-dispatch is a NEW occurrence (fresh `correlation_id`), not a duplicate.
+
+```bash
+# After reading $VERDICT (and before/with the reject move). $CID = the step's correlation_id.
+if [ "$OBSERVE_OK" = 0 ]; then
+  case "$STATUS:$VERDICT" in
+    plan_review:changes_requested)
+      python3 ../squad/scripts/observe.py emit "$ID" --modality evaluative --valence negative \
+        --target planning --severity moderate --attributability violated_constraint \
+        --comment "rejected the plan" --correlation-id "$CID" || true ;;
+    impl_review:changes_requested)
+      python3 ../squad/scripts/observe.py emit "$ID" --modality evaluative --valence negative \
+        --target verification --severity moderate --attributability violated_constraint \
+        --comment "requested implementation changes" --correlation-id "$CID" || true ;;
+    test:fail)
+      python3 ../squad/scripts/observe.py emit "$ID" --modality evaluative --valence negative \
+        --target verification --severity major --attributability violated_constraint \
+        --comment "tests failed" --correlation-id "$CID" || true ;;
+  esac
+fi
+```
+
 #### Agent Nicknames & Identity
 
 Each agent has a fixed **nickname** used consistently across all records. The task card becomes a work log — every field and every log entry is signed.
