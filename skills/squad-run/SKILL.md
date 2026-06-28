@@ -180,6 +180,19 @@ if [ "$LEVEL" = "3" ]; then PLAN_NEXT=plan_review; else PLAN_NEXT=impl; fi
 # 5. Re-read state, loop until done or circuit breaker
 ```
 
+#### SQD-936 observation gate-seam (consent before any `user_steering` emit)
+
+Before the orchestrator emits any `user_steering` observation event it MUST pass the **consent gate** — `../squad/scripts/observe.py` (read-only; see `../squad/shared.md` → **Observation & Consent**). Resolve it **ONCE at run start** and cache the exit code for the whole run (observe.py is stateless — one `GET /consent` per call):
+
+```bash
+# Resolve once per run; cache the decision. 0 = emit, non-zero = skip (no parsing).
+python3 ../squad/scripts/observe.py gate >/dev/null 2>&1; OBSERVE_OK=$?
+# … later, per correction, reuse the cached decision — do NOT re-resolve:
+#   [ "$OBSERVE_OK" = 0 ] && <emit user_steering>   # else skip
+```
+
+Local kill-switches (`DO_NOT_TRACK` / `SQUAD_OBSERVE_DISABLED` / `CI`) hard-off the gate with no network; otherwise it reads server consent and **fails closed** on any error. A mid-run web opt-out takes effect on the **next** run; any straggler emit is 403'd server-side (SQD-937). The emission itself is SQD-936; this gate is the seam it calls.
+
 #### Per-Step Transition Contract (orchestrator owns every move)
 
 The orchestrator — never the agent — issues every status transition. Each agent step runs

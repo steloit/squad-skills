@@ -65,6 +65,40 @@ echo "SQUAD_ORG=${SQUAD_ORG:-unset (REQUIRED — fail-fast; add SQUAD_ORG=<slug>
 # A failing call surfaces an actionable auth/transport error on stderr (exit 3 auth, 6 network).
 ```
 
+## Observation & Consent
+
+Squad can observe **abstracted user steering** (corrections to a plan/step) to improve the team over time — but only with explicit, opt-in consent, and never the raw content. The act of opting **in/out lives in the web app** (Settings → Observation & Consent); skills **only read** consent state, they never grant or withdraw. Off by default.
+
+Before the orchestrator emits any `user_steering` event it consults the **consent gate** — `scripts/observe.py`, a zero-dep helper alongside `api.py`, invoked the same way:
+
+```bash
+# Read-only consent gate. observe.py NEVER handles the token — it subprocesses
+# api.py for one GET /consent and reads the wire shape; api.py owns auth.
+observe() { python3 ../squad/scripts/observe.py "$@"; }
+
+observe gate    --json   # the emit decision (exit 0 = on, non-zero = off)
+observe status           # effective on/off + the source that decided it
+observe dry-run | jq .   # the would-be payload, written/sent nowhere
+```
+
+**Local kill-switches (a HARD off — env beats config, like the GitHub-CLI rule).** Any of these, set and not in `{"", "0", "false"}`, resolves the gate **OFF with no network call** — they override even an active server grant:
+
+- `DO_NOT_TRACK` — the cross-tool [consoledonottrack.com](https://consoledonottrack.com) convention.
+- `SQUAD_OBSERVE_DISABLED` — a dedicated Squad-only switch.
+- `CI` — a CI runner is detected ⇒ default OFF (never observe in automation).
+
+**Gate contract (the `gate` exit code — squad-run branches on the code, no parsing):**
+
+| Code | Meaning |
+|------|---------|
+| 0 | observation **ON** — opted-in for `behavioral_capture`, no local override |
+| 1 | **OFF**, clean — an env kill-switch is set, OR not opted-in (no row / `opted_in:false`) |
+| 2 | **OFF**, fail-closed — a consent-read error (api.py non-zero or non-JSON). Any read failure → OFF, never accidental ON |
+
+Resolution order: **env override first** (no network) → else **one** `GET /consent`, ON iff the `behavioral_capture` row is `opted_in`. The gate **fails closed** — any auth/transport/parse error is OFF.
+
+**Once-per-run cadence.** `observe.py` is stateless — one `GET` per `gate` call. The run-scoped cache is the **caller's** job: squad-run resolves `gate` **ONCE at run start**, caches the exit code, and every per-correction emit reuses it (a mid-run web opt-out takes effect on the **next** run; any straggler emit is rejected server-side). The server (SQD-937) independently 403s un-consented `user_steering` writes, so the gate is an **optimization + the local override**, not the sole privacy guarantee.
+
 ## Pipeline Levels
 
 | Level | Path | Use Case |

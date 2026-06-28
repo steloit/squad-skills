@@ -30,5 +30,10 @@ def api_mod():
 
 
 @pytest.fixture(scope="session")
+def observe_mod():
+    return _load("skills/squad/scripts/observe.py", "observe")
+
+
+@pytest.fixture(scope="session")
 def repo_root():
     return ROOT

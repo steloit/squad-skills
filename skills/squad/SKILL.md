@@ -227,6 +227,25 @@ api DELETE /projects/$PROJECT/links --json '{"target_id": "other-project", "rela
 
 Relations: `extends`, `serves`, `depends_on`, `shares_data`.
 
+### `/squad observe status|dry-run` — Observation Consent (read-only)
+
+Inspect the **observation-consent** gate. Read-only — the opt-in/opt-out act lives in the **web app** (Settings → Observation & Consent); the skill never grants or withdraws. See `shared.md` → **Observation & Consent**.
+
+```bash
+observe() { python3 ../squad/scripts/observe.py "$@"; }
+
+# status — effective on/off, the source that decided it (env override / server
+# consent / default), the policy_version on record, and the web-app manage pointer.
+observe status            # human-readable;  add --json for the decision object
+
+# dry-run — print the ABSTRACTED user_steering payload that WOULD be recorded to
+# stdout (pipeable to jq) + a `# DRY RUN` banner to stderr. Writes/sends NOTHING,
+# in any consent state — inspect before opting in.
+observe dry-run | jq .
+```
+
+There is **no** `grant`/`withdraw` here — opt in or out in the web app.
+
 ## Setup & Web Board
 
 Run `/squad-init` first to register this project — it writes `.squadrc` (`SQUAD_PROJECT=…`, plus an optional `SQUAD_ORG=<label>` org selector) at the repo root, committed so your whole team's agents target the same board project. The token never goes in a project file — it's a **Personal Access Token** resolved as `SQUAD_AUTH_TOKEN` env > bare `SQUAD_AUTH_TOKEN=` from `~/.squad/auth` (see `shared.md`).
