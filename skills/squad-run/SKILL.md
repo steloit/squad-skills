@@ -180,6 +180,19 @@ if [ "$LEVEL" = "3" ]; then PLAN_NEXT=plan_review; else PLAN_NEXT=impl; fi
 # 5. Re-read state, loop until done or circuit breaker
 ```
 
+#### SQD-936 observation gate-seam (consent before any `user_steering` emit)
+
+Before the orchestrator emits any `user_steering` observation event it MUST pass the **consent gate** — `../squad/scripts/observe.py` (read-only; see `../squad/shared.md` → **Observation & Consent**). Resolve it **ONCE at run start** and cache the exit code for the whole run (observe.py is stateless — one `GET /consent` per call):
+
+```bash
+# Resolve once per run; cache the decision. 0 = emit, non-zero = skip (no parsing).
+python3 ../squad/scripts/observe.py gate >/dev/null 2>&1; OBSERVE_OK=$?
+# … later, per correction, reuse the cached decision — do NOT re-resolve:
+#   [ "$OBSERVE_OK" = 0 ] && <emit user_steering>   # else skip
+```
+
+Local kill-switches (`DO_NOT_TRACK` / `SQUAD_OBSERVE_DISABLED` / `CI`) hard-off the gate with no network; otherwise it reads server consent and **fails closed** on any error. A mid-run web opt-out takes effect on the **next** run; any straggler emit is 403'd server-side (SQD-937). The emission itself is SQD-936; this gate is the seam it calls.
+
 #### Per-Step Transition Contract (orchestrator owns every move)
 
 The orchestrator — never the agent — issues every status transition. Each agent step runs
@@ -228,6 +241,35 @@ read from the derived field — reviews are `approved` / `changes_requested`, th
 Reject loops (plan_review→plan, impl_review→impl, test→impl) re-dispatch the column's agent; a
 `plan→plan` re-entry sets `current_agent` only (no illegal status move). Re-issuing a move that is
 already applied is a safe no-op.
+
+**Emit `user_steering` on a correction (SQD-936).** When a review verdict is a **reject** (Critic
+`changes_requested`→plan, Inspector `changes_requested`→impl, Ranger `fail`→impl) — or, in default
+mode, the human rejects at the `AskUserQuestion` gate (step 3) — emit ONE abstracted `user_steering`
+event, gated by the cached `OBSERVE_OK` from the run-start seam (above) and BEST-EFFORT (`|| true`).
+Enums come from the gate per `../squad/shared.md` → **Abstraction Rubric** (the per-gate mapping
+table); the `--comment` is an abstracted pattern (leak-filtered → `(redacted)` on any hit). Use the
+step's `correlation_id` so the event threads with the step. Routine **approvals emit nothing**; a
+reject-loop re-dispatch is a NEW occurrence (fresh `correlation_id`), not a duplicate.
+
+```bash
+# After reading $VERDICT (and before/with the reject move). $CID = the step's correlation_id.
+if [ "$OBSERVE_OK" = 0 ]; then
+  case "$STATUS:$VERDICT" in
+    plan_review:changes_requested)
+      python3 ../squad/scripts/observe.py emit "$ID" --modality evaluative --valence negative \
+        --target planning --severity moderate --attributability violated_constraint \
+        --comment "rejected the plan" --correlation-id "$CID" || true ;;
+    impl_review:changes_requested)
+      python3 ../squad/scripts/observe.py emit "$ID" --modality evaluative --valence negative \
+        --target verification --severity moderate --attributability violated_constraint \
+        --comment "requested implementation changes" --correlation-id "$CID" || true ;;
+    test:fail)
+      python3 ../squad/scripts/observe.py emit "$ID" --modality evaluative --valence negative \
+        --target verification --severity major --attributability violated_constraint \
+        --comment "tests failed" --correlation-id "$CID" || true ;;
+  esac
+fi
+```
 
 #### Agent Nicknames & Identity
 

@@ -65,6 +65,82 @@ echo "SQUAD_ORG=${SQUAD_ORG:-unset (REQUIRED — fail-fast; add SQUAD_ORG=<slug>
 # A failing call surfaces an actionable auth/transport error on stderr (exit 3 auth, 6 network).
 ```
 
+## Observation & Consent
+
+Squad can observe **abstracted user steering** (corrections to a plan/step) to improve the team over time — but only with explicit, opt-in consent, and never the raw content. The act of opting **in/out lives in the web app** (Settings → Observation & Consent); skills **only read** consent state, they never grant or withdraw. Off by default.
+
+Before the orchestrator emits any `user_steering` event it consults the **consent gate** — `scripts/observe.py`, a zero-dep helper alongside `api.py`, invoked the same way:
+
+```bash
+# Read-only consent gate. observe.py NEVER handles the token — it subprocesses
+# api.py for one GET /consent and reads the wire shape; api.py owns auth.
+observe() { python3 ../squad/scripts/observe.py "$@"; }
+
+observe gate    --json   # the emit decision (exit 0 = on, non-zero = off)
+observe status           # effective on/off + the source that decided it
+observe dry-run | jq .   # the would-be payload, written/sent nowhere
+```
+
+**Local kill-switches (a HARD off — env beats config, like the GitHub-CLI rule).** Any of these, set and not in `{"", "0", "false"}`, resolves the gate **OFF with no network call** — they override even an active server grant:
+
+- `DO_NOT_TRACK` — the cross-tool [consoledonottrack.com](https://consoledonottrack.com) convention.
+- `SQUAD_OBSERVE_DISABLED` — a dedicated Squad-only switch.
+- `CI` — a CI runner is detected ⇒ default OFF (never observe in automation).
+
+**Gate contract (the `gate` exit code — squad-run branches on the code, no parsing):**
+
+| Code | Meaning |
+|------|---------|
+| 0 | observation **ON** — opted-in for `behavioral_capture`, no local override |
+| 1 | **OFF**, clean — an env kill-switch is set, OR not opted-in (no row / `opted_in:false`) |
+| 2 | **OFF**, fail-closed — a consent-read error (api.py non-zero or non-JSON). Any read failure → OFF, never accidental ON |
+
+Resolution order: **env override first** (no network) → else **one** `GET /consent`, ON iff the `behavioral_capture` row is `opted_in`. The gate **fails closed** — any auth/transport/parse error is OFF.
+
+**Once-per-run cadence.** `observe.py` is stateless — one `GET` per `gate` call. The run-scoped cache is the **caller's** job: squad-run resolves `gate` **ONCE at run start**, caches the exit code, and every per-correction emit reuses it (a mid-run web opt-out takes effect on the **next** run; any straggler emit is rejected server-side). The server (SQD-937) independently 403s un-consented `user_steering` writes, so the gate is an **optimization + the local override**, not the sole privacy guarantee.
+
+## Abstraction Rubric (emitting `user_steering`)
+
+When the gate is ON, an orchestrating skill emits ONE abstracted `user_steering` event at each **human correction** — a deterministic `AskUserQuestion` moment where the human redirects the run (rejects a plan, edits a spec, picks a non-recommended direction, flags a deviation). Routine **approvals** emit nothing — Tier-1 captures corrections, not confirmations. The emit is one `observe.py emit` call:
+
+```bash
+# Consent-gated, leak-filtered, BEST-EFFORT. Guard with the cached gate decision and
+# `|| true` so an emit failure NEVER breaks the host run. Body goes to api.py on stdin
+# (the PAT stays inside api.py; observe.py never sees it).
+[ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$ID" \
+  --modality <m> --valence <v> --target <t> --severity <s> --attributability <a> \
+  --comment "<abstracted pattern>" --correlation-id "$CID" || true
+```
+
+**The enums are TRUSTED — derived from the gate context, never inferred from free text.** The skill knows what the human did at each gate, so it maps the gate directly to the five enums (`modality, valence, target, severity, attributability`). The canonical vocabularies are single-sourced in `packages/types/src/activity.ts` (SQD-935) and bound to `observe.py emit`'s `choices=` (a bad value → exit 2 before any network).
+
+### Per-gate enum mapping
+
+| Skill | Correction gate (the `AskUserQuestion` moment) | modality | valence | target | severity | attributability |
+|-------|-----------------------------------------------|----------|---------|--------|----------|-----------------|
+| squad-run | Critic **changes_requested** @ plan_review (or default-mode human reject of the plan) | `evaluative` | `negative` | `planning` | `moderate` | `violated_constraint` |
+| squad-run | Inspector **changes_requested** @ impl_review | `evaluative` | `negative` | `verification` | `moderate` | `violated_constraint` |
+| squad-run | Ranger **fail** @ test | `evaluative` | `negative` | `verification` | `major` | `violated_constraint` |
+| squad-refine | ⑥ "Edit more" (spec sent back to interview) | `corrective` | `negative` | `scope` | `moderate` | `latent_preference` |
+| squad-refine | ⑥ "Cancel" (spec discarded) | `corrective` | `negative` | `scope` | `moderate` | `ambiguous` |
+| squad-refine | ④ interview redirect (a Q&A answer that changes direction) | `corrective` | `na` | `scope` | `trivial` | `latent_preference` |
+| squad-explore | ④ a **non-recommended** direction chosen | `corrective` | `negative` | `planning` | `moderate` | `latent_preference` |
+| squad-explore | ④ "Cancel" (report saved, no tasks) | `corrective` | `negative` | `planning` | `trivial` | `ambiguous` |
+| squad-batch-run | post-Verify **unexpected design change** / deviation | `corrective` | `negative` | `scope` | `major` | `violated_constraint` |
+
+(These are sensible defaults; a skill MAY pick a closer enum from the canonical vocab when the gate context is more specific — e.g. `target=git_strategy` / `tooling` / `pipeline_flow` when that is plainly what the human steered.)
+
+### The `comment` — never capture raw
+
+The five enums are the analyzable signal and require NO free text. The optional `--comment` is the ONLY free-text surface; it is an **abstracted pattern**, never raw user words, code, paths, or secrets. `observe.py emit` runs it through a deterministic, zero-dep **reject-on-detect leak filter** (prose-charset + Shannon-entropy + email/URL/IP/path/dotfile/key=value/digit-run regex); on ANY hit the comment is dropped to the **`(redacted)`** sentinel — but the enums always emit.
+
+- **GOOD** (abstracted patterns): `"preferred a smaller scope"`, `"wanted tests first"`, `"redirected to the web app"`, `"asked to research before building"`.
+- **BAD** (raw / leaky — the filter drops these to `(redacted)`): `"change src/auth/login.ts line 42"`, `"use key=sk_live_…"`, `"email me at a@b.com"`, `"the server at 10.0.0.1"`.
+
+**Sentinel note.** The platform write-path requires `comment` (`z.string().min(1).max(120)`), so a dropped/empty comment can't be omitted — it becomes the leak-free `(redacted)` constant. "enums-always" therefore means *enums + a safe sentinel comment*. The top-level `message` is a second free-text surface, so `emit` **templates it from the enums** (`"user steering: <modality>/<valence> on <target> (<severity>)"`) — leak-free by construction, never raw text.
+
+**Cadence + best-effort.** Resolve `gate` ONCE per run (cache `OBSERVE_OK`); emit exactly ONE event per correction occurrence (a reject-loop re-dispatch is a NEW occurrence with a fresh `correlation_id`, not a duplicate). Every emit is `|| true` best-effort — an api.py error is logged and the host run continues. The server (SQD-937) independently 403s un-consented writes as the backstop (see **Observation & Consent**).
+
 ## Pipeline Levels
 
 | Level | Path | Use Case |

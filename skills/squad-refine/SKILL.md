@@ -16,6 +16,11 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
 ### Procedure
 
 ```
+⓪ Resolve the observation gate ONCE (SQD-936 seam — see ../squad/shared.md → Abstraction Rubric)
+   python3 ../squad/scripts/observe.py gate >/dev/null 2>&1; OBSERVE_OK=$?
+   # 0 = emit corrections, non-zero = skip. Cache it; every emit below reuses it (best-effort, || true).
+   # Mint ONE correlation_id for this refine run for any steering emits: CID=$(python3 -c 'import uuid;print(uuid.uuid4())')
+
 ① Read the task
    TASK = api GET /task/$ID
    Extract: title, description, priority, level, tags, card_type
@@ -79,6 +84,13 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
    - Don't ask about things that are already clear
    - Use concrete options when possible, not open-ended questions
 
+   Steering emit (SQD-936, best-effort): if an interview answer REDIRECTS the task's direction
+   (not a routine fill-in), emit one abstracted user_steering event (enums per ../squad/shared.md →
+   Abstraction Rubric: interview-redirect row). Skip for ordinary answers.
+   [ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$ID" --modality corrective \
+     --valence na --target scope --severity trivial --attributability latent_preference \
+     --comment "redirected during the interview" --correlation-id "$CID" || true
+
 ⑤ Synthesize the refined SPEC
    Build a structured spec OBJECT — NOT a description rewrite. The human's original
    request stays in `description` and is NEVER overwritten; the refined spec is a
@@ -120,6 +132,18 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
    - "Approve & save" (write the spec)
    - "Edit more" (go back to interview)
    - "Cancel" (discard changes)
+
+   Steering emit (SQD-936, best-effort): "Approve & save" emits nothing (routine approval).
+   On "Edit more" OR "Cancel" emit one abstracted user_steering event (enums per
+   ../squad/shared.md → Abstraction Rubric: the Edit-more / Cancel rows). Use the same $CID.
+   # "Edit more":
+   [ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$ID" --modality corrective \
+     --valence negative --target scope --severity moderate --attributability latent_preference \
+     --comment "sent the spec back for edits" --correlation-id "$CID" || true
+   # "Cancel":
+   [ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$ID" --modality corrective \
+     --valence negative --target scope --severity moderate --attributability ambiguous \
+     --comment "cancelled the refine" --correlation-id "$CID" || true
 
 ⑦ Save
    If approved:
