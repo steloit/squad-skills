@@ -16,7 +16,7 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
 ### Procedure
 
 ```
-⓪ Resolve the observation gate ONCE (SQD-936 seam — see ../squad/shared.md → Abstraction Rubric)
+⓪ Resolve the observation gate ONCE (the consent-gate seam — see ../squad/shared.md → Abstraction Rubric)
    python3 ../squad/scripts/observe.py gate >/dev/null 2>&1; OBSERVE_OK=$?
    # 0 = emit corrections, non-zero = skip. Cache it; every emit below reuses it (best-effort, || true).
    # Mint ONE correlation_id for this refine run for any steering emits: CID=$(python3 -c 'import uuid;print(uuid.uuid4())')
@@ -74,22 +74,104 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
    - EDGE CASES: Error states, boundary conditions?
    - DEPENDENCIES: Does it depend on other tasks or external systems?
 
-④ Interview the user (MANDATORY)
-   Use AskUserQuestion to ask about the gaps found in ③.
-   Rules:
-   - Ask 1–4 focused questions per round (AskUserQuestion limit)
-   - Group related questions in one round
-   - Run multiple rounds if needed (max 3 rounds)
-   - Stop early if the user says "enough" or all gaps are filled
-   - Don't ask about things that are already clear
-   - Use concrete options when possible, not open-ended questions
+④ Interview the user — the GAP-LEDGER LOOP (MANDATORY)
+   Depth comes from chasing follow-ups, not from one big up-front round. The LOOP
+   MECHANICS below are low-freedom (re-emit the ledger → ask → probe → call the
+   script → obey it); the CONTENT of each question stays high-freedom (your
+   judgement). The stop is OWNED by `../squad/scripts/refine_ledger.py` — you do
+   NOT self-judge "looks done" (a known gameable failure).
 
-   Steering emit (SQD-936, best-effort): if an interview answer REDIRECTS the task's direction
+   1. Seed + RE-EMIT the ledger artifact. From the ③ gaps, build a fixed-schema
+      JSON list — and RE-EMIT IT IN FULL at the top of EVERY round (state lives in
+      tokens, not memory). Do NOT just "keep a ledger" in your head:
+        [ {"id":"g1","dimension":"WHAT","status":"OPEN","source":"original"},
+          {"id":"g2","dimension":"SCOPE","status":"OPEN","source":"original"}, … ]
+      dimension ∈ WHAT/WHY/SCOPE/ACCEPTANCE/CONSTRAINTS/EDGE/DEPS (③); status ∈
+      OPEN/RESOLVED; source = original | raised-by-answer-R#.
+
+   2. SELECT the highest-value OPEN gaps (those whose answers most change
+      scope / acceptance / level — EVPI-style), recency-first (chase the LAST
+      answer). Ask 1–4 as ONE AskUserQuestion round. Apply the **Clarification &
+      Research** rules below to decide menu-vs-research-recommend for each.
+
+   3. RECORD answers → mark those ledger entries RESOLVED (re-emit reflects it).
+
+   4. PROBE-SCAN (mandatory, non-skippable output slot). Over EACH new answer,
+      write to a visible `Probe-scan (R#):` slot either:
+        - ≥1 NEW OPEN ledger entry the answer introduced — an underspecified
+          concept / a vague term / an in-scope omission / an open choice —
+          `{"id":…,"dimension":…,"status":"OPEN","source":"raised-by-answer-R#"}`, OR
+        - an explicit `No new gaps: <reason>` (the diminishing-returns signal).
+      Grice filter every candidate question: Clear + Relevant + Informative (its
+      answer increases what's known); drop generic filler; NEVER re-ask a RESOLVED
+      entry. A genuinely CLEAR card produces `No new gaps` in round 1 — do NOT
+      manufacture filler gaps to keep the loop alive.
+
+   5. CALL THE STOP-GATE and OBEY its exit code. Pipe the re-emitted ledger to the
+      script with the round number + this round's probe-scan outcome:
+        printf '%s' "$LEDGER_JSON" | python3 ../squad/scripts/refine_ledger.py \
+          verdict --round "$R" --last-probe <new_gaps|no_new_gaps>; V=$?
+        # 0 STOP-CLEAN → go to verify-before-done, then ⑤
+        # 1 CONTINUE   → loop to step 1 (R+1); the script says gaps remain
+        # 2 STOP-DEGRADED → cap hit with WHAT/SCOPE/ACCEPTANCE still OPEN (backstop)
+        # 3 STOP-ENOUGH → user escape (backstop)
+      The verdict is AUTHORITY. Exit 1 means MORE rounds are owed — do not synthesize.
+
+   6. BACKSTOPS (not the primary control — the probe-scan + OPEN count are):
+      - The user says "enough" at ANY point → run the gate with `--user-enough`
+        (STOP-ENOUGH, exit 3): synthesize now; any residual OPEN row → an
+        `## Open Questions` block in ⑤.
+      - The script's hard cap (exit 2, STOP-DEGRADED) → write the residual OPEN rows
+        into `## Open Questions` AND, since WHAT/SCOPE/ACCEPTANCE is still OPEN,
+        recommend `/squad-explore` or a card split rather than shipping a falsely-
+        "refined" card. (`--json` gives `core_unresolved` + `residual_open`.)
+      - A clean stop (exit 0) at the cap MAY still carry non-core residual OPEN rows
+        (WHAT/SCOPE/ACCEPTANCE resolved, only non-core gaps left) → write those rows
+        into `## Open Questions` too. (`--json` `residual_open` lists them; the script's
+        human output flags `N non-core row(s) → ## Open Questions`.) No explore/split
+        recommendation here — the core is covered, so the card is genuinely refined.
+
+   7. VERIFY-BEFORE-DONE (immediately before ⑤). Re-derive the OPEN count by
+      re-running the gate on the final ledger; if ANY row is still OPEN under a
+      synthesize verdict it can only be a cap/enough stop (exit 2/3) → carry the
+      residual into `## Open Questions`. A self-asserted "done" with an OPEN row on
+      a non-backstop path is impossible — the gate (exit 1) catches it.
+
+   Steering emit (best-effort): if an interview answer REDIRECTS the task's direction
    (not a routine fill-in), emit one abstracted user_steering event (enums per ../squad/shared.md →
    Abstraction Rubric: interview-redirect row). Skip for ordinary answers.
    [ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$ID" --modality corrective \
      --valence na --target scope --severity trivial --attributability latent_preference \
      --comment "redirected during the interview" --correlation-id "$CID" || true
+
+   ── Clarification & Research (value-of-information) ──
+   Wired into step 2's question selection:
+   - VoI RULE: ask a question ONLY when its answer would MATERIALLY change what
+     gets built. Otherwise proceed and NOTE THE ASSUMPTION (don't ask filler).
+   - CLASSIFY each question you would ask:
+       · PREFERENCE / OWNERSHIP / IRREVERSIBLE-SCOPE fork → AskUserQuestion MENU,
+         each option carrying a one-line rationale (the user owns this call).
+       · ANALYSIS-RESOLVABLE (best practice / architecture / perf / library) →
+         RESEARCH it and present ONE recommendation WITH REASONING — not a menu.
+   - MODE-DETECTION → switch to research-then-recommend-ONE for the rest of the
+     thread (remember it for the session) when the user: re-sends a directive
+     verbatim, asks "what do you suggest", says "do web research / best practices",
+     grants "full freedom to re-architect", or rejects an option-set.
+   - PROPOSAL-NOT-COMMIT: every output is a recommendation + reasoning + a cheap
+     override (reject / edit / redirect), mirroring Plan Mode. Never read as locked.
+   - VALUE-GATED RESEARCH: research fires ONLY when value is high — the card is
+     design / architecture / re-architecture / high-uncertainty (best practices
+     materially shape the outcome) OR the user explicitly signals it. A clear /
+     trivial card does NO research (fast refine, near-zero extra tokens). DEPTH
+     scales with stakes: ONE targeted best-practices check for a moderate card; a
+     deeper sweep ONLY for a genuine architecture decision — never an always-on
+     fan-out. EDGE: a research keyword on a trivial card does NOT trigger a sweep —
+     the gate is VoI, not keyword-match.
+   - CONFIGURABLE aggressiveness `SQUAD_REFINE_RESEARCH = off | auto-by-value |
+     always`, default `auto-by-value`. Resolve env `SQUAD_REFINE_RESEARCH` >
+     committed `.squadrc` `SQUAD_REFINE_RESEARCH=` (the standard `SQUAD_*` ladder,
+     `../squad/shared.md` → Per-key resolution); `off` disables research entirely,
+     `always` researches every design-shaped question.
 
 ⑤ Synthesize the refined SPEC
    Build a structured spec OBJECT — NOT a description rewrite. The human's original
@@ -109,6 +191,19 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
                      "SCOPE(IN): …" / "SCOPE(OUT): …"      the in / "Not Included" boundary
                      "CONSTRAINT: …"                       technical constraint
                      "EDGE: …"                             edge case
+                     "SOURCE: <url>"                       a research source (guarded; see below)
+
+                   GUARDED `## Sources` (the Sources convention; reuse note in
+                   `../squad/shared.md` → Sources Convention). EMIT `SOURCE:`
+                   entries ONLY when external research MATERIALLY informed the card
+                   (a non-research card carries NONE — the omit-empty rule). Two
+                   hard guards: (1) cite ONLY sources actually consulted THIS run
+                   as real, verifiable URLs — NEVER fabricate a citation or a
+                   plausible-looking arXiv id; (2) a codebase fact cites `file:line`,
+                   NOT a URL. The entries live IN `requirements[]` as `SOURCE: …`
+                   rows (the spec is a structured object — there is no free-markdown
+                   home for a `## Sources` section; the card view renders the rows
+                   as the Sources block).
    - qa:           {question, answer}[] — one entry per interview question asked in ④
                    (answer = the user's chosen value; null if a question went unanswered).
 
@@ -126,14 +221,32 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
    }
    ```
 
-⑥ Present the refined SPEC to the user
-   Show the spec in a readable form (goal, the requirements list, the Q&A).
-   Ask user to confirm with AskUserQuestion:
+⑥ Present the refined SPEC + RE-ASSESS THE LEVEL
+   Paraphrase the resolved scope back, then show the spec in a readable form
+   (goal, the requirements list, the Q&A).
+
+   RE-ASSESS THE LEVEL from the REFINED scope (scope can grow materially during the
+   interview and the level must follow it — e.g. an L2 that grew to
+   RLS proofs + e2e + multi-job CI + deploy config stayed L2, skipping plan_review
+   AND test). Score the refined requirements against `../squad/shared.md` →
+   Pipeline Levels (L1 trivial / L2 single-layer / L3 new-feature · architecture ·
+   multi-layer — adds test/CI surface) + `../squad/principles.md` → Card-Split
+   Criteria. The L1/L2/L3 rubric itself is UNCHANGED; you only re-score against it.
+
+   Ask the user to confirm with AskUserQuestion:
    - "Approve & save" (write the spec)
    - "Edit more" (go back to interview)
    - "Cancel" (discard changes)
 
-   Steering emit (SQD-936, best-effort): "Approve & save" emits nothing (routine approval).
+   If the re-assessed level DIFFERS from the current level, surface the change
+   INSIDE this approval as an explicit choice (the level is NEVER auto-applied;
+   re-leveling happens ONLY here in refine, never in squad-run):
+   - "Apply" (save with the re-assessed level, e.g. L2 → L3)
+   - "Keep" (save, keep the current level)
+   - "Adjust" (pick a different level)
+   The chosen level is written in ⑦ (the "Apply the re-assessed level" line).
+
+   Steering emit (best-effort): "Approve & save" emits nothing (routine approval).
    On "Edit more" OR "Cancel" emit one abstracted user_steering event (enums per
    ../squad/shared.md → Abstraction Rubric: the Edit-more / Cancel rows). Use the same $CID.
    # "Edit more":
@@ -177,7 +290,9 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
      # (On a 412 retry, KEEP the same $CORRELATION_ID — it's still the same save occasion.)
      rm -f "$ERR"
      ```
-   - Update title/level/priority/tags ONLY if the interview changed them (PATCH — never `description`).
+   - Apply the re-assessed level from ⑥ (and priority/tags if discussed) — PATCH the
+     `level` to the user's ⑥ choice (Apply / Keep / Adjust), and title/priority/tags
+     only if the interview changed them (PATCH — never `description`).
    - **Declare dependencies structurally**: if the interview surfaced that this task is blocked by
      another (#DEP), declare it via a `blocks` edge — NOT a `Depends on:` text line:
      ```bash
