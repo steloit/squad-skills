@@ -109,7 +109,7 @@ observe dry-run | jq .   # the would-be payload, written/sent nowhere
 
 Resolution order: **env override first** (no network) → else **one** `GET /consent`, ON iff the `behavioral_capture` row is `opted_in`. The gate **fails closed** — any auth/transport/parse error is OFF.
 
-**Once-per-run cadence.** `observe.py` is stateless — one `GET` per `gate` call. The run-scoped cache is the **caller's** job: squad-run resolves `gate` **ONCE at run start**, caches the exit code, and every per-correction emit reuses it (a mid-run web opt-out takes effect on the **next** run; any straggler emit is rejected server-side). The server (SQD-937) independently 403s un-consented `user_steering` writes, so the gate is an **optimization + the local override**, not the sole privacy guarantee.
+**Once-per-run cadence.** `observe.py` is stateless — one `GET` per `gate` call. The run-scoped cache is the **caller's** job: squad-run resolves `gate` **ONCE at run start**, caches the exit code, and every per-correction emit reuses it (a mid-run web opt-out takes effect on the **next** run; any straggler emit is rejected server-side). The server independently 403s un-consented `user_steering` writes, so the gate is an **optimization + the local override**, not the sole privacy guarantee.
 
 ## Abstraction Rubric (emitting `user_steering`)
 
@@ -124,7 +124,7 @@ When the gate is ON, an orchestrating skill emits ONE abstracted `user_steering`
   --comment "<abstracted pattern>" --correlation-id "$CID" || true
 ```
 
-**The enums are TRUSTED — derived from the gate context, never inferred from free text.** The skill knows what the human did at each gate, so it maps the gate directly to the five enums (`modality, valence, target, severity, attributability`). The canonical vocabularies are single-sourced in `packages/types/src/activity.ts` (SQD-935) and bound to `observe.py emit`'s `choices=` (a bad value → exit 2 before any network).
+**The enums are TRUSTED — derived from the gate context, never inferred from free text.** The skill knows what the human did at each gate, so it maps the gate directly to the five enums (`modality, valence, target, severity, attributability`). The canonical vocabularies are single-sourced server-side and bound to `observe.py emit`'s `choices=` (a bad value → exit 2 before any network).
 
 ### Per-gate enum mapping
 
@@ -151,7 +151,7 @@ The five enums are the analyzable signal and require NO free text. The optional 
 
 **Sentinel note.** The platform write-path requires `comment` (`z.string().min(1).max(120)`), so a dropped/empty comment can't be omitted — it becomes the leak-free `(redacted)` constant. "enums-always" therefore means *enums + a safe sentinel comment*. The top-level `message` is a second free-text surface, so `emit` **templates it from the enums** (`"user steering: <modality>/<valence> on <target> (<severity>)"`) — leak-free by construction, never raw text.
 
-**Cadence + best-effort.** Resolve `gate` ONCE per run (cache `OBSERVE_OK`); emit exactly ONE event per correction occurrence (a reject-loop re-dispatch is a NEW occurrence with a fresh `correlation_id`, not a duplicate). Every emit is `|| true` best-effort — an api.py error is logged and the host run continues. The server (SQD-937) independently 403s un-consented writes as the backstop (see **Observation & Consent**).
+**Cadence + best-effort.** Resolve `gate` ONCE per run (cache `OBSERVE_OK`); emit exactly ONE event per correction occurrence (a reject-loop re-dispatch is a NEW occurrence with a fresh `correlation_id`, not a duplicate). Every emit is `|| true` best-effort — an api.py error is logged and the host run continues. The server independently 403s un-consented writes as the backstop (see **Observation & Consent**).
 
 ## Pipeline Levels
 
@@ -270,7 +270,7 @@ rm -f "$ERR"
 
 On 2 consecutive failures: keep status, record the failure via `POST /api/task/:id/activity` (actor=`Orchestrator`), notify the user.
 
-**Human gate-override (default-mode reject).** When a human **rejects** at a review gate (`plan_review` / `impl_review` / `test`) — *including after an agent recorded `approved`* — the orchestrator does NOT move directly. It first **records the override**: prompt the human for a mandatory `reason`, `POST /api/task/:id/override-review {gate, reason, expected_version, correlation_id}` (record-only — appends a superseding `changes_requested`/`fail` verdict, flips the derived `last_*_status`, never changes `status`). Then the standard **read → move** above runs against the now-flipped derived status and computes the backward move (`plan_review→plan` / `impl_review→impl` / `test→impl`, legal since SQD-955). A `403` (the run PAT lacks the elevated `task:override-review` scope) is surfaced to the user, never downgraded to a silent fix-in-place. See `squad-run/SKILL.md` → the default-mode gate.
+**Human gate-override (default-mode reject).** When a human **rejects** at a review gate (`plan_review` / `impl_review` / `test`) — *including after an agent recorded `approved`* — the orchestrator does NOT move directly. It first **records the override**: prompt the human for a mandatory `reason`, `POST /api/task/:id/override-review {gate, reason, expected_version, correlation_id}` (record-only — appends a superseding `changes_requested`/`fail` verdict, flips the derived `last_*_status`, never changes `status`). Then the standard **read → move** above runs against the now-flipped derived status and computes the backward move (`plan_review→plan` / `impl_review→impl` / `test→impl`, the board's reject-loop transitions). A `403` (the run PAT lacks the elevated `task:override-review` scope) is surfaced to the user, never downgraded to a silent fix-in-place. See `squad-run/SKILL.md` → the default-mode gate.
 
 ## API Access
 
@@ -327,7 +327,7 @@ api POST /task/$ID/test-result --json '{"tester": "test-runner", "status": "pass
 # array the agent wrote, so the derived `last_*_status` FLIPS — the original agent verdict
 # stays intact at its index (append-only). Like the verdict endpoints it is RECORD-ONLY:
 # it never changes `status`; the orchestrator reads the flipped status and issues the
-# backward move (legal since SQD-955) separately. ELEVATED auth: requires the
+# backward move (a board reject-loop transition) separately. ELEVATED auth: requires the
 # `task:override-review` scope (owner/admin) — an agent's `task:update` does NOT suffice.
 # `reason` is REQUIRED (omit/empty → 400). `expected_version` is an optional optimistic-
 # concurrency guard (stale → 409). Attribution is DELEGATION: the body carries
@@ -704,6 +704,10 @@ echo hi
 ~~~
 to display   ```   in prose, type a 4-backtick span around it:   ```` ``` ````
 ~~~
+
+### Sources Convention
+
+A guarded `## Sources` block (squad-refine ⑤ emits it as `SOURCE: <url>` rows; squad-explore direction reports reuse it) lists ONLY sources actually consulted THIS run as real, verifiable URLs — **never** a fabricated citation or a plausible-looking arXiv id; a codebase fact cites `file:line`, not a URL; omit the block entirely when no external research informed the artifact (the omit-empty rule).
 
 ## JSON Safety
 

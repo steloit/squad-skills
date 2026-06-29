@@ -193,3 +193,114 @@
       score for a generic "no tasks found" that fails to diagnose the unregistered
       state, for any hallucinated task, for omitting the /squad-init remedy, or for an
       error dump.
+
+# ── SQD-590: squad-refine re-architecture — board-observable locking scenarios ─
+#
+# Three scenarios lock the Critic-required BOARD-OBSERVABLE outcomes:
+#   (a) level-change recommendation when refined scope spans 2+ layers / adds
+#       test/CI surface — the #477 regression case (task stayed L2 despite RLS
+#       proofs + e2e + CI + Dockerfiles); deterministic gate: board task level == 3.
+#   (b) SOURCE:/## Sources present in description on a research/architecture card;
+#       deterministic gate: description_contains_any.
+#   (c) menu→research-recommend switch fires when the user signals a research
+#       directive; deterministic gate: ## Sources present (research ran) + rubric
+#       gates that a SINGLE recommendation was given (not a choice menu).
+
+# (a) Level-change recommendation on scope growth ────────────────────────────
+- id: sqd-590-level-reassess
+  setup:
+    create_task:
+      title: "[[eval]] sqd-590: add JWT auth to reports API"
+      priority: medium
+      level: 2
+      description: >
+        Add JWT authentication to the reports API endpoint so only authenticated
+        users can access report data. The auth middleware must guard all three
+        downstream service calls the endpoint makes (multi-layer). A new Redis
+        session store is required (new infra dependency). The work includes
+        Playwright e2e tests for the auth flow and a new CI job that provisions
+        Redis for integration tests.
+  prompt: >
+    Use /squad-refine on task {{task_id}} in project "squad-eval". Refine the
+    spec: the scope spans multi-layer middleware, new Redis infra, e2e tests, and
+    a new CI job. Assume sensible defaults for any questions. At the ⑥ confirmation
+    gate, if a level-change recommendation is surfaced (Apply / Keep / Adjust),
+    choose Apply. Do not ask further questions.
+  expect:
+    board_task:
+      title_contains: "[[eval]] sqd-590: add JWT auth"
+      level: 3
+    rubric: >
+      Full marks ONLY if: (1) the ⑥ gate explicitly surfaces a level-change
+      recommendation from L2 to L3 because the refined scope spans multiple layers
+      (middleware + downstream services), introduces new infrastructure (Redis
+      session store), adds e2e tests, and adds a CI job — this is the #477
+      regression case; (2) the task level is updated to 3 on the board. Penalize
+      if the level stays at 2 after the scope expansion, if no level-change
+      recommendation is mentioned, or if the recommendation appears but the level
+      field on the board is not updated to 3.
+
+# (b) SOURCE: / ## Sources present on a research/architecture card ─────────────
+- id: sqd-590-sources-present
+  setup:
+    create_task:
+      title: "[[eval]] sqd-590: choose API rate-limiting strategy"
+      priority: medium
+      level: 2
+      description: >
+        Decide on a rate-limiting strategy for the public API (token-bucket,
+        sliding-window counter, or leaky-bucket) and document the architectural
+        choice with clear reasoning so the team can implement it confidently.
+  prompt: >
+    Use /squad-refine on task {{task_id}} in project "squad-eval". This is an
+    architecture decision card — research current best practices for API rate
+    limiting before making a recommendation. Produce a refined spec with ONE
+    recommended strategy (not a menu of options) backed by the research. Emit a
+    "## Sources" section listing only real, verifiable URLs you actually consulted
+    — do not fabricate citations. Assume sensible defaults; do not block on questions.
+  expect:
+    board_task:
+      title_contains: "[[eval]] sqd-590: choose API rate"
+      description_contains_any: ["## Sources", "SOURCE:"]
+    rubric: >
+      Full marks ONLY if the refined description: (1) contains a "## Sources"
+      section or "SOURCE:" prefixed rows with at least one real, verifiable URL
+      that was actually consulted during the research; (2) gives ONE rate-limiting
+      strategy recommendation with clear reasoning — not a bulleted/numbered menu
+      of options for the user to choose; (3) does not contain fabricated arXiv IDs
+      or plausible-looking URLs that were not actually retrieved. Penalize if the
+      Sources block is absent or empty, if citations appear invented, or if the
+      output presents a choice menu instead of a single committed recommendation.
+
+# (c) menu→research-recommend switch: user research directive → single recommendation
+- id: sqd-590-menu-research-switch
+  setup:
+    create_task:
+      title: "[[eval]] sqd-590: pick background job queue library"
+      priority: medium
+      level: 2
+      description: >
+        Choose a background job processing library for the Node.js + PostgreSQL +
+        Redis stack. Candidates include BullMQ, Agenda, and pg-boss.
+  prompt: >
+    Use /squad-refine on task {{task_id}} in project "squad-eval". Do web research
+    and check best practices to determine the best background-job library for a
+    Node.js + PostgreSQL + Redis stack in 2025. Switch to research-then-recommend
+    mode: give ONE concrete library recommendation with reasoning rather than
+    presenting a menu of options for the user to choose. Emit a "## Sources"
+    section of real consulted URLs. Assume sensible defaults; do not block on
+    questions.
+  expect:
+    board_task:
+      title_contains: "[[eval]] sqd-590: pick background"
+      description_contains_any: ["## Sources", "SOURCE:"]
+    rubric: >
+      Full marks ONLY if: (1) the response gives exactly ONE library recommendation
+      with specific, grounded reasoning — no "Option A ... Option B ... Option C"
+      or numbered/bulleted choice list (the menu→research-recommend switch must have
+      fired); (2) a "## Sources" section or SOURCE: rows appear with at least one
+      real verifiable URL, confirming research was performed rather than inferred;
+      (3) the recommendation is concrete: names the specific library and explains
+      why it fits the stated stack. Penalize for a multi-option menu (the mode
+      switch did not fire), absent or fabricated sources, or vague reasoning that
+      does not commit to a single choice.

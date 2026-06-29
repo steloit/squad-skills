@@ -114,8 +114,9 @@ def test_shared_move_protocol_documents_override(repo_root):
     assert re.search(r"record-only|never changes? `?status`?", move, re.IGNORECASE), (
         "shared.md Move Protocol must state the override is record-only (never changes status)"
     )
-    assert re.search(r"SQD-955", move), (
-        "shared.md Move Protocol must tie the backward move to SQD-955 (now legal)"
+    assert re.search(r"impl_review→impl|backward move|reject-loop", move, re.IGNORECASE), (
+        "shared.md Move Protocol must document the backward move the override drives "
+        "(by feature, not an internal board id — shipped docs carry no SQD-* references)"
     )
 
 

@@ -35,5 +35,10 @@ def observe_mod():
 
 
 @pytest.fixture(scope="session")
+def refine_ledger():
+    return _load("skills/squad/scripts/refine_ledger.py", "refine_ledger")
+
+
+@pytest.fixture(scope="session")
 def repo_root():
     return ROOT
