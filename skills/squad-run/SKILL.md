@@ -180,7 +180,7 @@ if [ "$LEVEL" = "3" ]; then PLAN_NEXT=plan_review; else PLAN_NEXT=impl; fi
 # 5. Re-read state, loop until done or circuit breaker
 ```
 
-#### SQD-936 observation gate-seam (consent before any `user_steering` emit)
+#### Observation gate-seam (consent before any `user_steering` emit)
 
 Before the orchestrator emits any `user_steering` observation event it MUST pass the **consent gate** — `../squad/scripts/observe.py` (read-only; see `../squad/shared.md` → **Observation & Consent**). Resolve it **ONCE at run start** and cache the exit code for the whole run (observe.py is stateless — one `GET /consent` per call):
 
@@ -191,7 +191,7 @@ python3 ../squad/scripts/observe.py gate >/dev/null 2>&1; OBSERVE_OK=$?
 #   [ "$OBSERVE_OK" = 0 ] && <emit user_steering>   # else skip
 ```
 
-Local kill-switches (`DO_NOT_TRACK` / `SQUAD_OBSERVE_DISABLED` / `CI`) hard-off the gate with no network; otherwise it reads server consent and **fails closed** on any error. A mid-run web opt-out takes effect on the **next** run; any straggler emit is 403'd server-side (SQD-937). The emission itself is SQD-936; this gate is the seam it calls.
+Local kill-switches (`DO_NOT_TRACK` / `SQUAD_OBSERVE_DISABLED` / `CI`) hard-off the gate with no network; otherwise it reads server consent and **fails closed** on any error. A mid-run web opt-out takes effect on the **next** run; any straggler emit is 403'd server-side by the consent gate. The emission itself is the observation capture; this gate is the seam it calls.
 
 #### Per-Step Transition Contract (orchestrator owns every move)
 
@@ -242,13 +242,13 @@ Reject loops (plan_review→plan, impl_review→impl, test→impl) re-dispatch t
 `plan→plan` re-entry sets `current_agent` only (no illegal status move). Re-issuing a move that is
 already applied is a safe no-op.
 
-**Human gate-override write-through (default mode, SQD-958).** At the step-3 gate a human may
+**Human gate-override write-through (default mode).** At the step-3 gate a human may
 **reject** — *including after the agent recorded `approved`* (the derived `$VERDICT` still reads
 `approved`, so the table above would compute a FORWARD move). The human's send-back is not a
 terminal-scrollback note: it is recorded SERVER-SIDE as a durable, attributable override BEFORE the
 move. On a human reject (default mode only — `--auto` never rejects), record the override, then
 **re-read** the now-flipped `$VERDICT` and fall through to the SAME verdict→move table — which now
-computes the backward move SQD-955 made legal (`plan_review→plan` / `impl_review→impl` / `test→impl`):
+computes the backward move the pipeline makes legal (`plan_review→plan` / `impl_review→impl` / `test→impl`):
 
 ```bash
 # Runs ONLY when the human REJECTS at the step-3 AskUserQuestion gate (incl. post-`approved`).
@@ -268,8 +268,8 @@ if [ "$GATE_DECISION" = reject ]; then
   RC=$?   # 4 = 4xx (403 missing task:override-review scope · 400 empty reason · 409 stale version)
   if [ "$RC" -ne 0 ]; then
     # SURFACE the failure to the user — a 403 means the run PAT lacks the elevated
-    # task:override-review scope. NEVER silently downgrade to a fix-in-place (the SQD-957
-    # anti-pattern this card fixes); the server record is the single source of truth.
+    # task:override-review scope. NEVER silently downgrade to a fix-in-place (the
+    # no-silent-downgrade rule); the server record is the single source of truth.
     echo "ERROR: could not record human override on $ID (exit $RC): $(grep -v '^ERROR:' "$ERR" 2>/dev/null || cat "$ERR")"
     rm -f "$ERR"
     return 1 2>/dev/null || exit 1   # halt the gate; do not move, do not fix in place
@@ -282,7 +282,7 @@ if [ "$GATE_DECISION" = reject ]; then
 fi
 ```
 
-**Emit `user_steering` on a correction (SQD-936).** When a review verdict is a **reject** (Critic
+**Emit `user_steering` on a correction.** When a review verdict is a **reject** (Critic
 `changes_requested`→plan, Inspector `changes_requested`→impl, Ranger `fail`→impl) — or, in default
 mode, the human rejects at the `AskUserQuestion` gate (step 3) — emit ONE abstracted `user_steering`
 event, gated by the cached `OBSERVE_OK` from the run-start seam (above) and BEST-EFFORT (`|| true`).
@@ -618,7 +618,7 @@ the orchestrator COMMITS the move via the generic PATCH with `current_agent:null
 PRECEDES the move PATCH; the move is always the generic PATCH, never the verdict endpoint.
 A human **reject** at the gate — *including after the agent recorded `approved`* — first records a
 durable, attributable **override** (`POST /task/$ID/override-review`, mandatory `reason`) that flips
-the derived verdict, THEN the normal read→move computes the backward send-back (SQD-958, above); a
+the derived verdict, THEN the normal read→move computes the backward send-back (the human gate-override write-through, above); a
 403 (PAT lacks `task:override-review`) is surfaced to the user, never a silent fix-in-place.
 **Auto mode (`--auto`)**: same order, but auto-accept at the gate (orchestrator still issues the move PATCH).
 

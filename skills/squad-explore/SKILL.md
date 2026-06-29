@@ -18,7 +18,7 @@ This skill explores first, reports direction, then seeds the squad board with ph
 ### Procedure
 
 ```
-⓪ Resolve the observation gate ONCE (SQD-936 seam — see ../squad/shared.md → Abstraction Rubric)
+⓪ Resolve the observation gate ONCE (the gate-seam — see ../squad/shared.md → Abstraction Rubric)
    python3 ../squad/scripts/observe.py gate >/dev/null 2>&1; OBSERVE_OK=$?
    # 0 = emit corrections, non-zero = skip. Cache it; the emit at ④ reuses it (best-effort, || true).
    # Mint one correlation_id for this explore run: CID=$(python3 -c 'import uuid;print(uuid.uuid4())')
@@ -170,7 +170,7 @@ This skill explores first, reports direction, then seeds the squad board with ph
 
    If user selects Cancel → jump to ⑥-Cancel.
 
-   Steering emit (SQD-936, best-effort): choosing the Plan agent's RECOMMENDED direction emits
+   Steering emit (observation capture, best-effort): choosing the Plan agent's RECOMMENDED direction emits
    nothing. If the user picks a NON-recommended direction, OR "Cancel", emit one abstracted
    user_steering event (enums per ../squad/shared.md → Abstraction Rubric: the explore rows).
    # non-recommended direction:

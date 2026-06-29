@@ -7,7 +7,7 @@ hermetic unit `tests/test_observe.py` is the gate). It mutates NOTHING — obser
 only ever issues `GET /consent`, and never grants/withdraws (the human opt-in act
 lives in the web app).
 
-HONEST SCOPE: production `GET /consent` (SQD-937) is NOT deployed yet, so the
+HONEST SCOPE: production `GET /consent` is NOT deployed yet, so the
 opted-in → gate-ON path is verifiable ONLY against a LOCALLY-booted consent-branch
 platform (point SQUAD_BASE_URL at it). The production live-test is deferred to deploy.
 
@@ -16,7 +16,7 @@ reflects the real server state end-to-end:
   A  observe.py status  -> exit in {0,1,2}, names a source + the manage pointer
   B  observe.py gate    -> exit code matches status (same resolution); 0=on else off
   C  observe.py emit --dry-run -> assembles a valid user_steering body (NO gate, NO
-     POST). The live opted-in emit POST is DEPLOY-DEFERRED (needs SQD-937 /consent +
+     POST). The live opted-in emit POST is DEPLOY-DEFERRED (needs the /consent endpoint +
      the user_steering activity write path); only the local dry-run preview is checked.
 
 Usage:
@@ -79,9 +79,9 @@ def check_gate(expected_code):
 
 def check_emit_dry_run():
     """C — local emit preview: assemble a real user_steering body, NO gate, NO POST.
-    The live opted-in emit POST is deploy-deferred (SQD-937); only this is checked."""
+    The live opted-in emit POST is deploy-deferred (the /consent endpoint); only this is checked."""
     res = run_observe(
-        "emit", "SQD-0",
+        "emit", "ABC-0",
         "--modality", "corrective",
         "--valence", "negative",
         "--target", "planning",
@@ -105,7 +105,7 @@ def check_emit_dry_run():
         return False
     print(
         f"[C emit] OK dry-run body assembled (modality={payload.get('modality')}, "
-        f"comment={payload.get('comment')!r}); live POST is deploy-deferred (SQD-937)",
+        f"comment={payload.get('comment')!r}); live POST is deploy-deferred (the /consent endpoint)",
         file=sys.stderr,
     )
     return True
@@ -116,7 +116,7 @@ def main():
         print(
             "[skip] SQUAD_OBSERVE_LIVE!=1 — live round-trip not requested. Set "
             "SQUAD_OBSERVE_LIVE=1 (and point SQUAD_BASE_URL at a locally-booted "
-            "SQD-937 consent branch; production GET /consent is not deployed).",
+            "consent branch; production GET /consent is not deployed).",
             file=sys.stderr,
         )
         return 0

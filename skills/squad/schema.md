@@ -4,11 +4,11 @@
 
 The **task resource as returned by the board REST API** (`GET /api/orgs/:org/task/:id`).
 This documents the JSON the API exposes — the board owns its own storage. Tasks are
-addressed by their **display id** `<KEY>-<seq>` (e.g. `SQD-42`) in every API path.
+addressed by their **display id** `<KEY>-<seq>` (e.g. `ABC-42`) in every API path.
 
 | Field (JSON) | Type | Description |
 |--------------|------|-------------|
-| `id` | string | Display id `<KEY>-<seq>` (e.g. `SQD-42`) — used in all API paths and as activity `task_id` |
+| `id` | string | Display id `<KEY>-<seq>` (e.g. `ABC-42`) — used in all API paths and as activity `task_id` |
 | `project` | string | Project key/name (matches `.squadrc` `SQUAD_PROJECT`) |
 | `title` | string | Task title |
 | `status` | string | `todo` / `plan` / `plan_review` / `impl` / `impl_review` / `test` / `done` / `cancelled` |
@@ -135,10 +135,10 @@ The immutable machine **event stream** for a task — one append-only event per 
 **Event shape as returned by the activity API:**
 
 ```json
-{"id": "<uuid>", "task_id": "SQD-42", "actor": "Planner", "model": "<MODEL_PLANNER>", "message": "Plan complete. 4 files to modify.", "tokens": 12000, "created_at": "2026-02-20T10:05:00.000Z"}
+{"id": "<uuid>", "task_id": "ABC-42", "actor": "Planner", "model": "<MODEL_PLANNER>", "message": "Plan complete. 4 files to modify.", "tokens": 12000, "created_at": "2026-02-20T10:05:00.000Z"}
 ```
 
-- `id` is an opaque string (used as the `?before=<id>` pagination cursor); `task_id` is the **display id** `<KEY>-<seq>` (e.g. `SQD-42`), not a number. There is no `project` field on the event.
+- `id` is an opaque string (used as the `?before=<id>` pagination cursor); `task_id` is the **display id** `<KEY>-<seq>` (e.g. `ABC-42`), not a number. There is no `project` field on the event.
 - `actor` is the squad actor (see actor vocabulary below); `model` is the resolved provider model from `models.json` (or `system` for `Orchestrator`/`Heartbeat`) — it may be `null`.
 - `tokens` is optional/`null` — estimated total tokens (input + output) for the step; omit when unknown (missing counts as 0 in stats).
 - `created_at` is server-set — clients do **not** send a timestamp.
@@ -149,7 +149,7 @@ The immutable machine **event stream** for a task — one append-only event per 
 
 The mutable **human** comment channel. Skills NEVER write this.
 
-Comment shape as returned by the API: `{"id": "<uuid>", "task_id": "SQD-42", "author": <string|null>, "content": "...", "created_at": "<iso>"}` (`task_id` is the display id; there is no `project` field).
+Comment shape as returned by the API: `{"id": "<uuid>", "task_id": "ABC-42", "author": <string|null>, "content": "...", "created_at": "<iso>"}` (`task_id` is the display id; there is no `project` field).
 
 ## Activity & Comment Endpoints
 

@@ -34,5 +34,6 @@ Resolution: token = `SQUAD_AUTH_TOKEN` env > bare `SQUAD_AUTH_TOKEN=` (`~/.squad
 ## Develop
 
 - Add a skill: create `skills/<name>/SKILL.md` with `name` + `description` frontmatter (`name` must match the directory).
+- No internal IDs in shipped files: `skills/**` files carry NO internal board IDs (the team's `<KEY>-NNN` tracking tickets) or backend source paths — describe the feature and reference only the REST API wire contract. Enforced by `tests/test_no_internal_ids_in_skills.py`.
 - Validate: `bash scripts/validate-skills.sh` (also runs in CI on every push/PR).
 - Release: tag the repo (`npx skills` tracks the git tree / tags for updates).
