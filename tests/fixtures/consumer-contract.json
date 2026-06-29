@@ -101,6 +101,10 @@
   },
   {
     "method": "POST",
+    "path": "/orgs/{}/task/{}/override-review"
+  },
+  {
+    "method": "POST",
     "path": "/orgs/{}/task/{}/plan-review"
   },
   {

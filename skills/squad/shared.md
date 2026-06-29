@@ -270,6 +270,8 @@ rm -f "$ERR"
 
 On 2 consecutive failures: keep status, record the failure via `POST /api/task/:id/activity` (actor=`Orchestrator`), notify the user.
 
+**Human gate-override (default-mode reject).** When a human **rejects** at a review gate (`plan_review` / `impl_review` / `test`) — *including after an agent recorded `approved`* — the orchestrator does NOT move directly. It first **records the override**: prompt the human for a mandatory `reason`, `POST /api/task/:id/override-review {gate, reason, expected_version, correlation_id}` (record-only — appends a superseding `changes_requested`/`fail` verdict, flips the derived `last_*_status`, never changes `status`). Then the standard **read → move** above runs against the now-flipped derived status and computes the backward move (`plan_review→plan` / `impl_review→impl` / `test→impl`, legal since SQD-955). A `403` (the run PAT lacks the elevated `task:override-review` scope) is surfaced to the user, never downgraded to a silent fix-in-place. See `squad-run/SKILL.md` → the default-mode gate.
+
 ## API Access
 
 All DB operations go through the deployed Squad board HTTP API (`$BASE_URL`).
@@ -318,6 +320,23 @@ api POST /task/$ID/review --json '{"reviewer": "Inspector", "model": "<MODEL_INS
 # Test result (record-only)
 api POST /task/$ID/test-result --json '{"tester": "test-runner", "status": "pass", "lint": "...", "build": "...", "tests": "...", "comment": "...", "correlation_id": "<correlation_id>"}'
 # → {"success":true,"result":{...},"version":<int>} — verdict recorded; status unchanged.
+
+# Human gate-override (record-only) — a HUMAN supervisor sends a card BACK at a review
+# gate, SUPERSEDING the agent's recorded verdict (the GitHub-dismiss model). Appends a
+# `changes_requested` (plan_review/impl_review) or `fail` (test) entry to the SAME verdict
+# array the agent wrote, so the derived `last_*_status` FLIPS — the original agent verdict
+# stays intact at its index (append-only). Like the verdict endpoints it is RECORD-ONLY:
+# it never changes `status`; the orchestrator reads the flipped status and issues the
+# backward move (legal since SQD-955) separately. ELEVATED auth: requires the
+# `task:override-review` scope (owner/admin) — an agent's `task:update` does NOT suffice.
+# `reason` is REQUIRED (omit/empty → 400). `expected_version` is an optional optimistic-
+# concurrency guard (stale → 409). Attribution is DELEGATION: the body carries
+# `actor_kind=human`; the server stamps `executed_by=<PAT>` + `on_behalf_of=<owner>` even
+# when relayed over the run's user-scoped PAT (the decision is the human's, never collapsed).
+api POST /task/$ID/override-review --json '{"gate": "impl_review", "reason": "stale snippet must be fixed first", "expected_version": <int>, "correlation_id": "<correlation_id>"}'
+# → {"success":true,"comment":{...},"version":<int>} — superseding verdict recorded; status unchanged.
+# A 403 (PAT lacks task:override-review) MUST be surfaced to the user — never silently
+# downgraded to a fix-in-place.
 
 # Append an activity event (machine event stream — see "Activity vs Comments" below)
 api POST /task/$ID/activity --json '{"actor": "Orchestrator", "model": "system", "message": "Committed abc1234: <subject> [squad #'$ID']"}'
