@@ -92,7 +92,7 @@ api GET /board?summary=true > /dev/null   # non-zero exit (auth/transport) → s
 
 Read the project name from `.squadrc` (`SQUAD_PROJECT=`) — see `squad/shared.md` for the full resolution (it sources the `api()` wrapper and reads `SQUAD_ORG` env → `.squadrc`; `api.py` owns the PAT internally).
 
-**Observation gate-seam (SQD-936).** Resolve the consent gate ONCE for the whole batch and cache it, so any post-Verify steering emit (step 6C) is consent-gated and best-effort (see `squad/shared.md` → **Abstraction Rubric**):
+**Observation gate-seam.** Resolve the consent gate ONCE for the whole batch and cache it, so any post-Verify steering emit (step 6C) is consent-gated and best-effort (see `squad/shared.md` → **Abstraction Rubric**):
 
 ```bash
 python3 ../squad/scripts/observe.py gate >/dev/null 2>&1; OBSERVE_OK=$?   # 0 = emit, non-zero = skip

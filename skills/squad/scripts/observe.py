@@ -8,7 +8,7 @@ unconditionally. This helper decides whether the orchestrator may emit a
 
 Four subcommands ONLY (the grant/withdraw/disclosure act lives in the WEB app):
 
-  gate     — the SQD-936 seam. Resolve order: local env kill-switches FIRST
+  gate     — the observation gate-seam. Resolve order: local env kill-switches FIRST
              (DO_NOT_TRACK / SQUAD_OBSERVE_DISABLED / CI → OFF, NO network),
              else ONE read of `GET /consent` (via the sibling api.py) → ON iff
              the `behavioral_capture` row is opted_in. FAILS CLOSED: any
@@ -19,7 +19,7 @@ Four subcommands ONLY (the grant/withdraw/disclosure act lives in the WEB app):
   dry-run  — prints an ILLUSTRATIVE `user_steering` payload that WOULD be recorded
              to stdout + a `# DRY RUN` banner to stderr. ZERO network/writes;
              works in any consent state (inspection, not capture).
-  emit     — the SQD-936 Tier-1 capture: POST ONE abstracted `user_steering`
+  emit     — the Tier-1 observation capture: POST ONE abstracted `user_steering`
              event for a human correction. The five enums come from the calling
              skill's trusted gate context (argparse `choices=` validated); the
              optional `--comment` is the only free-text surface and is passed
@@ -60,7 +60,7 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 API = HERE / "api.py"
 
-# The single v1 capture purpose (SQD-937). No row for it ⇒ never granted ⇒ OFF.
+# The single v1 capture purpose (the consent gate). No row for it ⇒ never granted ⇒ OFF.
 PURPOSE = "behavioral_capture"
 MANAGE_POINTER = "Squad web app → Settings → Observation & Consent"
 
@@ -76,7 +76,7 @@ _OVERRIDE_ENV = [
 _FALSEY = {"", "0", "false"}
 
 # Canonical user_steering enum vocabularies. These MIRROR the single source of
-# truth `packages/types/src/activity.ts` (SQD-935); they are duplicated here only
+# truth (the server-side activity event types); they are duplicated here only
 # to bind argparse `choices=` for client-side validation before the wire POST —
 # the server re-validates. Keep in sync with that file; never invent values.
 MODALITY = ("evaluative", "corrective", "demonstrative", "other")
@@ -91,9 +91,9 @@ ATTRIBUTABILITY = ("latent_preference", "violated_constraint", "ambiguous")
 STEERING_COMMENT_MAX_LEN = 120
 REDACTED_SENTINEL = "(redacted)"
 
-# The abstracted user_steering payload (SQD-935 shape). Values are ILLUSTRATIVE
+# The abstracted user_steering payload (the activity event shape). Values are ILLUSTRATIVE
 # but DRAWN FROM THE CANONICAL VOCAB above — the real dimensions come from
-# SQD-936's `emit` abstraction of an actual correction. `comment` is always an
+# the `emit` observation abstraction of an actual correction. `comment` is always an
 # abstracted pattern: never raw user text, code, or paths.
 DRY_RUN_PAYLOAD = {
     "kind": "user_steering",
@@ -180,7 +180,7 @@ def _decision(capture, source, policy_version, error=None):
 
 
 def cmd_gate(args):
-    """The SQD-936 seam: squad-run resolves this ONCE per run and branches on the
+    """The observation gate-seam: squad-run resolves this ONCE per run and branches on the
     exit code (rc==0 ⇒ emit, else skip) — no stdout parsing required."""
     decision, code = resolve()
     if args.json:
@@ -211,7 +211,7 @@ def cmd_dry_run(args):
     works in any consent state (never calls GET /consent)."""
     sys.stderr.write(
         "# DRY RUN — nothing written or sent. The values below are illustrative; "
-        "real dimensions come from SQD-936's abstraction of an actual correction.\n"
+        "real dimensions come from the observation abstraction of an actual correction.\n"
     )
     sys.stdout.write(json.dumps(DRY_RUN_PAYLOAD) + "\n")
     return 0
@@ -308,7 +308,7 @@ def _template_message(args):
 
 
 def _build_emit_body(args):
-    """Assemble the SQD-935 wire body from trusted enums + the filtered comment."""
+    """Assemble the activity wire body from trusted enums + the filtered comment."""
     body = {
         "kind": "user_steering",
         "message": _template_message(args),
@@ -385,10 +385,10 @@ def build_parser():
             "env kill-switches (hard off, beat an active server grant, NO network):\n"
             "  DO_NOT_TRACK · SQUAD_OBSERVE_DISABLED · CI (set & not in {'',0,false})\n\n"
             "examples:\n"
-            "  observe.py gate --json      # the SQD-936 seam (resolve once per run)\n"
+            "  observe.py gate --json      # the observation gate-seam (resolve once per run)\n"
             "  observe.py status           # effective on/off + source + manage pointer\n"
             "  observe.py dry-run | jq .   # an illustrative payload, written nowhere\n"
-            "  observe.py emit SQD-1 --modality corrective --valence negative \\\n"
+            "  observe.py emit ABC-1 --modality corrective --valence negative \\\n"
             "    --target planning --severity moderate --attributability latent_preference \\\n"
             "    --comment 'preferred a smaller scope'   # consent-gated, best-effort POST\n"
         ),
@@ -411,7 +411,7 @@ def build_parser():
         "emit",
         help="POST one abstracted user_steering event (consent-gated, leak-filtered, best-effort).",
     )
-    p_emit.add_argument("task_id", help="the task id the steering event attaches to (e.g. SQD-936).")
+    p_emit.add_argument("task_id", help="the task id the steering event attaches to (e.g. ABC-12).")
     p_emit.add_argument("--modality", required=True, choices=MODALITY, help="the steering modality.")
     p_emit.add_argument("--valence", required=True, choices=VALENCE, help="the steering valence.")
     p_emit.add_argument("--target", required=True, choices=TARGET, help="what the steering was about.")

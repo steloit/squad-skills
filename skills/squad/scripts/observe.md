@@ -18,7 +18,7 @@ observe.py status  [--json]
 observe.py dry-run [--json]
 ~~~
 
-- **`gate`** — the SQD-936 seam. Resolve order: local env kill-switches FIRST
+- **`gate`** — the observation gate-seam. Resolve order: local env kill-switches FIRST
   (`DO_NOT_TRACK` / `SQUAD_OBSERVE_DISABLED` / `CI` → OFF, **no network**), else one
   `GET /consent` → ON iff the `behavioral_capture` row is `opted_in`. `--json` emits
   the decision object to stdout; squad-run branches on the **exit code** alone.
@@ -48,7 +48,7 @@ the 1-vs-2 split is diagnostic only. So `if observe.py gate; then …; fi` works
 
 ## Wire contract consumed (read-only)
 
-`GET /consent` (SQD-937) →
+`GET /consent` →
 `{ "consent": [ { "purpose": "behavioral_capture", "opted_in": <bool>,
 "policy_version": <str|null>, … } ], "events": [ … ] }`. The gate reads ONLY
 `purpose` / `opted_in` / `policy_version` from the `behavioral_capture` row;
@@ -63,5 +63,5 @@ writes, so the gate is an **optimization + the local override**, not the sole
 guarantee. The full contract also lives in `observe.py --help`.
 
 A live read-only round-trip (`observe_smoke.py`, `SQUAD_OBSERVE_LIVE=1`, needs a
-locally-booted SQD-937 consent branch — production `GET /consent` is not deployed)
+locally-booted consent branch — production `GET /consent` is not deployed)
 proves the gate reflects the real server state without mutating it.
