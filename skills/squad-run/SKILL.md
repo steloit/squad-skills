@@ -242,6 +242,46 @@ Reject loops (plan_review→plan, impl_review→impl, test→impl) re-dispatch t
 `plan→plan` re-entry sets `current_agent` only (no illegal status move). Re-issuing a move that is
 already applied is a safe no-op.
 
+**Human gate-override write-through (default mode, SQD-958).** At the step-3 gate a human may
+**reject** — *including after the agent recorded `approved`* (the derived `$VERDICT` still reads
+`approved`, so the table above would compute a FORWARD move). The human's send-back is not a
+terminal-scrollback note: it is recorded SERVER-SIDE as a durable, attributable override BEFORE the
+move. On a human reject (default mode only — `--auto` never rejects), record the override, then
+**re-read** the now-flipped `$VERDICT` and fall through to the SAME verdict→move table — which now
+computes the backward move SQD-955 made legal (`plan_review→plan` / `impl_review→impl` / `test→impl`):
+
+```bash
+# Runs ONLY when the human REJECTS at the step-3 AskUserQuestion gate (incl. post-`approved`).
+# $STATUS = the review stage (= the override `gate`); $VFIELD/$CID as set above.
+if [ "$GATE_DECISION" = reject ]; then
+  # 1. Mandatory reason — a follow-up AskUserQuestion / free-text. Empty reason ⇒ server 400,
+  #    so re-prompt until non-empty (mirrors the GitHub mandatory dismiss-reason).
+  REASON="<the human's reason — required, non-empty>"
+  # 2. Current version (optimistic-concurrency guard against a concurrent override).
+  VER=$(api GET /task/$ID?fields=version | jq -r '.version')
+  # 3. Record the SUPERSEDING override over the run's user-scoped PAT. The server stamps
+  #    executed_by=<PAT> + on_behalf_of=<owner>; the body carries actor_kind=human (delegation,
+  #    not impersonation). Record-only: it flips last_*_status, never moves status.
+  ERR=$(mktemp)
+  api POST /task/$ID/override-review \
+    --json "{\"gate\": \"$STATUS\", \"reason\": \"$REASON\", \"expected_version\": $VER, \"correlation_id\": \"$CID\"}" 2>"$ERR"
+  RC=$?   # 4 = 4xx (403 missing task:override-review scope · 400 empty reason · 409 stale version)
+  if [ "$RC" -ne 0 ]; then
+    # SURFACE the failure to the user — a 403 means the run PAT lacks the elevated
+    # task:override-review scope. NEVER silently downgrade to a fix-in-place (the SQD-957
+    # anti-pattern this card fixes); the server record is the single source of truth.
+    echo "ERROR: could not record human override on $ID (exit $RC): $(grep -v '^ERROR:' "$ERR" 2>/dev/null || cat "$ERR")"
+    rm -f "$ERR"
+    return 1 2>/dev/null || exit 1   # halt the gate; do not move, do not fix in place
+  fi
+  rm -f "$ERR"
+  # 4. Re-read the now-flipped derived verdict; fall through to the verdict→move table above
+  #    (it now computes the backward reject move). The user_steering emit below also fires.
+  VERDICT=$(api GET /task/$ID?fields=$VFIELD \
+    | VFIELD="$VFIELD" python3 -c "import sys,json,os; print(json.load(sys.stdin).get(os.environ['VFIELD']) or '')")
+fi
+```
+
 **Emit `user_steering` on a correction (SQD-936).** When a review verdict is a **reject** (Critic
 `changes_requested`→plan, Inspector `changes_requested`→impl, Ranger `fail`→impl) — or, in default
 mode, the human rejects at the `AskUserQuestion` gate (step 3) — emit ONE abstracted `user_steering`
@@ -576,6 +616,10 @@ api PATCH /task/$ID --json '{"status": "impl_review", "current_agent": null, "ac
 records its verdict → the orchestrator reads it → **gate** (`AskUserQuestion` accept/reject) →
 the orchestrator COMMITS the move via the generic PATCH with `current_agent:null`. The gate
 PRECEDES the move PATCH; the move is always the generic PATCH, never the verdict endpoint.
+A human **reject** at the gate — *including after the agent recorded `approved`* — first records a
+durable, attributable **override** (`POST /task/$ID/override-review`, mandatory `reason`) that flips
+the derived verdict, THEN the normal read→move computes the backward send-back (SQD-958, above); a
+403 (PAT lacks `task:override-review`) is surfaced to the user, never a silent fix-in-place.
 **Auto mode (`--auto`)**: same order, but auto-accept at the gate (orchestrator still issues the move PATCH).
 
 #### → Done Transition (all levels)
