@@ -792,6 +792,15 @@ The `model` value should be the resolved provider model from `models.json` (not 
 
 Agents write only their own domain field above; they do **not** append to the activity stream themselves. The orchestrating skill (`squad-run`) appends one signed `POST /api/task/:id/activity` event per agent step (actor=the agent's nickname, model=its resolved model, optional `tokens`), reads the domain fields, and performs every status move (see Move Protocol).
 
+### Spec Precedence (`spec` vs `description`)
+
+A card carries two sources of intent — the human's `description` (the original request) and the Refiner's `spec`. Resolve them this way:
+
+- When the task has a **non-null `spec`**, the `spec` is the **authoritative** source of intent. The `description` is the human's **original request** and may predate the spec — treat it as a possibly-stale pre-refine artifact.
+- On a **conflict** between spec and description, **follow the spec** and treat the conflicting part of the description as stale.
+- When the task has **no spec**, the `description` **is** the authoritative source of intent — never ignore it.
+- When the spec does **not conflict** with the description, proceed unchanged — this rule is a no-op.
+
 > **Planner entry move**: the orchestrator (squad-run) performs the `todo → plan` move and sets `current_agent:"Planner"` in one PATCH *before* the Planner runs — the Planner does not move `todo → plan` itself. The Planner runs at `plan` and exits with a single level-aware move (`plan → plan_review` for L3, `plan → impl` for L2). A Critic reject (`plan_review → plan`, server-side) re-dispatches the Planner at `plan`.
 
 ## Task Relationships & Epics

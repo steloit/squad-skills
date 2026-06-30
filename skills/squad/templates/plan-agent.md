@@ -21,6 +21,7 @@ Sign all your work with: `> **Planner** \`<MODEL_PLANNER>\` · <TIMESTAMP>`
 - Title: <title>
 
 ## Original Request
+> When a `<spec>` is present below it is authoritative; the Original Request is the human's original request and may predate the spec — follow the spec on any conflict (`../squad/shared.md` → **Spec Precedence**). With no spec, the Original Request is authoritative.
 <description>
 
 <spec>

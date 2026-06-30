@@ -508,8 +508,8 @@ Template files are at `../squad/templates/`.
      <PROJECT>                → actual project name
      <project_brief>          → project brief from step ⓪ (empty string if not set)
      <title>                  → task title
-     <description>            → task description (the human's original request)
-     <spec>                   → rendered Refiner spec (Planner/Critic/Builder only): "## Refined Spec\n\n…" or "" if no spec (see SPEC_MD below)
+     <description>            → task description (the human's original request — may predate the spec)
+     <spec>                   → rendered Refiner spec (Planner/Critic/Builder only): "## Refined Spec\n\n…" or "" if no spec (see SPEC_MD below); when present the spec is authoritative over the description (`../squad/shared.md` → **Spec Precedence**)
      <plan>                   → plan field value
      <decision_log>           → decision_log field value
      <done_when>              → done_when field value
@@ -537,6 +537,11 @@ Template files are at `../squad/templates/`.
    `<spec>`. Empty string when the task has no spec (legacy/un-refined), so `<spec>` collapses
    cleanly and `## Original Request` (`<description>`) carries the requirements. (Inline python,
    mirrors the `CRITIC_FEEDBACK` pattern — no new script.)
+
+   When the rendered spec is non-empty, present it as authoritative and label `## Original Request`
+   (`<description>`) as the human's original request that may predate the spec — the standing
+   precedence rule (`../squad/shared.md` → **Spec Precedence**) governs every agent that consumes
+   both fields; do not inject a per-prompt precedence guard.
    ```bash
    SPEC_MD=$(echo "$TASK" | python3 -c "
    import sys, json
