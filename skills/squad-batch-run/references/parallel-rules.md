@@ -53,5 +53,5 @@ The planner should emit:
 
 Examples:
 
-- `500 -> 501 sequential: phase 2 depends on phase 1 browse data contract.`
-- `610 + 611 parallel_candidate: same phase, explicit Parallel-safe: yes, distinct touches.`
+- `<KEY>-<seq> -> <KEY>-<seq> sequential: phase 2 depends on phase 1 browse data contract.`
+- `<KEY>-<seq> + <KEY>-<seq> parallel_candidate: same phase, explicit Parallel-safe: yes, distinct touches.`
