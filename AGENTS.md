@@ -33,7 +33,29 @@ Resolution: token = `SQUAD_AUTH_TOKEN` env > bare `SQUAD_AUTH_TOKEN=` (`~/.squad
 
 ## Develop
 
+**Shipped `skills/**` is the installed product surface** — it is installed on users' devices
+(`npx skills add`) and executed by AI coding agents against the user's *own* repo, in any language.
+Hold these constraints on **every** change:
+
+- **Instruction-only.** A shipped skill file tells the agent *what to do* — nothing else. NO design
+  rationale, decisions-not-taken ("deliberately" / "out of scope" / "we decided"), references to
+  features that don't exist, or sales prose ("future-proofs at zero cost", "language-agnostic by
+  construction"). Design rationale belongs on the board (the card's `decision_log`), never in the
+  installed payload.
+- **Language / tool / framework portable.** Skills run against any stack — Go, Rust, Java, Python,
+  TS, Elixir, … NEVER hardcode a toolchain (`pnpm` / `vitest` / `biome` / `cargo` / `go test`).
+  Resolve a repo's real build/lint/test/format commands via the ladder in
+  `skills/squad/shared.md` → **Command Resolution**: the loaded project context (AGENTS.md canonical /
+  CLAUDE.md / GEMINI.md / `.cursor/rules` / `.github/copilot-instructions.md`) → the repo task runner
+  (make / just / Taskfile / mise / npm scripts) → auto-detect by language. Tool names appear only as
+  *examples*, never as THE command.
+- **No internal IDs / backend internals.** `skills/**` carry NO internal board IDs (the team's
+  `<KEY>-NNN` tickets) or backend source paths — describe the feature and reference only the REST API
+  wire contract. Enforced by `tests/test_no_internal_ids_in_skills.py`. (`tests/` itself is dev-only —
+  not installed — so these two rules apply to `skills/**` only.)
+
+Mechanics:
+
 - Add a skill: create `skills/<name>/SKILL.md` with `name` + `description` frontmatter (`name` must match the directory).
-- No internal IDs in shipped files: `skills/**` files carry NO internal board IDs (the team's `<KEY>-NNN` tracking tickets) or backend source paths — describe the feature and reference only the REST API wire contract. Enforced by `tests/test_no_internal_ids_in_skills.py`.
 - Validate: `bash scripts/validate-skills.sh` (also runs in CI on every push/PR).
 - Release: tag the repo (`npx skills` tracks the git tree / tags for updates).
