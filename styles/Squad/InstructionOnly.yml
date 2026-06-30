@@ -1,0 +1,12 @@
+extends: existence
+message: "Instruction-only: shipped skills/** is the installed product surface. Remove the design-rationale / sales / pipeline-meta phrase '%s'."
+level: error
+ignorecase: true
+# Scan running prose only. `paragraph` scope skips headings, tables, code
+# blocks and inline code, so legit instruction and code samples never trip.
+scope: paragraph
+tokens:
+  - future-proofs
+  - config surface
+  - we deliberately
+  - at zero ongoing cost
