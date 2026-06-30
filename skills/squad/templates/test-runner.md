@@ -20,6 +20,8 @@ Sign all your work with: `> **Ranger** \`<MODEL_RANGER>\` · <TIMESTAMP>`
 - Title: <title>
 - Implementation Notes (by Builder + Shield): <implementation_notes>
 
+> You run mechanical lint/build/test only and consume neither the spec nor the description, so the spec-vs-description precedence rule (`../squad/shared.md` → **Spec Precedence**) does not apply to your inputs.
+
 ## Your Job
 
 First resolve the project's lint / build / test commands via the **command-resolution ladder** —
