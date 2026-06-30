@@ -3,7 +3,7 @@
 The Builder's test_instruction_only_guard_contract.py covers the top-level
 wiring (Vale config exists, tokens present, CI wired). This file covers the gaps:
 
-1. Style YAML is well-formed (yaml.safe_load parseable).
+1. Style file declares the existence rule at error / paragraph scope / >=4 tokens.
 2. CI workflow triggers are complete (pull_request + push:[main] + workflow_dispatch).
 3. BEHAVIORAL: a planted forbidden phrase in running prose IS flagged by real
    `vale`; the SAME phrase inside a fenced code block is NOT flagged (scope:paragraph
@@ -14,15 +14,17 @@ wiring (Vale config exists, tokens present, CI wired). This file covers the gaps
 Does NOT duplicate the Builder's assertions (file existence, token set,
 `errata-ai/vale-action`, `fail_on_error`).
 
-Stdlib + yaml (available in test env via requirements.txt).
+Stdlib only (re / shutil / subprocess) — the tests CI job installs no deps; the
+YAML files are parsed/validated by Vale + the validate-skills workflow, not here.
 """
 
 import shutil
 import subprocess
 import textwrap
 
+import re
+
 import pytest
-import yaml
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -40,24 +42,22 @@ def _read(repo_root, rel: str) -> str:
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def test_instruction_only_style_yaml_is_parseable(repo_root):
-    """styles/Squad/InstructionOnly.yml parses without error via yaml.safe_load
-    and the parsed structure matches the expected schema keys."""
+def test_instruction_only_style_is_well_formed(repo_root):
+    """styles/Squad/InstructionOnly.yml declares the existence rule at error with a
+    paragraph scope and >=4 tokens. Stdlib string checks only — the tests CI job is
+    dependency-free (no PyYAML); the YAML itself is parsed/validated by Vale and the
+    validate-skills workflow."""
     path = repo_root / "styles" / "Squad" / "InstructionOnly.yml"
     assert path.is_file(), "styles/Squad/InstructionOnly.yml missing"
     raw = path.read_text(encoding="utf-8")
-    data = yaml.safe_load(raw)  # raises on malformed YAML
-    assert isinstance(data, dict), "InstructionOnly.yml must parse to a mapping"
-    # Required keys the existence-rule schema mandates
-    for key in ("extends", "level", "tokens"):
-        assert key in data, f"InstructionOnly.yml is missing required key: {key!r}"
-    assert data["extends"] == "existence", "extends must be 'existence'"
-    assert data["level"] == "error", "level must be 'error'"
-    assert isinstance(data["tokens"], list), "tokens must be a YAML sequence"
-    assert len(data["tokens"]) >= 4, "at least 4 tokens expected"
-    # scope key must be present (paragraph)
-    assert "scope" in data, "scope key missing — needed to skip code blocks"
-    assert data["scope"] == "paragraph", "scope must be 'paragraph'"
+    assert re.search(r"^extends:\s*existence\b", raw, re.MULTILINE), "extends must be 'existence'"
+    assert re.search(r"^level:\s*error\b", raw, re.MULTILINE), "level must be 'error'"
+    assert re.search(r"^scope:\s*paragraph\b", raw, re.MULTILINE), (
+        "scope must be 'paragraph' (skips code blocks/headings/tables)"
+    )
+    assert re.search(r"^tokens:", raw, re.MULTILINE), "tokens: sequence missing"
+    tokens = re.findall(r"^\s*-\s+\S", raw, re.MULTILINE)
+    assert len(tokens) >= 4, "at least 4 tokens expected"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -70,19 +70,12 @@ def test_vale_ci_has_all_required_triggers(repo_root):
     workflow_dispatch (matches the one-concern-per-workflow convention in the
     repo and ensures manual re-runs are possible)."""
     txt = _read(repo_root, ".github/workflows/vale.yml")
-    wf = yaml.safe_load(txt)
-    on = wf.get("on") or wf.get(True)  # YAML parses bare `on` as bool True
-    assert on is not None, "vale.yml missing 'on:' trigger block"
-    trigger_keys = set(on.keys()) if isinstance(on, dict) else set()
-    assert "pull_request" in trigger_keys, "vale CI must trigger on pull_request"
-    assert "push" in trigger_keys, "vale CI must trigger on push"
-    assert "workflow_dispatch" in trigger_keys, (
+    assert re.search(r"^\s*pull_request:", txt, re.MULTILINE), "vale CI must trigger on pull_request"
+    assert re.search(r"^\s*push:", txt, re.MULTILINE), "vale CI must trigger on push"
+    assert re.search(r"^\s*workflow_dispatch:", txt, re.MULTILINE), (
         "vale CI must trigger on workflow_dispatch (manual re-run)"
     )
-    # push must restrict to main branch
-    push_cfg = on.get("push", {})
-    branches = push_cfg.get("branches", []) if isinstance(push_cfg, dict) else []
-    assert "main" in branches, "push trigger must restrict to [main]"
+    assert re.search(r"branches:\s*\[\s*main\s*\]|-\s*main", txt), "push trigger must restrict to [main]"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
