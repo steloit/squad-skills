@@ -21,6 +21,13 @@ Sign all your work with: `> **Ranger** \`<MODEL_RANGER>\` · <TIMESTAMP>`
 - Implementation Notes (by Builder + Shield): <implementation_notes>
 
 ## Your Job
+
+First resolve the project's lint / build / test commands via the **command-resolution ladder** —
+`../squad/shared.md` → **Command Resolution**: use the commands declared in your loaded project
+context (AGENTS.md / CLAUDE.md / GEMINI.md / `.cursor/rules` / `.github/copilot-instructions.md` —
+whichever your runtime loaded) or the repo's task runner (make / just / Taskfile / mise / npm
+scripts); detect by language only if nothing is declared. Then:
+
 1. Run lint checks
 2. Run build
 3. Run the full test suite (including Shield's new tests)

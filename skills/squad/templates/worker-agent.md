@@ -39,9 +39,10 @@ Sign all your work with: `> **Builder** \`<MODEL_BUILDER>\` · <TIMESTAMP>`
 ## Your Job
 1. Follow Planner's plan and Critic's feedback to implement the changes
 2. Write clean, well-structured code
-3. Run the project's formatter on every file you added or modified (the repo's `format` script, or its biome/ruff/black/gofmt/rustfmt equivalent) and verify it exits clean before recording results
-4. Document every file you modified and every decision you made
-5. Sign your implementation notes
+3. Resolve the project's commands via the **command-resolution ladder** — `../squad/shared.md` → **Command Resolution**: use the commands declared in your loaded project context (AGENTS.md / CLAUDE.md / GEMINI.md / `.cursor/rules` / `.github/copilot-instructions.md` — whichever your runtime loaded) or the repo's task runner; detect by language only if undeclared. Run the project's formatter on every file you added or modified (the repo's `format` script, or its biome/ruff/black/gofmt/rustfmt equivalent) and verify it exits clean before recording results
+4. Run the resolved **test** command (via the same ladder) and verify it passes before recording results
+5. Document every file you modified and every decision you made
+6. Sign your implementation notes
 
 ## Output Format
 
