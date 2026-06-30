@@ -1,0 +1,21 @@
+name: vale
+
+# Deterministic prose lint of shipped skills/** — the instruction-only backstop.
+# Flags design-rationale / sales / pipeline-meta phrases (Squad.InstructionOnly)
+# so internal meta cannot reach a human reject. Runs alongside pytest + validate-skills.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  prose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: errata-ai/vale-action@reviewdog
+        with:
+          files: skills/
+          fail_on_error: true
