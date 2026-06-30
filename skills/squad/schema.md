@@ -58,9 +58,10 @@ A **projected read** (`?fields=a,b,c`) returns only the requested fields (plus `
 
 > **Derived epic `complete` flag (display / reporting only).** The board's `epics` aggregate exposes a
 > derived `complete` boolean per epic (true when its children are all `done` — `done == total > 0`). It is
-> **DISPLAY / REPORTING only** — a rolled-up progress indicator, **NOT** a dependency-satisfaction signal.
-> Readiness stays status-based: an epic used as a blocker is unblocked by explicitly `/complete`-ing it
-> (its status → `done`), never by this derived rollup.
+> **DISPLAY / REPORTING only** — a rolled-up progress indicator, **NOT** itself a dependency-satisfaction
+> signal. What satisfies a dep is the epic's **stored status**, which now **auto-rolls-up**: when all of an
+> epic's children reach a terminal status the stored status transitions to `done`/`cancelled`
+> (`completed_via:"rollup"`), satisfying the status-based gate automatically — no manual `/complete` needed.
 
 > **Attachments** are not part of the task JSON — they live behind their own endpoints:
 > list `GET /task/:id/attachment` → array of `{filename, stored_name, url, size, uploaded_at}`;

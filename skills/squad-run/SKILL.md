@@ -376,8 +376,10 @@ Template files are at `../squad/templates/`.
    - **Default mode**: `AskUserQuestion` — surface the incomplete dep(s) and confirm before proceeding.
    - **`--auto` mode**: refuse with `"blocked by incomplete dependency #N"` and abort the pipeline.
    This is the **hard block** and takes precedence over the soft sub-task nudge (① below).
-   An **epic** used as a blocker is unblocked by `/complete`-ing it (→ `done`); readiness stays
-   **status-based** — the derived epic `complete` rollup is display-only and does NOT satisfy a dep.
+   An **epic** used as a blocker **auto-completes** — when all its children reach a terminal status its
+   stored status rolls up to `done`/`cancelled`, satisfying the **status-based** readiness gate
+   automatically (no manual `/complete` needed). The derived epic `complete` rollup stays display-only;
+   the stored status (kept in sync by the rollup) is what satisfies the dep.
    The jq below is **unchanged** — `done` is already in the resolved set `{done, cancelled}`.
    ```bash
    BLOCKERS=$(echo "$REL" | jq -r '.blocked_by[]? | select(.status != "done" and .status != "cancelled") | "#\(.id) (\(.status))"')

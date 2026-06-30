@@ -794,7 +794,7 @@ The server **enforces acyclicity at write time** (in-transaction CTE) and single
 
 `/api/board` emits an **`epics` aggregate** (each with `children_progress`); board/context summaries group by it (and the embedded `parent`/`children`), not by tag parsing.
 
-> The `epics` aggregate also exposes a derived **`complete`** boolean per epic (true when `children_progress.done == total > 0`). It is **DISPLAY / REPORTING only** — a progress rollup, **NOT** a dependency-satisfaction signal. An epic used as a blocker is unblocked by explicitly `/complete`-ing it (its status → `done`, recording `completed_via:"admin"`), never by this derived flag; readiness stays status-based.
+> The `epics` aggregate also exposes a derived **`complete`** boolean per epic (true when `children_progress.done == total > 0`). It is **DISPLAY / REPORTING only** — a progress rollup, **NOT** itself a dependency-satisfaction signal. What satisfies a dep is the epic's **stored status**, which now **auto-rolls-up**: when all of an epic's children reach a terminal status the epic's stored status transitions to `done`/`cancelled` (recording `completed_via:"rollup"`), satisfying the status-based readiness gate automatically — no manual `/complete` needed (an explicit `/complete` → `completed_via:"admin"` still works). Readiness stays status-based.
 
 ### Declaring edges
 
@@ -811,7 +811,7 @@ api POST /task/$CHILD/relationships --json "$(jq -n --arg to "$EPIC" '{to:$to, t
 
 Read `blocks` edges via `GET /api/task/:id/relationships` → `.blocked_by` (NOT description text).
 
-**Readiness gate (hard block)**: a dep is **resolved** when its status is `done` **or** `cancelled` (the two terminal statuses). If any `.blocked_by[].status` is not in `{done, cancelled}` → default mode `AskUserQuestion` confirm; `--auto` → refuse `"blocked by incomplete dependency #N"` and abort. This precedes (and overrides) the soft sub-task nudge. An **epic** used as a blocker should be `/complete`'d (→ `done`) to unblock its dependents; readiness is **status-based** — the derived epic `complete` rollup is display-only and does NOT satisfy a dependency (the resolved set is unchanged: `{done, cancelled}`).
+**Readiness gate (hard block)**: a dep is **resolved** when its status is `done` **or** `cancelled` (the two terminal statuses). If any `.blocked_by[].status` is not in `{done, cancelled}` → default mode `AskUserQuestion` confirm; `--auto` → refuse `"blocked by incomplete dependency #N"` and abort. This precedes (and overrides) the soft sub-task nudge. An **epic** used as a blocker **auto-completes** — when all its children are terminal its stored status rolls up to `done`/`cancelled`, satisfying this gate automatically (no manual `/complete` needed); readiness is **status-based**, and the derived epic `complete` rollup stays display-only (the resolved set is unchanged: `{done, cancelled}`).
 
 **Context injection**: take dep ids from `.blocked_by[].id`, then fetch each dep's context fields:
 ```bash

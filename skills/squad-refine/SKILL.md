@@ -35,8 +35,10 @@ Reads a rough backlog item and refines it into concrete, actionable requirements
    and point them at `POST /api/task/$ID/reopen` (which restores `cancelled`/`done` → `todo`), then stop.
    (A `done` target may have been reached via the gated pipeline OR an administrative
    `POST /api/task/$ID/complete`; both land on the same `done` terminal, so this one branch covers both.)
-   An **epic** used as a blocker is unblocked by `/complete`-ing it (→ `done`); readiness is status-based,
-   and the derived epic `complete` rollup is display-only (NOT a dependency-satisfaction signal).
+   An **epic** used as a blocker **auto-completes** — when all its children reach a terminal status its
+   stored status rolls up to `done`/`cancelled`, satisfying the status-based readiness gate automatically
+   (no manual `/complete` needed). The derived epic `complete` rollup stays display-only; the stored
+   status (kept in sync by the rollup) is what satisfies the dep.
 
 ① ½. Look for prior implementation context (always run this before the interview)
 
