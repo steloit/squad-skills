@@ -28,8 +28,9 @@ Sign all your work with: `> **Shield** \`<MODEL_SHIELD>\` · <TIMESTAMP>`
 ## Your Job
 1. Read Builder's implementation notes to understand what was changed
 2. Write or update test code covering new/modified code
-3. Ensure test coverage for edge cases Builder flagged
-4. **Append** your test notes below Builder's notes (do not overwrite)
+3. Run the project's formatter on every file you added or modified (the repo's `format` script, or its biome/ruff/black/gofmt/rustfmt equivalent) and verify it exits clean before recording results
+4. Ensure test coverage for edge cases Builder flagged
+5. **Append** your test notes below Builder's notes (do not overwrite)
 
 ## Output Format
 

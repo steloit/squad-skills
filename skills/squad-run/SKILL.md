@@ -56,7 +56,7 @@ L1 Quick:
 L2 Standard:
   todo → [orchestrator: todo→plan, current_agent=Planner, actor:Orchestrator] → Plan Agent(planner) @plan
        → orchestrator PATCH {status:impl, current_agent:null, actor:Orchestrator} (skip plan_review)
-  impl → Worker(builder) + TDD Tester(shield) → orchestrator PATCH {status:impl_review, current_agent:null, actor:Orchestrator}
+  impl → Worker(builder) + TDD Tester(shield) → [orchestrator: format-normalize changed files] → orchestrator PATCH {status:impl_review, current_agent:null, actor:Orchestrator}
   impl_review → Inspector returns verdict → orchestrator records → [user confirm] →
                 orchestrator PATCH {status: done | impl, current_agent:null, actor:Orchestrator} → side-effects after done
 
@@ -66,7 +66,7 @@ L3 Full:
   plan_review → Critic returns verdict → orchestrator records → [user confirm] →
                 orchestrator PATCH {status: impl (approve) | plan (reject), current_agent:null, actor:Orchestrator}
                 (reject re-dispatches Planner with <critic_feedback>; plan→plan re-entry is idempotent)
-  impl → Worker(builder) + TDD Tester(shield) → orchestrator PATCH {status:impl_review, current_agent:null, actor:Orchestrator}
+  impl → Worker(builder) + TDD Tester(shield) → [orchestrator: format-normalize changed files] → orchestrator PATCH {status:impl_review, current_agent:null, actor:Orchestrator}
   impl_review → Inspector returns verdict → orchestrator records → [user confirm] →
                 orchestrator PATCH {status: test (approve) | impl (reject), current_agent:null, actor:Orchestrator}
   test → Ranger returns verdict → orchestrator records → [gate] →
@@ -233,7 +233,7 @@ read from the derived field — reviews are `approved` / `changes_requested`, th
 |---|---|---|
 | Planner @ plan | (done) | L3 → plan_review · L2 → impl |
 | Critic @ plan_review | approved / changes_requested | impl / plan |
-| Builder+Shield @ impl | (both done) | impl_review |
+| Builder+Shield @ impl | (both done) | impl_review (after format-normalize, L2/L3) |
 | Inspector @ impl_review | approved / changes_requested | (L2 → done · L3 → test) / impl |
 | Ranger @ test | pass / fail | done / impl |
 | done finalize | — | done |
@@ -608,8 +608,83 @@ Template files are at `../squad/templates/`.
    carry one id, so the board groups them into a single timeline entry for the step.
 ```
 
-Builder and Shield each RETURN their output (no self-move). Once both complete, the orchestrator
-issues the impl→impl_review **commit** move:
+Builder and Shield each RETURN their output (no self-move). Once both complete — but **before** the
+impl→impl_review commit move — the orchestrator runs the deterministic **Impl-Step Format
+Normalization** step below, then issues the commit move.
+
+#### Impl-Step Format Normalization (deterministic, pre-impl_review)
+
+**Level scope: L2/L3 only.** This step runs at the single impl→impl_review seam — the one place where
+the impl step's full changed-file set exists and no review/CI gate (Inspector/Ranger) has seen it yet.
+**L1 has no Shield and no impl_review seam** (Builder-only, straight to `done`), so L1 is **not** covered
+here; it relies on the Builder template's self-format backstop (`templates/worker-agent.md` → Your Job).
+
+**Purpose:** mechanically normalize *auto-fixable formatting only* in the impl step's changed files so a
+format-only violation never reaches the Inspector or Ranger gate (no impl_review→impl bounce for
+formatting). It runs the formatter's **format/write mode only** — it does **not** run lint, never passes a
+lint `--fix`/`--write` that auto-disables rules, and never inserts an `eslint-disable`/`biome-ignore`
+suppression. Genuine lint ERRORS and type errors are left untouched and **still fail the Ranger gate**
+(Inspector and Ranger keep running full lint — unchanged). The step only guarantees they never see a
+*format-only* failure.
+
+```bash
+# Runs after Builder+Shield return, BEFORE the impl_review PATCH. Best-effort; never hard-fails.
+
+# 1. Bounded changed-file set: tracked edits + new untracked files. Empty → clean no-op, continue.
+CHANGED=$( { git diff --name-only; git ls-files --others --exclude-standard; } | sort -u )
+if [ -z "$CHANGED" ]; then
+  : # no changed files in the impl step — nothing to normalize
+else
+  # 2. Resolve the formatter ONCE (first match wins). FMT is the write/format-mode command;
+  #    the changed-file list is appended to it so the run is bounded to the change-set ONLY
+  #    (never a full-repo reformat).
+  FMT=""
+  if   [ -f package.json ] && grep -q '"format"' package.json; then
+    # repo's own script — run via its package manager (format-only by repo convention)
+    if   [ -f pnpm-lock.yaml ]; then FMT="pnpm run format"
+    elif [ -f yarn.lock ];      then FMT="yarn format"
+    elif [ -f bun.lockb ];      then FMT="bun run format"
+    else                             FMT="npm run format"
+    fi
+  elif { [ -f Makefile ] || [ -f makefile ]; } && grep -qE '^format:' Makefile makefile 2>/dev/null; then
+    FMT="make format"
+  elif [ -f justfile ] && grep -qE '^format' justfile; then
+    FMT="just format"
+  # else detect by config / file type — format/write mode only (NOT a lint --fix):
+  elif [ -f biome.json ] || [ -f biome.jsonc ] || grep -q '@biomejs' package.json 2>/dev/null; then
+    FMT="biome format --write"            # format-only — NOT `biome check --write` (which also applies lint fixes)
+  elif grep -q '\[tool.ruff\]' pyproject.toml 2>/dev/null; then
+    FMT="ruff format"
+  elif command -v black >/dev/null 2>&1 && ls *.py >/dev/null 2>&1; then
+    FMT="black"
+  elif command -v gofmt >/dev/null 2>&1 && git ls-files '*.go' | grep -q .; then
+    FMT="gofmt -w"
+  elif command -v rustfmt >/dev/null 2>&1 && git ls-files '*.rs' | grep -q .; then
+    FMT="rustfmt"
+  elif [ -f .prettierrc ] || [ -f .prettierrc.json ] || [ -f prettier.config.js ]; then
+    FMT="prettier --write"
+  fi
+
+  if [ -z "$FMT" ]; then
+    # 3. No resolvable formatter → skip CLEANLY (never hard-fail), log an Orchestrator note, continue.
+    BODY=$(jq -n '{actor:"Orchestrator", model:"system",
+      message:"format-normalize: no formatter resolved — skipped (no format gate applied)"}')
+    api POST /task/$ID/activity --json "$BODY" || true
+  else
+    # 4. Run format/write mode over the CHANGED FILES ONLY. Best-effort: a non-zero exit
+    #    logs a note and continues — it NEVER blocks the pipeline.
+    if ! ( echo "$CHANGED" | xargs $FMT ); then
+      BODY=$(jq -n --arg cmd "$FMT" '{actor:"Orchestrator", model:"system",
+        message:("format-normalize: formatter (" + $cmd + ") exited non-zero — continued best-effort")}')
+      api POST /task/$ID/activity --json "$BODY" || true
+    fi
+    # 5. Re-stage the normalized bytes so the later `git add -A` + done commit records them.
+    echo "$CHANGED" | xargs git add
+  fi
+fi
+```
+
+After normalization (or a clean skip), the orchestrator issues the impl→impl_review **commit** move:
 ```bash
 api PATCH /task/$ID --json '{"status": "impl_review", "current_agent": null, "actor": "Orchestrator"}'
 ```
