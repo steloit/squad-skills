@@ -163,6 +163,39 @@ The five enums are the analyzable signal and require NO free text. The optional 
 
 Level is set at task creation and stored in the `level` column.
 
+## Command Resolution
+
+The pipeline runs a repo's **real** build / lint / test / format commands, and those commands differ
+per language and per repo. This is *where* an agent-driven step (Ranger test-runner, the Builder +
+Shield self-checks) gets them — a tool-agnostic resolution ladder. The skill never shells out to
+locate or parse a context file — the running agent (Claude Code / Codex / Cursor / Aider / Copilot)
+**already has its own project-context file in working memory**, so resolution is "use what you already
+loaded", not "go read a file".
+
+**Resolution ladder (first rung that yields a command wins):**
+
+1. **Your loaded project context.** Use the build/lint/test/format commands declared in the
+   project-context file your runtime already ingested — **AGENTS.md / CLAUDE.md / GEMINI.md /
+   `.cursor/rules` / `.github/copilot-instructions.md`** (whichever your runtime loads). These are
+   **equivalents** — the resolution is "whatever the running agent already loaded", not one specific
+   filename the skill must find. **AGENTS.md is the canonical, portable declaration** (the open
+   AGENTS.md standard, read by Claude Code too). Prefer it when authoring; treat the per-tool files as
+   equivalents when reading.
+2. **The repo's task runner / wrapper scripts** — `make` / `just` / `Taskfile` / `mise` / npm
+   scripts (`package.json`) / a `scripts/` directory. A declared `test` / `lint` / `build` / `format`
+   target here is an explicit, language-agnostic command (e.g. a Go repo's `make test`, a Python
+   repo's `just test`) — run it as declared.
+3. **Auto-detect by language / config** — the fallback, and today's behaviour: when **nothing** is
+   declared in any context file and no task runner is present, detect the stack from its config
+   (lockfiles, `pyproject.toml`, `go.mod`, `Cargo.toml`, `pom.xml`, `mix.exs`, …) and run the
+   conventional command. When you fall back this far you **MAY offer to scaffold an `AGENTS.md`
+   `Commands` section** (the build / lint / test / format commands you just detected) so every later
+   run resolves at rung 1 — and note the `ln -s AGENTS.md CLAUDE.md` symlink so Claude Code consumes
+   the same single source.
+
+> **Do not hardcode a single stack.** A step resolves the command via this ladder — it never assumes
+> `pnpm test` / `vitest` / `cargo test` is THE gate. Detect by language only when nothing is declared.
+
 ## 7-Column AI Team Pipeline
 
 ```

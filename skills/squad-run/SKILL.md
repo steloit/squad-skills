@@ -619,6 +619,14 @@ the impl step's full changed-file set exists and no review/CI gate (Inspector/Ra
 **L1 has no Shield and no impl_review seam** (Builder-only, straight to `done`), so L1 is **not** covered
 here; it relies on the Builder template's self-format backstop (`templates/worker-agent.md` → Your Job).
 
+> **This deterministic step is a best-effort safety net — NOT the primary cross-language mechanism.**
+> The authoritative path is the **agent layer** resolving the project's real commands via
+> `../squad/shared.md` → **Command Resolution** (your loaded project context → repo task runner →
+> detect by language); the Ranger, Builder, and Shield templates run those resolved commands. The
+> tool ladder below (repo `format` script → biome / ruff / black / gofmt / rustfmt / prettier) is the
+> **step-3 auto-detect fallback only** — it is JS/Py/Go/Rust-centric and clean-skips stacks it does
+> not recognise (Java/Kotlin/Ruby/PHP/C#/Swift/…).
+
 **Purpose:** mechanically normalize *auto-fixable formatting only* in the impl step's changed files so a
 format-only violation never reaches the Inspector or Ranger gate (no impl_review→impl bounce for
 formatting). It runs the formatter's **format/write mode only** — it does **not** run lint, never passes a
