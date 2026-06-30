@@ -37,6 +37,23 @@ PHASE_RE = re.compile(r"(?:^|,)\s*phase:(\d+)\s*(?:,|$)")
 PARALLEL_RE = re.compile(r"(?im)^parallel-safe:\s*(.+)$")
 TOUCHES_RE = re.compile(r"(?im)^touches:\s*(.+)$")
 
+# Legacy positional selectors (rejected): a numeric range (500-504 / 500~504 /
+# reverse) and a bare numeric (500). A real display id like <KEY>-42 has a
+# NON-numeric left side, so it never matches these.
+NUMERIC_RANGE_RE = re.compile(r"^\d+[-~]\d+$")
+BARE_NUMERIC_RE = re.compile(r"^\d+$")
+LEGACY_SELECTOR_HELP = (
+    "numeric range / bare-numeric selectors are no longer supported: {token!r}. "
+    "Task ids are opaque per-project display strings (e.g. <KEY>-42). Pass an "
+    "explicit id list (`--tasks \"<KEY>-42 <KEY>-43\"`) or compose "
+    "`--status` / `--tag` / `--phase` / `--epic <EPIC-ID>` filters."
+)
+
+# /api/board status columns (each an array of cards); flattened by fetch_board.
+BOARD_COLUMNS = (
+    "todo", "plan", "plan_review", "impl", "impl_review", "test", "done", "cancelled",
+)
+
 GENERIC_TAG_PREFIXES = ("phase:", "explore-", "sprint")
 GENERIC_TAGS = {"ui", "feature", "maintenance", "data", "ux"}
 HOTSPOT_HINTS = {
@@ -91,45 +108,40 @@ def build_ssl_context() -> ssl.SSLContext:
     return ssl.create_default_context()
 
 
-def expand_selector(raw: str) -> list[int]:
+def parse_id_list(raw: str) -> list[str]:
+    """Parse an explicit display-id list (space- or comma-separated) into opaque
+    id strings, deduped in first-seen order. Legacy numeric ranges (500-504) and
+    bare numerics (500) are rejected with an actionable message — display ids are
+    per-project strings, so positional ranges are meaningless."""
     parts = [part.strip() for part in re.split(r"[\s,]+", raw) if part.strip()]
-    ids: list[int] = []
-    seen: set[int] = set()
+    ids: list[str] = []
+    seen: set[str] = set()
 
     for part in parts:
-        if "-" in part or "~" in part:
-            separator = "-" if "-" in part else "~"
-            start_raw, end_raw = part.split(separator, 1)
-            start = int(start_raw)
-            end = int(end_raw)
-            step = 1 if end >= start else -1
-            for value in range(start, end + step, step):
-                if value not in seen:
-                    seen.add(value)
-                    ids.append(value)
-            continue
-
-        value = int(part)
-        if value not in seen:
-            seen.add(value)
-            ids.append(value)
+        if NUMERIC_RANGE_RE.match(part) or BARE_NUMERIC_RE.match(part):
+            raise SystemExit(LEGACY_SELECTOR_HELP.format(token=part))
+        if part not in seen:
+            seen.add(part)
+            ids.append(part)
 
     return ids
 
 
-def fetch_task(
-    base_url: str,
-    org: str,
-    project: str,
-    task_id: int,
-    auth_token: str = "",
-    ssl_context: ssl.SSLContext | None = None,
+def split_filter_values(raw: str | None) -> list[str]:
+    """Split a comma/space-separated filter value (``--status`` / ``--tag``) into
+    a lowercased list; empty/None -> []."""
+    if not raw:
+        return []
+    return [tok.strip().lower() for tok in re.split(r"[\s,]+", raw) if tok.strip()]
+
+
+def _get_json(
+    url: str,
+    auth_token: str,
+    ssl_context: ssl.SSLContext | None,
+    *,
+    what: str,
 ) -> dict:
-    # Org-scoped board surface: org in the path, project stays in the query.
-    url = (
-        f"{base_url}/api/orgs/{urllib.parse.quote(org)}/task/{task_id}"
-        f"?project={urllib.parse.quote(project)}"
-    )
     auth_state = "present" if auth_token else "missing"
     request = urllib.request.Request(url)
     if auth_token:
@@ -139,7 +151,7 @@ def fetch_task(
             return json.load(response)
     except urllib.error.HTTPError as exc:
         raise SystemExit(
-            f"failed to fetch task {task_id} from {url}: HTTP {exc.code} "
+            f"failed to fetch {what} from {url}: HTTP {exc.code} "
             f"(auth_token={auth_state})"
         ) from exc
     except urllib.error.URLError as exc:
@@ -147,6 +159,62 @@ def fetch_task(
             f"failed to connect to {url}: {exc.reason} (auth_token={auth_state})\n"
             "Is the Squad board reachable at the configured base_url? Check the URL and auth token."
         ) from exc
+
+
+def fetch_task(
+    base_url: str,
+    org: str,
+    project: str,
+    task_id: str,
+    auth_token: str = "",
+    ssl_context: ssl.SSLContext | None = None,
+) -> dict:
+    # Org-scoped board surface: org in the path, project stays in the query.
+    # task_id is an opaque <KEY>-<seq> display string; quote() it for the path.
+    url = (
+        f"{base_url}/api/orgs/{urllib.parse.quote(org)}"
+        f"/task/{urllib.parse.quote(str(task_id))}"
+        f"?project={urllib.parse.quote(project)}"
+    )
+    return _get_json(url, auth_token, ssl_context, what=f"task {task_id}")
+
+
+def fetch_board(
+    base_url: str,
+    org: str,
+    project: str,
+    auth_token: str = "",
+    ssl_context: ssl.SSLContext | None = None,
+) -> list[dict]:
+    """GET the org-scoped board and flatten its status-keyed columns into one
+    task list."""
+    url = (
+        f"{base_url}/api/orgs/{urllib.parse.quote(org)}/board"
+        f"?project={urllib.parse.quote(project)}"
+    )
+    board = _get_json(url, auth_token, ssl_context, what=f"board for {project}")
+    tasks: list[dict] = []
+    for column in BOARD_COLUMNS:
+        tasks.extend(board.get(column) or [])
+    return tasks
+
+
+def fetch_relationships(
+    base_url: str,
+    org: str,
+    project: str,
+    task_id: str,
+    auth_token: str = "",
+    ssl_context: ssl.SSLContext | None = None,
+) -> dict:
+    """GET /api/task/:id/relationships -> {blocked_by, blocking, parent, children,
+    children_progress}."""
+    url = (
+        f"{base_url}/api/orgs/{urllib.parse.quote(org)}"
+        f"/task/{urllib.parse.quote(str(task_id))}/relationships"
+        f"?project={urllib.parse.quote(project)}"
+    )
+    return _get_json(url, auth_token, ssl_context, what=f"relationships for {task_id}")
 
 
 def parse_phase(tags: str | None) -> int | None:
@@ -158,12 +226,13 @@ def parse_phase(tags: str | None) -> int | None:
     return int(match.group(1))
 
 
-def extract_blocked_by(task: dict) -> list[int]:
+def extract_blocked_by(task: dict) -> list[str]:
     """Structured dependency ids from the embedded relationships object
-    (`.relationships.blocked_by`). The `Depends on:` text convention is retired —
-    dependencies are typed `blocks` edges, read from the relationships API."""
+    (`.relationships.blocked_by`). Ids are opaque `<KEY>-<seq>` display strings —
+    kept verbatim. The `Depends on:` text convention is retired — dependencies are
+    typed `blocks` edges, read from the relationships API."""
     rel = task.get("relationships") or {}
-    return [int(dep["id"]) for dep in (rel.get("blocked_by") or []) if dep.get("id") is not None]
+    return [dep["id"] for dep in (rel.get("blocked_by") or []) if dep.get("id") is not None]
 
 
 def parse_parallel_safe(description: str | None) -> bool | None:
@@ -222,7 +291,7 @@ def infer_task(task: dict) -> dict:
     modules = sorted(set(touches + tag_modules))
 
     return {
-        "id": int(task["id"]),
+        "id": task["id"],
         "title": task.get("title"),
         "status": task.get("status"),
         "priority": task.get("priority"),
@@ -236,11 +305,11 @@ def infer_task(task: dict) -> dict:
     }
 
 
-def task_sort_key(task: dict, input_order: dict[int, int]):
+def task_sort_key(task: dict, input_order: dict[str, int]):
     phase = task.get("phase")
     return (
         phase if phase is not None else 10_000,
-        input_order[int(task["id"])],
+        input_order[task["id"]],
     )
 
 
@@ -353,10 +422,99 @@ def build_groups(tasks: list[dict]) -> list[dict]:
     return groups
 
 
+def expand_epic(rel: dict) -> list[str]:
+    """The child display ids of an epic, from its relationships object
+    (`.children[].id`)."""
+    return [child["id"] for child in (rel.get("children") or []) if child.get("id") is not None]
+
+
+def matches_filters(
+    task: dict,
+    *,
+    statuses: list[str],
+    tags: list[str],
+    phase: int | None,
+) -> bool:
+    """AND of every provided filter (omitted filters are no-ops): the task status
+    is in ``statuses``; at least one of ``tags`` appears in the task's tags; the
+    task's ``phase:N`` tag equals ``phase``."""
+    if statuses and task.get("status") not in statuses:
+        return False
+    if tags:
+        task_tags = {
+            tok.strip().lower()
+            for tok in (task.get("tags") or "").split(",")
+            if tok.strip()
+        }
+        if not any(tag in task_tags for tag in tags):
+            return False
+    if phase is not None and parse_phase(task.get("tags")) != phase:
+        return False
+    return True
+
+
+def resolve_selection(
+    base_url: str,
+    org: str,
+    project: str,
+    auth_token: str,
+    ssl_context: ssl.SSLContext | None,
+    *,
+    explicit_ids: list[str],
+    epic_id: str | None,
+    statuses: list[str],
+    tags: list[str],
+    phase: int | None,
+) -> list[str]:
+    """Compose the working set: base = explicit id list (else epic children, else
+    the whole board), then AND the status/tag/phase filters onto it. Returns the
+    ordered, deduped display-id list. Empty result -> SystemExit."""
+    has_filters = bool(statuses) or bool(tags) or phase is not None
+
+    if explicit_ids:
+        # Fetch each task only when filters need its metadata; otherwise the ids
+        # are enough (main re-fetches each fully for inference).
+        base = (
+            [fetch_task(base_url, org, project, tid, auth_token, ssl_context) for tid in explicit_ids]
+            if has_filters
+            else [{"id": tid} for tid in explicit_ids]
+        )
+    elif epic_id is not None:
+        rel = fetch_relationships(base_url, org, project, epic_id, auth_token, ssl_context)
+        base = (rel.get("children") or []) if has_filters else [{"id": cid} for cid in expand_epic(rel)]
+    else:
+        base = fetch_board(base_url, org, project, auth_token, ssl_context)
+
+    if has_filters:
+        base = [t for t in base if matches_filters(t, statuses=statuses, tags=tags, phase=phase)]
+
+    ids: list[str] = []
+    seen: set[str] = set()
+    for task in base:
+        tid = task["id"]
+        if tid not in seen:
+            seen.add(tid)
+            ids.append(tid)
+
+    if not ids:
+        raise SystemExit(
+            "no tasks matched the given selectors/filters — widen the id list or "
+            "loosen --status/--tag/--phase/--epic."
+        )
+    return ids
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", required=True)
-    parser.add_argument("--tasks", required=True, help="e.g. 500-504 or 500,501,504")
+    parser.add_argument(
+        "--tasks",
+        help="explicit display-id list, space- or comma-separated (e.g. \"<KEY>-42 <KEY>-43\")",
+    )
+    parser.add_argument("--status", help="filter: status(es), comma/space-separated")
+    parser.add_argument("--tag", help="filter: tag(s), comma/space-separated")
+    parser.add_argument("--phase", type=int, help="filter: phase number (phase:N tag)")
+    parser.add_argument("--epic", help="filter: epic <EPIC-ID>; expands to its children")
     parser.add_argument("--base-url")
     parser.add_argument("--auth-token")
     args = parser.parse_args()
@@ -387,9 +545,28 @@ def main() -> int:
             ".squadrc or export SQUAD_ORG=<slug>. Resolution order: env > .squadrc."
         )
 
-    task_ids = expand_selector(args.tasks)
-    if not task_ids:
-        raise SystemExit("no task ids resolved")
+    explicit_ids = parse_id_list(args.tasks) if args.tasks else []
+    statuses = split_filter_values(args.status)
+    tags = split_filter_values(args.tag)
+    if not (explicit_ids or args.epic or statuses or tags or args.phase is not None):
+        raise SystemExit(
+            "no selector given. Provide an explicit id list (`--tasks "
+            "\"<KEY>-42 <KEY>-43\"`) and/or compose `--status` / `--tag` / "
+            "`--phase` / `--epic <EPIC-ID>` filters."
+        )
+
+    task_ids = resolve_selection(
+        base_url,
+        org,
+        args.project,
+        auth_token,
+        ssl_context,
+        explicit_ids=explicit_ids,
+        epic_id=args.epic,
+        statuses=statuses,
+        tags=tags,
+        phase=args.phase,
+    )
 
     input_order = {task_id: index for index, task_id in enumerate(task_ids)}
     raw_tasks = [

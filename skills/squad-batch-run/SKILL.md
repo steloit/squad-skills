@@ -35,7 +35,7 @@ Do not re-implement either pipeline manually when this command path is available
 
 ### `/squad-batch-run <selector> [--auto] [--big-bang]`
 
-Run all tasks matching the selector in dependency order.
+Run all tasks matching the selector in dependency order. A `<selector>` is an explicit display-id list (`<KEY>-42 <KEY>-43`) and/or composable `--status` / `--tag` / `--phase` / `--epic <EPIC-ID>` filters (see **Inputs**).
 
 - **Default (Rolling Wave)**: refine(N) → implement(N) → verify(N) → repeat. L2/L3 tasks pause at review checkpoints for user confirmation.
 - **`--auto`**: auto-approve all review checkpoints inside `squad-run`. Refine and Verify always run.
@@ -49,8 +49,16 @@ Resume a stopped batch from the given task ID. Skips all tasks before `<start-ID
 
 ## Inputs
 
-- Accept task selectors: `500-504`, `500~504`, `500,501,504`, or whitespace-separated IDs.
-- Reverse ranges like `504-500` are normalized to ascending order.
+Task ids are **opaque per-project display strings** (`<KEY>-<seq>`, e.g. `<KEY>-42`) — never positional integers. Select tasks **declaratively**:
+
+- **Explicit id list** — `--tasks "<KEY>-42 <KEY>-43"` (space- or comma-separated). Deduped in first-seen order; resolves current-or-former-key aliases server-side.
+- **Composable filters** (AND together) — narrow whichever base is chosen:
+  - `--status <todo,impl,...>` — one or more statuses.
+  - `--tag <auth,billing>` — match any of the given tags.
+  - `--phase <N>` — the `phase:N` tag.
+  - `--epic <EPIC-ID>` — expand to that epic's children via the relationships API.
+- At least one selector source is required. With only filters (no `--tasks`/`--epic`), the whole board is the base.
+- **Numeric ranges are rejected.** Legacy positional selectors (a numeric range `<n>-<m>` / `<n>~<m>`, reverse ranges, or a bare numeric) raise an error pointing at this syntax — per-project display ids make positional ranges meaningless.
 - Read `../squad/shared.md` before any API call.
 - Invoke `squad-run` and `squad-refine` for each task via the Skill tool when available.
 - In Codex environments without the Skill tool, invoke via `$squad-run ...` / `$squad-refine ...` directly.
@@ -104,7 +112,9 @@ python3 ../squad/scripts/observe.py gate >/dev/null 2>&1; OBSERVE_OK=$?   # 0 = 
 
 ```bash
 export SQUAD_ORG   # exported from the shared.md resolution (env → .squadrc); selects the tenant via the org path
-python3 scripts/plan_batch.py --project "$PROJECT" --tasks "<selector>"
+# Explicit id list, and/or composable --status / --tag / --phase / --epic filters:
+python3 scripts/plan_batch.py --project "$PROJECT" --tasks "<KEY>-42 <KEY>-43"
+python3 scripts/plan_batch.py --project "$PROJECT" --epic "<EPIC-ID>" --status todo
 ```
 
 ### 3. Read plan

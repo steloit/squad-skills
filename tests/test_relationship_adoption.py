@@ -320,14 +320,15 @@ def test_plan_batch_epic_exclusion_is_functional(repo_root):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
-    # Simulate a task list containing one epic and one regular task.
+    # Simulate a task list containing one epic and one regular task. Ids are
+    # opaque per-project display strings, preserved verbatim (no int cast).
     epic_task_raw = {
-        "id": "100", "title": "Auth epic", "status": "todo",
+        "id": "SQD-100", "title": "Auth epic", "status": "todo",
         "priority": "high", "level": 3, "tags": "phase:1",
         "description": "", "card_type": "epic", "relationships": {},
     }
     regular_task_raw = {
-        "id": "101", "title": "Add login", "status": "todo",
+        "id": "SQD-101", "title": "Add login", "status": "todo",
         "priority": "high", "level": 2, "tags": "phase:1",
         "description": "", "card_type": "task", "relationships": {},
     }
@@ -336,7 +337,7 @@ def test_plan_batch_epic_exclusion_is_functional(repo_root):
     skipped_epics = [t["id"] for t in inferred if t.get("card_type") == "epic"]
     runnable = [t for t in inferred if t.get("card_type") != "epic"]
 
-    assert skipped_epics == [100], "infer_task must preserve card_type:'epic' so it can be filtered"
-    assert len(runnable) == 1 and runnable[0]["id"] == 101, (
+    assert skipped_epics == ["SQD-100"], "infer_task must preserve card_type:'epic' so it can be filtered"
+    assert len(runnable) == 1 and runnable[0]["id"] == "SQD-101", (
         "plan_batch must exclude epics from the runnable set"
     )
