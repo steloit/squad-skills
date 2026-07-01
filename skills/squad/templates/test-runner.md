@@ -24,6 +24,8 @@ Sign all your work with: `> **Ranger** \`<MODEL_RANGER>\` · <TIMESTAMP>`
 
 ## Your Job
 
+> **Role Boundary** (`../squad/shared.md` → **Role Boundary**): stay in your lane — on ANY failing check (lint / build / test), for any reason, record `status=fail` with the output as evidence and **edit no files**. Report, don't fix; the orchestrator routes back to impl where Builder owns the fix. (This is the worked-repo role lane — distinct from the line-7 Squad-tool friction rule above.)
+
 > If your run modifies the working tree (any tracked edit or new untracked file), the orchestrator re-fires the impl_review gate before the done-commit, so the Inspector approval is re-validated against the changed tree.
 
 First resolve the project's lint / build / test commands via the **command-resolution ladder** —

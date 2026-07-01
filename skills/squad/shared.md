@@ -196,6 +196,45 @@ loaded", not "go read a file".
 > **Do not hardcode a single stack.** A step resolves the command via this ladder — it never assumes
 > `pnpm test` / `vitest` / `cargo test` is THE gate. Detect by language only when nothing is declared.
 
+## Role Boundary (Stay in Your Lane / Report — Don't Fix)
+
+Every pipeline agent owns exactly ONE lane and **writes only its own artifact** — the single
+file / output its role produces — and edits nothing else on the *worked* repo:
+
+- **Planner** authors the `plan` (with `decision_log` / `done_when`); **Builder** owns the
+  production source; **Shield** owns the tests; **Critic / Inspector / Ranger** each record a
+  verdict. An agent stays inside that lane for the whole step.
+- A **review / verify agent records a verdict and edits nothing it evaluates** — the Critic does
+  not rewrite the plan, the Inspector does not edit the code it reviews, and the Ranger does not
+  patch source or interfaces to turn a failing check green.
+- A **test-authoring agent (Shield) writes tests, not production source** — it never edits
+  production / source files to make a failing test pass.
+- On finding a problem **outside its lane**, an agent **REPORTS** it — records `fail` (Ranger) or
+  `changes_requested` (Critic / Inspector) with the failing output as evidence, and edits no files
+  — and the orchestrator routes the card back to `impl`, where **Builder owns the fix**. Report,
+  don't fix.
+
+**Builder's lane is the production source, so authoring it is NOT a boundary violation** — this
+principle constrains the review / verify / test-author roles, not the author. Builder's own
+**surgical-changes** scope discipline still applies (touch only what the plan requires); the Role
+Boundary adds no new limit on the Builder lane.
+
+**Two distinct axes — do not conflate them:**
+
+- **Axis-A — Squad-tool friction.** Friction with the **tooling you work *with*** (the skills /
+  board / orchestrator) is *reported, not fixed* — see **Squad Friction Reports**. This is about the
+  Squad product, never the repo under work.
+- **Axis-B — Role Boundary (this rule).** Your **role lane on the *worked* repo** — don't edit
+  code / plan / source outside your role.
+
+The two are separate: a friction report concerns Squad itself; the Role Boundary concerns the repo
+you are changing. An agent may hit one, both, or neither — never fold one into the other.
+
+> Distinct also from **Agent Context Flow**'s "write only your own **domain field**", which is about
+> *board-field* ownership — who writes `plan` vs `implementation_notes` vs a verdict endpoint. The
+> Role Boundary governs *worked-repo artifacts / files* — who may edit the plan text, the source, or
+> the tests. Different axis, different surface; don't read them as the same rule.
+
 ## 7-Column AI Team Pipeline
 
 ```
