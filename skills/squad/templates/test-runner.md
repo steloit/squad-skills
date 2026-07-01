@@ -51,11 +51,9 @@ api POST /task/<ID>/test-result --json '{
     "build": "Build successful",
     "tests": "42 passed, 0 failed",
     "comment": "> **Ranger** `<MODEL_RANGER>` · <TIMESTAMP>\n\nAll checks passed.",
-    "tokens": <ESTIMATED_TOKENS>,
     "correlation_id": "<correlation_id>",
     "timestamp": "<TIMESTAMP>"
   }'
-# "tokens" is optional: estimated input+output tokens. Omit if unknown.
 # "correlation_id" is filled by the orchestrator (the <correlation_id> placeholder) —
 # the per-step grouping token tying this verdict to the orchestrator's activity event
 # for this step. Leave the placeholder as-is; do not generate or change it.

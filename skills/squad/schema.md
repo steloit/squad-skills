@@ -191,7 +191,8 @@ After each agent completes, the orchestrator appends ONE signed event — a sing
 python3 -c "
 import subprocess, json
 body = {'actor': 'NICKNAME', 'model': 'MODEL', 'message': 'MESSAGE'}
-# Optional: include 'tokens' (estimated input+output), omit when unknown.
+# Optional: include 'tokens' = the runtime's reported per-subagent usage for the
+# just-completed step; omit the key entirely when the runtime reports nothing.
 # body['tokens'] = TOKENS
 # Optional: include 'correlation_id' = the step's grouping uuid (same id the agent's
 # record-results write carried) so the board groups them into one timeline entry.
@@ -202,7 +203,7 @@ subprocess.run(['python3','../squad/scripts/api.py','POST',f'/task/{task_id}/act
 
 Replace `NICKNAME` with the agent's nickname (e.g. `Planner`, `Builder`), and `MODEL` with the resolved value from `models.json`.
 
-**Token Estimation Guide**: the orchestrator estimates each agent's usage based on context size + output length. Example: context ~8k input + ~2k output → `tokens: 10000`. If unknown, omit the key (never send `tokens: null`) — missing tokens count as 0 in stats.
+**Token Usage Guide**: `tokens` is the runtime's reported per-subagent usage at Task completion — the orchestrator captures it, because an agent cannot know its own final usage mid-run. Omit the key ONLY when the runtime genuinely reports nothing (never send `tokens: null`, never force `tokens: 0`) — a missing value counts as 0 in stats.
 
 ## Table: projects
 
