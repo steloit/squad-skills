@@ -2,34 +2,34 @@
   "default_provider": "claude",
   "providers": {
     "claude": {
-      "refiner": "sonnet",
+      "refiner": "opus",
       "planner": "opus",
-      "critic": "sonnet",
+      "critic": "opus",
       "builder": "opus",
-      "shield": "sonnet",
-      "inspector": "sonnet",
-      "ranger": "haiku",
+      "shield": "opus",
+      "inspector": "opus",
+      "ranger": "sonnet",
       "coach": "sonnet"
     },
     "codex": {
-      "refiner": "gpt-5.4",
+      "refiner": "gpt-5.5",
       "planner": "gpt-5.5",
-      "critic": "gpt-5.4",
+      "critic": "gpt-5.5",
       "builder": "gpt-5.5",
-      "shield": "gpt-5.4",
-      "inspector": "gpt-5.4",
-      "ranger": "gpt-5.4-mini",
+      "shield": "gpt-5.5",
+      "inspector": "gpt-5.5",
+      "ranger": "gpt-5.4",
       "coach": "gpt-5.4"
     }
   },
   "reasoning_effort": {
     "codex": {
-      "refiner": "medium",
-      "planner": "high",
-      "critic": "medium",
-      "builder": "high",
-      "shield": "medium",
-      "inspector": "medium",
+      "refiner": "high",
+      "planner": "xhigh",
+      "critic": "high",
+      "builder": "xhigh",
+      "shield": "high",
+      "inspector": "high",
       "ranger": "medium",
       "coach": "medium"
     }
