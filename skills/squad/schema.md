@@ -203,7 +203,7 @@ subprocess.run(['python3','../squad/scripts/api.py','POST',f'/task/{task_id}/act
 
 Replace `NICKNAME` with the agent's nickname (e.g. `Planner`, `Builder`), and `MODEL` with the resolved value from `models.json`.
 
-**Token Usage Guide**: `tokens` is the runtime's reported per-subagent usage at Task completion — the orchestrator captures it, because an agent cannot know its own final usage mid-run. Omit the key ONLY when the runtime genuinely reports nothing (never send `tokens: null`, never force `tokens: 0`) — a missing value counts as 0 in stats.
+**Token Usage Guide**: `tokens` is **OPTIONAL and best-effort** — include it ONLY when the runtime itself reports its own per-subagent usage at Task completion, read from that reported accounting; the orchestrator captures it there because an agent cannot know its own final usage mid-run. The value comes from the runtime's own accounting only — never orchestrator-derived, never locally computed (a caller sees only the final result, not the subagent's internal calls, so any local figure undercounts). Omit the key when the runtime reports nothing (never send `tokens: null`, never force `tokens: 0`) — a missing value counts as 0 in stats. Per-agent token stats are therefore best-effort and runtime-capability-gated, not a guaranteed or complete accounting.
 
 ## Table: projects
 

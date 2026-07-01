@@ -632,10 +632,12 @@ Template files are at `../squad/templates/`.
    )
 
 ⑥ After Task completes — append ONE agent-attributed activity event for the step.
-   The actor is the AGENT that just ran (NOT "Orchestrator"), tagged with its model and
-   the runtime's reported per-subagent token usage at Task completion. Concrete
-   copy-pasteable snippet + the agent-event-vs-orchestrator-machine-event distinction:
-   see "⑥ Agent-attributed step event" immediately below this block.
+   The actor is the AGENT that just ran (NOT "Orchestrator"), tagged with its model and —
+   OPTIONAL, best-effort — the runtime's OWN reported per-subagent token usage at Task
+   completion when the runtime exposes one (omitted otherwise, never null/0; never
+   orchestrator-estimated). Concrete copy-pasteable snippet + the
+   agent-event-vs-orchestrator-machine-event distinction: see "⑥ Agent-attributed step
+   event" immediately below this block.
    `correlation_id` is the SAME `$CORRELATION_ID` minted in step ② and passed to the
    agent template in step ④ — the agent's record-results write and this activity event
    carry one id (correlation_id:$CORRELATION_ID), so the board groups them into a single
@@ -645,18 +647,25 @@ Template files are at `../squad/templates/`.
 #### ⑥ Agent-attributed step event
 
 The per-step activity event is attributed to the **agent that just ran** (`actor:<Nickname>`,
-`model:<that agent's resolved model>`) — **not** `actor:"Orchestrator"` — and carries the
-runtime's reported per-subagent token usage for the just-completed Task. Single atomic POST,
-no read-modify-write:
+`model:<that agent's resolved model>`) — **not** `actor:"Orchestrator"`. `actor` and `model` are
+the reliable per-agent attribution and are always present. `tokens` is **OPTIONAL and
+best-effort**: include it ONLY when the runtime itself reports per-subagent usage for the
+just-completed Task, read from that reported usage — never orchestrator-estimated (a caller sees
+only the final result, not the subagent's internal LLM/tool calls, so any local estimate
+structurally undercounts). Omit it otherwise (never null, never 0); per-agent token stats are
+therefore not guaranteed or complete. Single atomic POST, no read-modify-write:
 
 ~~~bash
 # ⑥ Agent-attributed step event — the AGENT that just ran is the actor (NOT "Orchestrator"),
-#    tagged with its model + the runtime's reported per-subagent token usage at Task completion.
+#    tagged with its model + (OPTIONAL, best-effort) the runtime's OWN reported per-subagent
+#    token usage at Task completion when the runtime exposes one.
 #    AGENT_NICK  = this step's agent (Planner/Critic/Builder/Shield/Inspector/Ranger)
 #    AGENT_MODEL = that agent's resolved model ($MODEL_PLANNER / $MODEL_CRITIC / … from step ④)
 #    STEP_MSG    = one-line summary of what the step did
-#    STEP_TOKENS = your runtime's reported per-subagent usage for the just-completed Task.
-#                  Leave UNSET if the runtime reports nothing — the key is then omitted (never null/0).
+#    STEP_TOKENS = best-effort: your runtime's OWN reported per-subagent usage for the
+#                  just-completed Task — read from what the runtime reports, never
+#                  orchestrator-estimated. Leave UNSET if the runtime reports nothing — the key
+#                  is then omitted (never null/0); per-agent token stats are not guaranteed.
 BODY=$(AGENT_NICK="$AGENT_NICK" AGENT_MODEL="$AGENT_MODEL" STEP_MSG="$STEP_MSG" \
   CID="$CORRELATION_ID" STEP_TOKENS="${STEP_TOKENS:-}" python3 -c "
 import json, os
