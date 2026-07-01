@@ -59,3 +59,14 @@ Mechanics:
 - Add a skill: create `skills/<name>/SKILL.md` with `name` + `description` frontmatter (`name` must match the directory).
 - Validate: `bash scripts/validate-skills.sh` (also runs in CI on every push/PR).
 - Release: tag the repo (`npx skills` tracks the git tree / tags for updates).
+
+**Runtime token-usage capability (maintainer note).** The step-⑥ `tokens` field is intentionally
+OPTIONAL / best-effort because per-subagent usage is not portably readable, so the shipped skill
+populates it only from whatever usage the host runtime itself reports. Empirically, Claude Code
+exposes per-subagent usage on **background** Task completions (undocumented, observed — not a
+supported contract), but **not** in the documented **foreground** Task result; Codex is unverified.
+The portable target this field aligns to is the OpenTelemetry GenAI usage model (`gen_ai.usage.*` —
+provider-sourced, best-effort population), so a future supported source drops in cleanly. Pursuing a
+supported per-subagent usage interface (file Claude Code feedback for a documented exposure; wire
+`gen_ai.usage.*` when available) is a separate follow-up, not built here. This detail stays here —
+never in shipped `skills/**`, which must remain portable and free of runtime-specific field names.
