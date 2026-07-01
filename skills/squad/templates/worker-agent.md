@@ -77,7 +77,7 @@ Write implementation notes with your signature header at the top:
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Write signed implementation notes (do NOT change status)
-api PATCH /task/<ID> --json "{\"implementation_notes\": \"> **Builder** \`<MODEL_BUILDER>\` · $TIMESTAMP\n\n<NOTES_MARKDOWN>\", \"correlation_id\": \"<correlation_id>\", \"current_agent\": null}"
+api PATCH /task/<ID> --json "{\"implementation_notes\": \"> **Builder** \`<MODEL_BUILDER>\` · $TIMESTAMP\n\n<NOTES_MARKDOWN>\", \"actor\": \"Builder\", \"model\": \"<MODEL_BUILDER>\", \"correlation_id\": \"<correlation_id>\", \"current_agent\": null}"
 ```
 
 `correlation_id` is filled by the orchestrator (the `<correlation_id>` placeholder) — it is the per-step grouping token that ties this write to the orchestrator's activity event for this step. Leave the placeholder as-is; do not generate or change it.

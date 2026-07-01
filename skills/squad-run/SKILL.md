@@ -631,13 +631,47 @@ Template files are at `../squad/templates/`.
      prompt        = <filled template content>
    )
 
-⑥ After Task completes — append one signed activity event
-   POST /api/task/$ID/activity {actor:<Nickname>, model:<model>, message:<summary>, tokens?:<est>, correlation_id:$CORRELATION_ID}
-   (use schema.md › "Appending an event (orchestrator)" snippet — single atomic POST, no read-modify-write)
+⑥ After Task completes — append ONE agent-attributed activity event for the step.
+   The actor is the AGENT that just ran (NOT "Orchestrator"), tagged with its model and
+   the runtime's reported per-subagent token usage at Task completion. Concrete
+   copy-pasteable snippet + the agent-event-vs-orchestrator-machine-event distinction:
+   see "⑥ Agent-attributed step event" immediately below this block.
    `correlation_id` is the SAME `$CORRELATION_ID` minted in step ② and passed to the
    agent template in step ④ — the agent's record-results write and this activity event
-   carry one id, so the board groups them into a single timeline entry for the step.
+   carry one id (correlation_id:$CORRELATION_ID), so the board groups them into a single
+   timeline entry for the step.
 ```
+
+#### ⑥ Agent-attributed step event
+
+The per-step activity event is attributed to the **agent that just ran** (`actor:<Nickname>`,
+`model:<that agent's resolved model>`) — **not** `actor:"Orchestrator"` — and carries the
+runtime's reported per-subagent token usage for the just-completed Task. Single atomic POST,
+no read-modify-write:
+
+~~~bash
+# ⑥ Agent-attributed step event — the AGENT that just ran is the actor (NOT "Orchestrator"),
+#    tagged with its model + the runtime's reported per-subagent token usage at Task completion.
+#    AGENT_NICK  = this step's agent (Planner/Critic/Builder/Shield/Inspector/Ranger)
+#    AGENT_MODEL = that agent's resolved model ($MODEL_PLANNER / $MODEL_CRITIC / … from step ④)
+#    STEP_MSG    = one-line summary of what the step did
+#    STEP_TOKENS = your runtime's reported per-subagent usage for the just-completed Task.
+#                  Leave UNSET if the runtime reports nothing — the key is then omitted (never null/0).
+BODY=$(AGENT_NICK="$AGENT_NICK" AGENT_MODEL="$AGENT_MODEL" STEP_MSG="$STEP_MSG" \
+  CID="$CORRELATION_ID" STEP_TOKENS="${STEP_TOKENS:-}" python3 -c "
+import json, os
+b = {'actor': os.environ['AGENT_NICK'], 'model': os.environ['AGENT_MODEL'],
+     'message': os.environ['STEP_MSG'], 'correlation_id': os.environ['CID']}
+tok = os.environ.get('STEP_TOKENS')
+if tok: b['tokens'] = int(tok)   # runtime usage; omitted entirely when the runtime reports nothing
+print(json.dumps(b))")
+api POST /task/$ID/activity --json "$BODY"
+~~~
+
+**Agent-step event vs orchestrator machine event.** The step-⑥ event above is *agent-attributed*.
+The orchestrator's OWN machine events stay `actor:"Orchestrator", model:"system"`: the status-move
+PATCHes (the transition contract), the **format-normalize note**, and the **commit note** below.
+Do not sweep those into agent attribution.
 
 Builder and Shield each RETURN their output (no self-move). Once both complete — but **before** the
 impl→impl_review commit move — the orchestrator runs the deterministic **Impl-Step Format

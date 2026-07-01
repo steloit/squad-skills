@@ -82,11 +82,9 @@ api POST /task/<ID>/review --json '{
     "model": "<MODEL_INSPECTOR>",
     "status": "approved",
     "comment": "> **Inspector** `<MODEL_INSPECTOR>` · <TIMESTAMP>\n\n<REVIEW_MARKDOWN>",
-    "tokens": <ESTIMATED_TOKENS>,
     "correlation_id": "<correlation_id>",
     "timestamp": "<TIMESTAMP>"
   }'
-# "tokens" is optional: estimated input+output tokens. Omit if unknown.
 # "correlation_id" is filled by the orchestrator (the <correlation_id> placeholder) —
 # the per-step grouping token tying this verdict to the orchestrator's activity event
 # for this step. Leave the placeholder as-is; do not generate or change it.
