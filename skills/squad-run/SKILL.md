@@ -238,6 +238,32 @@ read from the derived field — reviews are `approved` / `changes_requested`, th
 | Ranger @ test | pass / fail | done / impl |
 | done finalize | — | done |
 
+##### L3 Approval Snapshot (Inspector → test)
+
+When the Inspector verdict is `approved` AND the computed move is the **L3 `impl_review → test`**
+transition, then immediately AFTER issuing that generic move PATCH, capture `APPROVAL_TREE` — a
+deterministic content-hash of the FULL working-tree state (tracked edits + untracked) that the
+Inspector approved. This is **L3-only**: L1/L2 have no Ranger/test stage, and the L2 `approved`
+branch moves straight to `done` and must NOT capture.
+
+```bash
+# Right after the impl_review→test move PATCH. L3-only: L2 approved→done never captures.
+# Non-destructive content-hash of the WHOLE tree (tracked + untracked) via a throwaway
+# temp index — the real index / working tree / stash list are never touched.
+if [ "$LEVEL" = "3" ]; then
+  TMPIDX=$(mktemp) && rm -f "$TMPIDX"          # mktemp pre-creates an empty file; git reads it
+                                               # as a corrupt index ("index file smaller than
+                                               # expected") — REMOVE it before use so git creates
+                                               # a fresh temp index at that path.
+  GIT_INDEX_FILE="$TMPIDX" git add -A          # stage tracked edits + untracked into the temp index
+  APPROVAL_TREE=$(GIT_INDEX_FILE="$TMPIDX" git write-tree)   # deterministic tree SHA of the whole tree
+  rm -f "$TMPIDX"                              # clean up the throwaway index
+fi
+```
+
+`APPROVAL_TREE` now represents the exact diff the Inspector approved — identical tree bytes ⇒
+identical hash; any content change (including a NEW untracked file) ⇒ a different hash.
+
 Reject loops (plan_review→plan, impl_review→impl, test→impl) re-dispatch the column's agent; a
 `plan→plan` re-entry sets `current_agent` only (no illegal status move). Re-issuing a move that is
 already applied is a safe no-op.
@@ -713,6 +739,42 @@ the derived verdict, THEN the normal read→move computes the backward send-back
 **Auto mode (`--auto`)**: same order, but auto-accept at the gate (orchestrator still issues the move PATCH).
 
 #### → Done Transition (all levels)
+
+**Staleness principle (impl_review → test → done).** An Inspector approval covers the diff *as it
+was approved*; any later change to the working tree before the done-commit invalidates that approval
+and requires re-review through the same impl_review gate.
+
+**Stale-approval recheck (L3, when `APPROVAL_TREE` is non-empty).** BEFORE the done-commit move
+PATCH below, re-capture the whole-tree content hash and compare it — by content equality, NOT by
+test-vs-source file classification — to the snapshot the Inspector approved:
+
+```bash
+# Re-capture PRECOMMIT_TREE with the SAME non-destructive primitive (whole tree, tracked + untracked).
+if [ "$LEVEL" = "3" ] && [ -n "$APPROVAL_TREE" ]; then
+  TMPIDX=$(mktemp) && rm -f "$TMPIDX"
+  GIT_INDEX_FILE="$TMPIDX" git add -A
+  PRECOMMIT_TREE=$(GIT_INDEX_FILE="$TMPIDX" git write-tree)
+  rm -f "$TMPIDX"
+
+  if [ "$PRECOMMIT_TREE" = "$APPROVAL_TREE" ]; then
+    : # identical content hash → the approved diff is intact → proceed to the done-commit unchanged.
+  else
+    # Differs → the approval is STALE (e.g. Ranger edited the tree after approval). Re-dispatch the
+    # Inspector through the EXISTING impl_review gate — NOT a new column/status. Move the card back via
+    # the standard impl_review re-entry, mint a FRESH per-step correlation_id, follow the existing
+    # record→read→gate→commit contract, and respect the EXISTING circuit breaker:
+    # impl_review_count > 3 → stop, ask user (no infinite loop). The re-review uses the same Inspector
+    # template, the same /review verdict endpoint, and the same verdict→move table:
+    #   • re-review approved        → capture a FRESH APPROVAL_TREE (re-snapshot with the primitive
+    #                                 above), the test stage runs again, and the next test→done attempt
+    #                                 re-enters this compare.
+    #   • re-review changes_requested → the EXISTING impl_review → impl reject loop fires (route back to
+    #                                 the Builder), unchanged.
+    echo "stale approval: working tree changed after impl_review approval — re-reviewing"
+    # … re-enter impl_review here (existing gate, fresh correlation_id, impl_review_count breaker) …
+  fi
+fi
+```
 
 ```bash
 # 1. Move to done (single validated generic PATCH) — clears current_agent.

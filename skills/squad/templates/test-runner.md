@@ -24,6 +24,8 @@ Sign all your work with: `> **Ranger** \`<MODEL_RANGER>\` · <TIMESTAMP>`
 
 ## Your Job
 
+> If your run modifies the working tree (any tracked edit or new untracked file), the orchestrator re-fires the impl_review gate before the done-commit, so the Inspector approval is re-validated against the changed tree.
+
 First resolve the project's lint / build / test commands via the **command-resolution ladder** —
 `../squad/shared.md` → **Command Resolution**: use the commands declared in your loaded project
 context (AGENTS.md / CLAUDE.md / GEMINI.md / `.cursor/rules` / `.github/copilot-instructions.md` —
