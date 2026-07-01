@@ -42,6 +42,8 @@ Score the implementation on **6 dimensions (1–5 each)**:
 | **Test Coverage** | No tests | Happy path only | Critical paths and edge cases covered |
 | **Completion** | done_when criteria largely unmet | Most criteria met, some gaps | All done_when criteria verified and met |
 
+> **Role Boundary** (`../squad/shared.md` → **Role Boundary**): stay in your lane — when you find a defect, record `changes_requested`; **never edit the code you review**. Report, don't fix; the orchestrator routes back to impl where Builder owns the fix.
+
 **Decision rule:**
 - Average ≥ 4.0 → `"approved"`
 - Average < 3.0 OR any Security/Type Safety score = 1 → `"changes_requested"`
