@@ -2,23 +2,23 @@
   "default_provider": "claude",
   "providers": {
     "claude": {
-      "refiner": "opus",
+      "refiner": "sonnet",
       "planner": "opus",
       "critic": "sonnet",
       "builder": "opus",
       "shield": "sonnet",
       "inspector": "sonnet",
-      "ranger": "sonnet",
+      "ranger": "haiku",
       "coach": "sonnet"
     },
     "codex": {
-      "refiner": "gpt-5.2",
-      "planner": "gpt-5.4",
+      "refiner": "gpt-5.4",
+      "planner": "gpt-5.5",
       "critic": "gpt-5.4",
-      "builder": "gpt-5.3-codex",
-      "shield": "gpt-5.3-codex",
+      "builder": "gpt-5.5",
+      "shield": "gpt-5.4",
       "inspector": "gpt-5.4",
-      "ranger": "gpt-5.3-codex",
+      "ranger": "gpt-5.4-mini",
       "coach": "gpt-5.4"
     }
   },
