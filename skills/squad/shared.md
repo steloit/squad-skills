@@ -574,7 +574,7 @@ A **single-task GET with no `?fields=` param** embeds the full `activity` + `com
 
 #### Per-actor stats — `GET /api/activity/stats?project=[&task_id=]`
 
-Server-side per-actor aggregate (one `GROUP BY actor`) → `{"success": true, "stats": [{"actor", "events", "tokens"}, …], "totals": {"events", "tokens"}}`. The scalable source for cross-task token stats — one call, no per-task loop (the board summary no longer carries activity).
+Server-side per-actor aggregate (one `GROUP BY actor`) → `{"success": true, "stats": [{"actor", "model", "events", "tokens", "reported"}, …], "totals": {"events", "tokens"}}`. Per-actor `tokens` is `number | null` (null = the actor reported no token figure) and `reported` = the count of that actor's events that carried a token figure (coverage); `totals.tokens` stays a **coalesced number** (only the per-actor `tokens` is nullable). The scalable source for cross-task token stats — one call, no per-task loop (the board summary no longer carries activity).
 
 #### Human comments — `POST /api/task/:id/comment` · `DELETE /api/task/:id/comment/:commentId`
 

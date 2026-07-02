@@ -141,7 +141,7 @@ The immutable machine **event stream** for a task — one append-only event per 
 
 - `id` is an opaque string (used as the `?before=<id>` pagination cursor); `task_id` is the **display id** `<KEY>-<seq>` (e.g. `ABC-42`), not a number. There is no `project` field on the event.
 - `actor` is the squad actor (see actor vocabulary below); `model` is the resolved provider model from `models.json` (or `system` for `Orchestrator`/`Heartbeat`) — it may be `null`.
-- `tokens` is optional/`null` — estimated total tokens (input + output) for the step; omit when unknown (missing counts as 0 in stats).
+- `tokens` is optional/`null` — the runtime's reported total tokens (input + output) for the step; omit when unknown. An omitted event token is excluded from the per-actor sum (it does not count as 0); the stats endpoint's `reported` count gives coverage.
 - `created_at` is server-set — clients do **not** send a timestamp.
 - **Clients send only** `{actor, model?, message, tokens?, correlation_id?}` on append. The board classifies each event internally (whether it was written by a human, an agent, or the system, and the kind of event); those classifications are NOT part of the append body or the returned shape — do not send or expect them.
 - `correlation_id` is optional — a **client-supplied uuid grouping token**. squad-run mints one fresh id per agent step and sends the SAME value on (a) the step's record-results write (task PATCH / verdict POST) and (b) this activity append, so the board can group the step's writes and its activity event into one timeline entry. Omit when not threading a step.
@@ -158,7 +158,7 @@ Comment shape as returned by the API: `{"id": "<uuid>", "task_id": "ABC-42", "au
 |----------|---------|
 | `POST /api/task/:id/activity?project=` | Append one event `{actor, message, model?, tokens?, correlation_id?}` → `{success, event}`. Single atomic INSERT, no read-modify-write; `actor` + `message` are required non-empty strings, `model` optional non-empty, `tokens` if present finite, `correlation_id` optional client-supplied grouping token, else 400. `actor` must be a known actor (see vocabulary). |
 | `GET /api/task/:id/activity?project=` | Reader, **newest-first** (`ORDER BY created_at DESC`), `?limit` (≤500), `?before=<id>` (returns events older than that cursor id). |
-| `GET /api/activity/stats?project=[&task_id=]` | Per-actor aggregate `{success, stats:[{actor, events, tokens}], totals}` via one `GROUP BY`. |
+| `GET /api/activity/stats?project=[&task_id=]` | Per-actor aggregate `{success, stats:[{actor, model, events, tokens, reported}], totals}` via one `GROUP BY`. Per-actor `tokens` is `number \| null` (null = no reported figure) and `reported` = count of that actor's events that carried a token figure (coverage); `totals.tokens` stays a coalesced number. |
 | `POST /api/task/:id/comment?project=` | Human comment `{content}` (optional `author`). |
 | `DELETE /api/task/:id/comment/:commentId?project=` | Delete a human comment. |
 
@@ -203,7 +203,7 @@ subprocess.run(['python3','../squad/scripts/api.py','POST',f'/task/{task_id}/act
 
 Replace `NICKNAME` with the agent's nickname (e.g. `Planner`, `Builder`), and `MODEL` with the resolved value from `models.json`.
 
-**Token Usage Guide**: `tokens` is **OPTIONAL and best-effort** — include it ONLY when the runtime itself reports its own per-subagent usage at Task completion, read from that reported accounting; the orchestrator captures it there because an agent cannot know its own final usage mid-run. The value comes from the runtime's own accounting only — never orchestrator-derived, never locally computed (a caller sees only the final result, not the subagent's internal calls, so any local figure undercounts). Omit the key when the runtime reports nothing (never send `tokens: null`, never force `tokens: 0`) — a missing value counts as 0 in stats. Per-agent token stats are therefore best-effort and runtime-capability-gated, not a guaranteed or complete accounting.
+**Token Usage Guide**: `tokens` is **OPTIONAL and best-effort** — include it ONLY when the runtime itself reports its own per-subagent usage at Task completion, read from that reported accounting; the orchestrator captures it there because an agent cannot know its own final usage mid-run. The value comes from the runtime's own accounting only — never orchestrator-derived, never locally computed (a caller sees only the final result, not the subagent's internal calls, so any local figure undercounts). Omit the key when the runtime reports nothing (never send `tokens: null`, never force `tokens: 0`) — a missing value is **excluded** from the per-actor sum (not counted as 0); the stats endpoint's `reported` count exposes how many events contributed a figure. Per-agent token stats are therefore best-effort and runtime-capability-gated, not a guaranteed or complete accounting.
 
 ## Table: projects
 
