@@ -138,18 +138,32 @@ for col in columns:
     print(f"| {col} | {counts[col]} |")
 print(f"| **total** | **{counts['total']}** |")
 
-# Per-actor token/event stats — straight from the aggregate endpoint
+# Per-actor token/event stats — tolerant reader: pull only the fields we use,
+# treat a null/missing per-actor `tokens` as unknown (render —, never coerce to 0,
+# never do arithmetic over a null), and ignore any unknown/extra fields the server adds.
 rows = stats.get('stats', [])
 totals = stats.get('totals', {})
 print("\n## Agent Token Usage\n")
-if not rows or totals.get('tokens', 0) == 0 and totals.get('events', 0) == 0:
+if not rows:
     print("No token data")
 else:
-    print("| Actor | Events | Tokens (est.) |")
-    print("|-------|--------|---------------|")
+    print("| Actor | Events | Tokens | Coverage |")
+    print("|-------|--------|--------|----------|")
     for r in sorted(rows, key=lambda r: r.get('actor', '')):
-        print(f"| {r.get('actor', 'unknown')} | {r.get('events', 0)} | {r.get('tokens', 0):,} |")
-    print(f"| **Total** | **{totals.get('events', 0)}** | **{totals.get('tokens', 0):,}** |")
+        events = r.get('events', 0)
+        tok = r.get('tokens')
+        reported = r.get('reported')
+        tok_cell = "—" if tok is None else f"{tok:,}"
+        if reported is None:
+            cov_cell = "—"
+        elif reported < events:
+            cov_cell = f"{reported}/{events} (partial)"
+        else:
+            cov_cell = f"{reported}/{events}"
+        print(f"| {r.get('actor', 'unknown')} | {events} | {tok_cell} | {cov_cell} |")
+    tot_tok = totals.get('tokens')
+    tot_tok_cell = "—" if tot_tok is None else f"{tot_tok:,}"
+    print(f"| **Total** | **{totals.get('events', 0)}** | **{tot_tok_cell}** | |")
 PY
 ```
 
