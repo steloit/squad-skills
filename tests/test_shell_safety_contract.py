@@ -215,8 +215,8 @@ def test_guard_does_not_flag_safe_patterns_or_prose():
     `<rendered-content>` sentinel must NOT trip the guard."""
     safe_lines = [
         # env var → os.environ, read INSIDE the program (safe pattern #2)
-        'BODY=$(MSG="$RENDERED" python3 -c "import json, os; '
-        'print(json.dumps({\'message\': os.environ[\'MSG\']}))")',
+        ('BODY=$(MSG="$RENDERED" python3 -c "import json, os; '
+         + 'print(json.dumps({\'message\': os.environ[\'MSG\']}))")'),
         # --json "$VAR" — a pre-built body passed out-of-band, not a raw literal
         'api POST /task/$ID/activity --json "$BODY"',
         # the step-④ placeholder-mapping TABLE — a token in prose, no sink on the line
@@ -487,8 +487,8 @@ def test_known_field_capture_guard_does_not_flag_safe_forms_or_prose():
     must NOT trip the tightened guard."""
     safe_lines = [
         # the fixed schema.md:204 form — MESSAGE="$MESSAGE" var-to-var, still on a shared line
-        'NICKNAME="Planner" MODEL="opus" MESSAGE="$MESSAGE" TASK_ID="$TASK_ID" '
-        'PROJECT="$PROJECT" python3 -c "',
+        ('NICKNAME="Planner" MODEL="opus" MESSAGE="$MESSAGE" TASK_ID="$TASK_ID" '
+         + 'PROJECT="$PROJECT" python3 -c "'),
         # the fixed SKILL.md:748 form — STEP_MSG="$STEP_MSG" var-to-var, shared line
         'BODY=$(AGENT_NICK="$AGENT_NICK" AGENT_MODEL="$AGENT_MODEL" STEP_MSG="$STEP_MSG" \\',
         # heredoc opener — `=$(cat <<'...'`, never matches the `="..."` capture shape at all
