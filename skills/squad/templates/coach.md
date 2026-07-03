@@ -91,9 +91,17 @@ best-effort to `POST /api/orgs/{org}/run-audit?project=squad` (documented in sha
 
 ```bash
 # Resolve run context (shell vars — NOT template placeholders, to keep render --strict clean).
+# Capture the substituted values via single-quoted heredocs so a backtick/$(…) in them stays inert
+# at the assignment (board content is data, never code — see shared.md → JSON Safety).
 SKILL="squad-run"                  # the skill that just ran
-SOURCE_PROJECT="<source_project>"  # already substituted by the renderer in prose; read from run ctx
-SOURCE_TASK="<source_task>"
+SOURCE_PROJECT=$(cat <<'SOURCE_PROJECT_EOF'
+<source_project>
+SOURCE_PROJECT_EOF
+)
+SOURCE_TASK=$(cat <<'SOURCE_TASK_EOF'
+<source_task>
+SOURCE_TASK_EOF
+)
 LEVEL="${SQUAD_LEVEL:-}"           # task level if known; else empty -> null
 # MODEL_PROVIDER resolved per shared.md → Model Resolution (claude|codex); empty -> null.
 

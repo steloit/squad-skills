@@ -188,20 +188,30 @@ Comment shape as returned by the API: `{"id": "<uuid>", "task_id": "ABC-42", "au
 After each agent completes, the orchestrator appends ONE signed event — a single atomic POST, no read-modify-write:
 
 ```python
-python3 -c "
-import subprocess, json
-body = {'actor': 'NICKNAME', 'model': 'MODEL', 'message': 'MESSAGE'}
-# Optional: include 'tokens' = the runtime's reported per-subagent usage for the
-# just-completed step; omit the key entirely when the runtime reports nothing.
-# body['tokens'] = TOKENS
-# Optional: include 'correlation_id' = the step's grouping uuid (same id the agent's
-# record-results write carried) so the board groups them into one timeline entry.
-# body['correlation_id'] = CORRELATION_ID
+# Board content (`message`) is DATA, never code — pass every field through the environment and
+# read it with os.environ INSIDE the program; never inline a rendered value into the python3 -c
+# "…" text (a backtick/$(…) in it would command-substitute in the shell BEFORE python runs). See
+# `../squad-run/SKILL.md` → Shell Safety (injection defense) and `shared.md` → JSON Safety.
+# CAPTURE the free-text `message` via a single-quoted heredoc — the quoted <<'…' delimiter disables
+# ALL expansion, so a backtick/$(…) in it stays inert AT THE ASSIGNMENT (a plain MESSAGE="<the text>"
+# would command-substitute right here, before the safe env handoff below).
+MESSAGE=$(cat <<'MESSAGE_EOF'
+<the event's one-line step summary — free text>
+MESSAGE_EOF
+)
+# Each field then crosses via the environment (var-to-var — an inert re-expansion, never a fresh
+# substitution) and is read with os.environ INSIDE the program.
+NICKNAME="Planner" MODEL="opus" MESSAGE="$MESSAGE" TASK_ID="$TASK_ID" PROJECT="$PROJECT" python3 -c "
+import subprocess, json, os
+body = {'actor': os.environ['NICKNAME'], 'model': os.environ['MODEL'], 'message': os.environ['MESSAGE']}
+# Optional: body['tokens'] = int(os.environ['TOKENS'])             # runtime usage; omit when unreported
+# Optional: body['correlation_id'] = os.environ['CORRELATION_ID']  # the step's grouping uuid
+task_id = os.environ['TASK_ID']; project = os.environ['PROJECT']
 subprocess.run(['python3','../squad/scripts/api.py','POST',f'/task/{task_id}/activity?project={project}','--json',json.dumps(body)], capture_output=True)
 "
 ```
 
-Replace `NICKNAME` with the agent's nickname (e.g. `Planner`, `Builder`), and `MODEL` with the resolved value from `models.json`.
+Set the `NICKNAME`/`MODEL`/`MESSAGE`/`TASK_ID`/`PROJECT` environment variables to the step's values — the agent's nickname (e.g. `Planner`, `Builder`), the resolved `models.json` model, the event message (captured out-of-band via the single-quoted heredoc above), and the task/project — never string-interpolate them into the `-c` program.
 
 **Token Usage Guide**: `tokens` is **OPTIONAL and best-effort** — include it ONLY when the runtime itself reports its own per-subagent usage at Task completion, read from that reported accounting; the orchestrator captures it there because an agent cannot know its own final usage mid-run. The value comes from the runtime's own accounting only — never orchestrator-derived, never locally computed (a caller sees only the final result, not the subagent's internal calls, so any local figure undercounts). Omit the key when the runtime reports nothing (never send `tokens: null`, never force `tokens: 0`) — a missing value is **excluded** from the per-actor sum (not counted as 0); the stats endpoint's `reported` count exposes how many events contributed a figure. Per-agent token stats are therefore best-effort and runtime-capability-gated, not a guaranteed or complete accounting.
 
