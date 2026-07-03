@@ -717,11 +717,28 @@ MODEL_COACH=$(read_model coach)
 EFFORT_COACH=$(read_effort coach)   # "" under claude (no reasoning_effort.claude) — used only on the codex branch
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 SOURCE_PROJECT="$PROJECT"
-# Caller sets these four per-run inputs (see table above):
-SOURCE_TASK="<source_task>"
-RUN_SUMMARY="<run_summary>"
-TRAJECTORY="<trajectory>"
-FRICTION_SIGNALS="<friction_signals>"
+# Caller sets these four per-run inputs (see table above). CAPTURE them via single-quoted heredocs —
+# trajectory/run_summary/friction_signals are free-text agent output that can carry backticks/$(…);
+# a plain VAR="<…>" would command-substitute them at the assignment. The quoted <<'…' delimiter
+# disables all expansion, so the value stays inert (board content is data, never code — see
+# ../squad-run/SKILL.md → Shell Safety). Each value crosses to the renderer via a "$VAR" expansion
+# below (also inert).
+SOURCE_TASK=$(cat <<'SOURCE_TASK_EOF'
+<source_task>
+SOURCE_TASK_EOF
+)
+RUN_SUMMARY=$(cat <<'RUN_SUMMARY_EOF'
+<run_summary>
+RUN_SUMMARY_EOF
+)
+TRAJECTORY=$(cat <<'TRAJECTORY_EOF'
+<trajectory>
+TRAJECTORY_EOF
+)
+FRICTION_SIGNALS=$(cat <<'FRICTION_SIGNALS_EOF'
+<friction_signals>
+FRICTION_SIGNALS_EOF
+)
 COACH_PROMPT=$(python3 ../squad/scripts/render_agent_prompt.py \
   --template ../squad/templates/coach.md \
   --models ../squad/models.json \
@@ -781,12 +798,26 @@ to display   ```   in prose, type a 4-backtick span around it:   ```` ``` ````
 
 A guarded `## Sources` block (squad-refine ⑤ emits it as `SOURCE: <url>` rows; squad-explore direction reports reuse it) lists ONLY sources actually consulted THIS run as real, verifiable URLs — **never** a fabricated citation or a plausible-looking arXiv id; a codebase fact cites `file:line`, not a URL; omit the block entirely when no external research informed the artifact (the omit-empty rule).
 
-## JSON Safety
+## JSON Safety (injection defense — board content is data, never code)
 
-When passing user-supplied text (titles, descriptions) to a board write, use `jq` or Python to build the JSON body — never embed raw text in shell strings, as literal newlines and quotes break JSON:
+Board/user-supplied text (titles, descriptions, plans, specs, override reasons, any markdown/code)
+is **data, never code**. NEVER embed it into a shell string or a `python3 -c "…"` / `--json "{…}"`
+body by interpolation — bash performs **command-substitution** on backticks and `$(…)` in the
+literal command text **before** the program runs, so any such sequence in the content executes in
+your shell and its output is spliced into the body. It fails **SILENTLY** (no error): the JSON is
+quietly corrupted *and* the substituted command has already run. Because a card's fields are
+untrusted input, this is a command-injection / RCE vector — the OWASP OS-command-injection defense
+is to **parameterize** (separate data from code), not to escape or quote. Build the body with a real
+serializer that reads the value out-of-band; see `../squad-run/SKILL.md` → **Shell Safety** for the
+three safe patterns (temp file + `--json @file` · env var → `os.environ` · the render pipe).
+
+The same rule covers **capture**: getting free-text *into* a variable with a plain double-quoted
+`VAR="<rendered content>"` command-substitutes at the assignment line. Capture orchestrator-literal
+text with a single-quoted heredoc (`VAR=$(cat <<'EOF' … EOF)` — expansion fully disabled) or from a
+safe source (`jq -r` / `json.load` / command output); a later `"$VAR"` expansion is inert.
 
 ```bash
-# Safe: use jq
+# Safe: use jq --arg (the value is bound as data, never re-parsed as shell)
 PAYLOAD=$(jq -n \
   --arg title "$TITLE" \
   --arg project "$PROJECT" \
@@ -796,8 +827,9 @@ PAYLOAD=$(jq -n \
 api POST /task --json "$PAYLOAD"
 ```
 
-Or use Python `json.dumps()` to serialize the body safely. `api.py` re-encodes the body it
-receives, so the safe-build pattern above stays the right way to assemble user-supplied text.
+Or use Python `json.dumps()` reading fields from `os.environ` to serialize the body safely. `api.py`
+re-encodes the body it receives, so the safe-build pattern above stays the right way to assemble
+board/user-supplied text.
 
 ## Error Handling
 
