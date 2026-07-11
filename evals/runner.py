@@ -89,6 +89,7 @@ def run_agent(prompt: str, cwd: str | None = None, timeout: int = 600) -> dict:
             e.stdout.decode(errors="replace") if e.stdout else "")
         returncode = -1
     output, tools = "", []
+    usage, cost, num_turns = {}, None, None
     for line in (stdout or "").splitlines():
         try:
             ev = json.loads(line)
@@ -100,9 +101,20 @@ def run_agent(prompt: str, cwd: str | None = None, timeout: int = 600) -> dict:
                     output += block["text"]
                 elif block.get("type") == "tool_use":
                     tools.append(block.get("name", "?"))
-        elif ev.get("type") == "result" and ev.get("result"):
-            output = ev["result"]  # final assembled result wins
-    return {"output": output.strip(), "tools": tools, "returncode": returncode}
+        elif ev.get("type") == "result":
+            if ev.get("result"):
+                output = ev["result"]           # final assembled result wins
+            usage = ev.get("usage") or {}        # {input_tokens, output_tokens, cache_*}
+            cost = ev.get("total_cost_usd")
+            num_turns = ev.get("num_turns")
+    inp = usage.get("input_tokens", 0)
+    out = usage.get("output_tokens", 0)
+    cache_r = usage.get("cache_read_input_tokens", 0)
+    cache_w = usage.get("cache_creation_input_tokens", 0)
+    return {"output": output.strip(), "tools": tools, "returncode": returncode,
+            "tokens": {"input": inp, "output": out, "cache_read": cache_r,
+                       "cache_write": cache_w, "total": inp + out + cache_r + cache_w},
+            "cost_usd": cost, "num_turns": num_turns}
 
 
 # ── Board API (Authorization: Bearer) ────────────────────────────────────────

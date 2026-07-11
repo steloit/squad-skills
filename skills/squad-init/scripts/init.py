@@ -172,6 +172,12 @@ def main():
               file=sys.stderr)
 
     if args.base_url:
+        # Never persist a non-URL to the global config — a mispassed path/garbage
+        # would silently poison board access for every project on this machine.
+        if not args.base_url.startswith(("http://", "https://")):
+            print(f"ERROR: --base-url must be an http(s) URL, got: {args.base_url!r}. "
+                  "Not written or registered.", file=sys.stderr)
+            return 2
         os.environ["SQUAD_BASE_URL"] = args.base_url
         if args.base_url != api.DEFAULT_BASE_URL:
             _persist_base_url(args.base_url)
