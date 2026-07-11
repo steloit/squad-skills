@@ -40,36 +40,33 @@ sys.path.insert(0, str(SQUAD_SCRIPTS))
 import api  # noqa: E402  (shared resolution: base URL, keyed-line reads, token key)
 import pipeline  # noqa: E402  (shared board-request core)
 
-SQUADRC = pathlib.Path(".squadrc")
+def _read_squadrc(squadrc):
+    return (squadrc.is_file(),
+            api._read_keyed_line(squadrc, "SQUAD_PROJECT="),
+            api._read_keyed_line(squadrc, "SQUAD_ORG="))
 
 
-def _read_squadrc():
-    return (SQUADRC.is_file(),
-            api._read_keyed_line(SQUADRC, "SQUAD_PROJECT="),
-            api._read_keyed_line(SQUADRC, "SQUAD_ORG="))
-
-
-def _write_squadrc(exists, force, cur_proj, cur_org, project, org):
+def _write_squadrc(squadrc, exists, force, cur_proj, cur_org, project, org):
     """Returns the squadrc state: written | overwritten | updated | kept."""
     content = f"SQUAD_PROJECT={project}\nSQUAD_ORG={org}\n"
     if not exists:
-        SQUADRC.write_text(content)
+        squadrc.write_text(content)
         return "written"
     if force:
-        SQUADRC.write_text(content)
+        squadrc.write_text(content)
         return "overwritten"
     if cur_proj and cur_org:
         print(f"Kept existing .squadrc (SQUAD_PROJECT={cur_proj}, SQUAD_ORG={cur_org}); "
               "use --force to overwrite.", file=sys.stderr)
         return "kept"
     # File exists but a key is missing — append only what's absent.
-    body = SQUADRC.read_text().rstrip("\n")
+    body = squadrc.read_text().rstrip("\n")
     add = []
     if not cur_proj:
         add.append(f"SQUAD_PROJECT={project}")
     if not cur_org:
         add.append(f"SQUAD_ORG={org}")
-    SQUADRC.write_text((body + "\n" if body else "") + "\n".join(add) + "\n")
+    squadrc.write_text((body + "\n" if body else "") + "\n".join(add) + "\n")
     return "updated"
 
 
@@ -91,8 +88,8 @@ def _persist_base_url(base_url):
     cfg.write_text("\n".join(lines) + "\n")
 
 
-def _infer_metadata(project):
-    """Best-effort category / purpose / stack / repo_url from the local checkout."""
+def _infer_metadata(project, target):
+    """Best-effort category / purpose / stack / repo_url from the target checkout."""
     category = "personal"
     if re.search(r"skill|squad", project, re.IGNORECASE):
         category = "skills"
@@ -100,7 +97,7 @@ def _infer_metadata(project):
         category = "tools"
 
     purpose = stack = ""
-    claude_md = pathlib.Path("CLAUDE.md")
+    claude_md = target / "CLAUDE.md"
     if claude_md.is_file():
         try:
             for line in claude_md.read_text(errors="replace").splitlines():
@@ -118,7 +115,7 @@ def _infer_metadata(project):
 
     try:
         repo_url = subprocess.run(["git", "remote", "get-url", "origin"],
-                                  capture_output=True, text=True).stdout.strip()
+                                  cwd=str(target), capture_output=True, text=True).stdout.strip()
     except OSError:
         repo_url = ""
     return category, purpose, stack, repo_url
@@ -134,9 +131,21 @@ def main():
                                       "required — every board call is org-scoped")
     parser.add_argument("--base-url", help="custom board URL; persisted to ~/.squad/config when non-default")
     parser.add_argument("--force", action="store_true", help="overwrite an existing .squadrc")
+    parser.add_argument("--dir", help="the project repo to register (default: current directory)")
     args = parser.parse_args()
 
-    exists, cur_proj, cur_org = _read_squadrc()
+    # Operate on an explicit target repo — never implicitly on the process cwd,
+    # which an agent may have set to the skill's own install directory.
+    target = pathlib.Path(args.dir).resolve() if args.dir else pathlib.Path.cwd()
+    if api.is_skill_dir(target):
+        print(f"ERROR: {target} is a skill directory (holds a SKILL.md), not a project repo. "
+              "Run squad-init from the repo you want to register (do not cd into the skill "
+              "directory), or pass --dir <repo>. Nothing was written or registered.",
+              file=sys.stderr)
+        return 2
+    squadrc = target / ".squadrc"
+
+    exists, cur_proj, cur_org = _read_squadrc(squadrc)
     arg_proj = (args.project or "").lstrip("-")
 
     if exists and not args.force:
@@ -153,7 +162,7 @@ def main():
                   "the current values. Nothing was written or registered.", file=sys.stderr)
             return 2
 
-    project = arg_proj or cur_proj or pathlib.Path.cwd().name
+    project = arg_proj or cur_proj or target.name
     org = args.org or os.environ.get("SQUAD_ORG", "") or cur_org
     if not org:
         print("ERROR: SQUAD_ORG is not set. Every board call is org-scoped (/api/orgs/<org>/...).",
@@ -163,7 +172,7 @@ def main():
               "written or registered.", file=sys.stderr)
         return 2
 
-    squadrc = _write_squadrc(exists, args.force, cur_proj, cur_org, project, org)
+    squadrc_state = _write_squadrc(squadrc, exists, args.force, cur_proj, cur_org, project, org)
 
     auth = _detect_auth()
     if auth == "none":
@@ -191,7 +200,7 @@ def main():
     if auth == "none":
         print("Skipping board registration (no token). Re-run after storing a token.", file=sys.stderr)
     else:
-        category, purpose, stack, repo_url = _infer_metadata(project)
+        category, purpose, stack, repo_url = _infer_metadata(project, target)
         payload = {"id": project, "name": project, "category": category}
         for key, value in (("purpose", purpose), ("stack", stack), ("repo_url", repo_url)):
             if value:
@@ -209,7 +218,8 @@ def main():
         "project": project,
         "org": org,
         "base_url": base_url,
-        "squadrc": squadrc,
+        "squadrc": squadrc_state,
+        "dir": str(target),
         "auth": auth,
         "registered": registered,
         "board_url": f"{base_url}/?project={project}",

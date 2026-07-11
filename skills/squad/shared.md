@@ -4,6 +4,8 @@ All projects share one Squad board (PostgreSQL behind an HTTP API). Every call g
 
 ## Bootstrap (run once per session)
 
+**Working directory matters: `.squadrc` and the project are read from the current directory.** Run squad commands from the user's repo so the project resolves from *its* `.squadrc` — if you resolve a relative script path by `cd`-ing into the skill directory, board reads target the wrong project. Scripts that write to the repo (squad-init) take an explicit target and refuse to run against a skill directory.
+
 ```bash
 api() { python3 ../squad/scripts/api.py "$@"; }   # api <GET|POST|PATCH|DELETE> <path> [--json <@file|inline|->] [-q dotted.path]
 PROJECT="${SQUAD_PROJECT:-}"

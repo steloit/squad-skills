@@ -8,18 +8,19 @@ Registers the current project on the shared Squad board (one central server — 
 
 ## Run
 
-Map the slash-command args, then run the script — name/org resolution, `.squadrc`, auth detection, and board registration all happen inside:
+Map the slash-command args, then run the script — name/org resolution, `.squadrc`, auth detection, and board registration all happen inside. It registers **the repo you run it in** (writes `.squadrc` there); pass `--dir` to target another. It refuses to run against a skill directory, so run it from the user's project — do not `cd` into the skill folder.
 
 ```bash
 # /squad-init [name] [url] — an https?:// arg is --base-url; any other token is --project.
-python3 scripts/init.py [--project NAME] [--org SLUG] [--base-url URL] [--force]
+python3 ../squad-init/scripts/init.py --dir . [--project NAME] [--org SLUG] [--base-url URL] [--force]
 ```
 
 | Flag | Meaning | Default |
 |------|---------|---------|
-| `--project NAME` | project name (leading dashes stripped) | existing `.squadrc` > directory name |
+| `--dir REPO` | the project repo to register (writes `.squadrc` there) | current directory |
+| `--project NAME` | project name (leading dashes stripped) | existing `.squadrc` > target directory name |
 | `--org SLUG` | org slug — REQUIRED overall; every board call is org-scoped | env `SQUAD_ORG` > existing `.squadrc` |
-| `--base-url URL` | custom board deployment; persisted to `~/.squad/config` | standard resolution (`../squad/shared.md`) |
+| `--base-url URL` | custom board deployment (must be http(s)); persisted to `~/.squad/config` | standard resolution (`../squad/shared.md`) |
 | `--force` | overwrite an existing `.squadrc` | refuse conflicting values, print current ones |
 
 The script prints one JSON summary: `project`, `org`, `base_url`, `squadrc` (written/updated/kept/overwritten), `auth` (env/file/none), `registered`, `board_url`.

@@ -49,6 +49,18 @@ DEFAULT_BASE_URL = "https://squad-api-285415501393.asia-south1.run.app"
 TOKEN_KEY = "SQUAD_AUTH_TOKEN="
 
 
+def is_skill_dir(path):
+    """True when `path` looks like an installed skill directory (holds a SKILL.md).
+
+    A skill-local script that operates on the USER's repo (writing .squadrc,
+    resolving the project from the directory) must refuse to run against a skill
+    directory. The failure mode this guards: an agent resolves a relative script
+    path by cd-ing into the skill dir, so the script silently operates on the
+    skill itself instead of the user's project — writing config into the install
+    and polluting it with stale state."""
+    return (pathlib.Path(path) / "SKILL.md").is_file()
+
+
 def _read_keyed_line(path, key):
     """Return the value after the first `key` line in `path` (key includes the
     trailing '='), keeping everything after that first '=' verbatim — mirrors

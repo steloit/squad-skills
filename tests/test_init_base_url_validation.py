@@ -49,3 +49,30 @@ def test_bare_hostname_without_scheme_is_rejected(repo_root, tmp_path):
     assert proc.returncode == 2, f"a scheme-less host must be rejected: {proc.stderr}"
     cfg = home / ".squad" / "config"
     assert not cfg.exists() or "board.example.com" not in cfg.read_text()
+
+
+def test_refuses_to_register_a_skill_directory(repo_root, tmp_path):
+    """The core cwd bug: an agent that cd's into the skill dir (which holds SKILL.md)
+    must NOT get .squadrc written there — init.py refuses a skill directory."""
+    skill = tmp_path / "skill"; skill.mkdir()
+    (skill / "SKILL.md").write_text("---\nname: x\n---\n")
+    home = tmp_path / "home"; home.mkdir()
+    proc = _run(repo_root, ["--project", "p", "--org", "steloit"], skill, home)
+    assert proc.returncode == 2, f"a skill dir must be refused: {proc.stderr}"
+    assert "skill directory" in proc.stderr
+    assert not (skill / ".squadrc").exists(), "must NOT write .squadrc into a skill directory"
+
+
+def test_dir_targets_an_explicit_repo_not_cwd(repo_root, tmp_path):
+    """--dir writes .squadrc to the TARGET repo, not the process cwd (which may be a skill dir)."""
+    cwd = tmp_path / "skill"; cwd.mkdir()
+    (cwd / "SKILL.md").write_text("---\nname: x\n---\n")   # cwd is a skill dir (would be refused)
+    target = tmp_path / "repo"; target.mkdir()
+    home = tmp_path / "home"; home.mkdir()
+    # No auth in the redirected HOME → board registration is skipped, but .squadrc still writes.
+    proc = _run(repo_root, ["--dir", str(target), "--project", "myproj", "--org", "steloit"],
+                cwd, home)
+    assert proc.returncode == 0, f"--dir target should succeed: {proc.stderr}"
+    rc = target / ".squadrc"
+    assert rc.is_file() and "SQUAD_PROJECT=myproj" in rc.read_text()
+    assert not (cwd / ".squadrc").exists(), "must not touch the cwd skill dir"
