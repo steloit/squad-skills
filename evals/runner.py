@@ -11,6 +11,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -108,16 +109,24 @@ def run_agent(prompt: str, cwd: str | None = None, timeout: int = 600) -> dict:
 def _api(method: str, path: str, body: dict | None = None) -> dict:
     url = f"{BASE_URL}{path}"
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(url, data=data, method=method)
-    req.add_header("Authorization", f"Bearer {token()}")
-    if data:
-        req.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            txt = r.read().decode()
-            return json.loads(txt) if txt else {}
-    except urllib.error.HTTPError as e:
-        return {"_error": e.code, "_body": e.read().decode(errors="replace")}
+    # The deployed board occasionally stalls a read past 20s (cold start); a
+    # transient timeout must not kill a whole eval run — retry twice with backoff.
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        req = urllib.request.Request(url, data=data, method=method)
+        req.add_header("Authorization", f"Bearer {token()}")
+        if data:
+            req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                txt = r.read().decode()
+                return json.loads(txt) if txt else {}
+        except urllib.error.HTTPError as e:
+            return {"_error": e.code, "_body": e.read().decode(errors="replace")}
+        except (TimeoutError, urllib.error.URLError, OSError) as e:
+            last_exc = e
+            time.sleep(2 * (attempt + 1))
+    raise last_exc
 
 
 def board_tasks(project: str) -> list[dict]:

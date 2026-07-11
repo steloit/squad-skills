@@ -30,6 +30,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import time
 
 import yaml
 
@@ -154,6 +155,7 @@ def run_scenario(sc: dict, *, project: str, trials: int, judge, floor: float) ->
     score_trials: list[float] = []
     reasons: list[str] = []
     tool_calls: list[int] = []
+    durations_s: list[float] = []
     det_passes = 0
     errors = 0
     rubric = sc.get("expect", {}).get("rubric")
@@ -171,7 +173,9 @@ def run_scenario(sc: dict, *, project: str, trials: int, judge, floor: float) ->
                 setup_task_id = task["id"]
                 prompt = prompt.replace("{{task_id}}", str(setup_task_id))
 
+            t0 = time.perf_counter()
             res = runner.run_agent(prompt, cwd=str(tmp), timeout=sc.get("timeout", 600))
+            durations_s.append(round(time.perf_counter() - t0, 1))
             if res["returncode"] != 0:
                 errors += 1
             tool_calls.append(len(res.get("tools", [])))
@@ -192,7 +196,8 @@ def run_scenario(sc: dict, *, project: str, trials: int, judge, floor: float) ->
                 reasons.append(metric.reason or "")
                 score_str = f"{metric.score:.2f}"
             print(f"  · {sc['id']} trial {trial + 1}/{trials}: "
-                  f"board={'ok' if passed else 'FAIL'} score={score_str}", flush=True)
+                  f"board={'ok' if passed else 'FAIL'} score={score_str} "
+                  f"t={durations_s[-1]}s tools={tool_calls[-1]}", flush=True)
         finally:
             # snapshot-diff cleanup: remove every task/project that appeared during the trial
             for tid in {t["id"] for t in runner.board_tasks(project)} - pre_tasks:
@@ -210,6 +215,7 @@ def run_scenario(sc: dict, *, project: str, trials: int, judge, floor: float) ->
         score=statistics.mean(score_trials) if score_trials else None,
         score_trials=score_trials,
         tool_calls=tool_calls,
+        durations_s=durations_s,
         errors=errors,
         reasons=reasons,
         note="" if (not rubric or judge) else "rubric skipped — no judge available",

@@ -53,6 +53,7 @@ class ScenarioResult:
     score: float | None               # mean GEval score across trials (None if no judge)
     score_trials: list[float] = field(default_factory=list)
     tool_calls: list[int] = field(default_factory=list)   # cost/efficiency signal
+    durations_s: list[float] = field(default_factory=list)  # wall-clock per trial (speed signal)
     errors: int = 0                   # trials where the agent exited non-zero
     reasons: list[str] = field(default_factory=list)      # judge reasoning per trial
     note: str = ""
