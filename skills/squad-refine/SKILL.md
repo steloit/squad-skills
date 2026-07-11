@@ -1,334 +1,142 @@
 ---
 name: squad-refine
-description: Refine backlog requirements through structured user interview. Turns rough task descriptions into concrete, actionable requirements with goal, scope, acceptance criteria, and edge cases.
+description: 'Refines a rough squad backlog task into a structured requirements spec (goal, requirements, acceptance criteria, edge cases) through a gap-ledger user interview, then saves the spec to the board. Use when a task''s requirements are vague or before running the pipeline on an unrefined card. Trigger phrases: "/squad-refine <ID>", "refine task <ID>", "flesh out / tighten the requirements for <ID>".'
 license: MIT
 ---
 
-> Shared context: read `../squad/shared.md` for pipeline levels, status transitions, API endpoints, error handling, and agent context flow.
-> Safety principles: read `../squad/principles.md` — **mandatory, not optional.**
+> Read `../squad/shared.md` (bootstrap + levels + errors) and `../squad/principles.md` first.
+
+```bash
+api() { python3 ../squad/scripts/api.py "$@"; }
+```
 
 ## `/squad-refine <ID>` — Refine Backlog Requirements
 
-Reads a rough backlog item and refines it into concrete, actionable requirements through structured user interview.
+Target: tasks in `todo`. Any other non-terminal status → warn and confirm before proceeding.
 
-**Target**: tasks in `todo` status (backlog). If the task is not `todo`, warn the user and confirm before proceeding.
-
-### Procedure
-
-```
-⓪ Resolve the observation gate ONCE (the consent-gate seam — see ../squad/shared.md → Abstraction Rubric)
-   python3 ../squad/scripts/observe.py gate >/dev/null 2>&1; OBSERVE_OK=$?
-   # 0 = emit corrections, non-zero = skip. Cache it; every emit below reuses it (best-effort, || true).
-   # Mint ONE correlation_id for this refine run for any steering emits: CID=$(python3 -c 'import uuid;print(uuid.uuid4())')
-
-① Read the task
-   TASK = api GET /task/$ID
-   Extract: title, description, priority, level, tags, card_type
-
-   **Epic targets are containers** (`card_type:'epic'`): they hold child tasks, they are not runnable
-   and have no acceptance-criteria/plan of their own. If the target is an epic, do NOT run the refine
-   interview — point the user at its children (`GET /api/task/$ID/relationships` → `.children`) and stop.
-
-   **Terminal targets are not runnable** (`status` is `cancelled` or `done`): a cancelled (or done)
-   task is a non-runnable terminal — there is nothing to refine until it re-enters the pipeline. Do NOT
-   run the interview; warn the user (e.g. `"Task #$ID is cancelled (terminal) — reopen it before refining"`)
-   and point them at `POST /api/task/$ID/reopen` (which restores `cancelled`/`done` → `todo`), then stop.
-   (A `done` target may have been reached via the gated pipeline OR an administrative
-   `POST /api/task/$ID/complete`; both land on the same `done` terminal, so this one branch covers both.)
-   An **epic** used as a blocker **auto-completes** — when all its children reach a terminal status its
-   stored status rolls up to `done`/`cancelled`, satisfying the status-based readiness gate automatically
-   (no manual `/complete` needed). The derived epic `complete` rollup stays display-only; the stored
-   status (kept in sync by the rollup) is what satisfies the dep.
-
-① ½. Look for prior implementation context (always run this before the interview)
-
-   a. Detect dependencies via the relationships API (NOT description text — the `Depends on:` convention
-      is retired; see `../squad/shared.md` → **Task Relationships & Epics**):
-      REL = api GET /task/$ID/relationships
-      Dependency ids = `.blocked_by[].id`. Also check `.parent` for the containing epic.
-
-   b. If a dependency found → fetch that card's implementation output:
-      PRIOR = api GET /task/$NNN?fields=title,implementation_notes,plan
-      Also inspect the actual codebase: read files, interfaces, schemas confirmed in that card.
-
-   c. If no explicit dependency → ask ONE question before the main interview:
-      "Is there a prior task whose implementation this builds on? (task ID or 'none')"
-      If the user gives an ID, fetch it as in (b).
-      If "none" or new work → skip, proceed with regular interview.
-
-   d. Summarize what was confirmed from prior implementation:
-      PRIOR_CONTEXT = {
-        confirmed interfaces, schemas, file paths, component names, API routes, etc.
-      }
-      This context is injected into ③ (gap analysis) and ⑤ (description synthesis).
-
-② Display current state
-   Show the user their raw title + description as-is.
-   If PRIOR_CONTEXT exists, also show: "Prior implementation context: [summary]"
-
-③ Analyze for gaps
-   Identify what's missing or vague across these dimensions:
-   - WHAT: What exactly should be built/changed?
-   - WHY: What problem does this solve? What's the motivation?
-   - SCOPE: What's included vs excluded?
-   - ACCEPTANCE: How do we know it's done?
-   - CONSTRAINTS: Technical limitations, compatibility, performance?
-   - EDGE CASES: Error states, boundary conditions?
-   - DEPENDENCIES: Does it depend on other tasks or external systems?
-
-④ Interview the user — the GAP-LEDGER LOOP (MANDATORY)
-   Depth comes from chasing follow-ups, not from one big up-front round. The LOOP
-   MECHANICS below are low-freedom (re-emit the ledger → ask → probe → call the
-   script → obey it); the CONTENT of each question stays high-freedom (your
-   judgement). The stop is OWNED by `../squad/scripts/refine_ledger.py` — you do
-   NOT self-judge "looks done" (a known gameable failure).
-
-   1. Seed + RE-EMIT the ledger artifact. From the ③ gaps, build a fixed-schema
-      JSON list — and RE-EMIT IT IN FULL at the top of EVERY round (state lives in
-      tokens, not memory). Do NOT just "keep a ledger" in your head:
-        [ {"id":"g1","dimension":"WHAT","status":"OPEN","source":"original"},
-          {"id":"g2","dimension":"SCOPE","status":"OPEN","source":"original"}, … ]
-      dimension ∈ WHAT/WHY/SCOPE/ACCEPTANCE/CONSTRAINTS/EDGE/DEPS (③); status ∈
-      OPEN/RESOLVED; source = original | raised-by-answer-R#.
-
-   2. SELECT the highest-value OPEN gaps (those whose answers most change
-      scope / acceptance / level — EVPI-style), recency-first (chase the LAST
-      answer). Ask 1–4 as ONE AskUserQuestion round. Apply the **Clarification &
-      Research** rules below to decide menu-vs-research-recommend for each.
-
-   3. RECORD answers → mark those ledger entries RESOLVED (re-emit reflects it).
-
-   4. PROBE-SCAN (mandatory, non-skippable output slot). Over EACH new answer,
-      write to a visible `Probe-scan (R#):` slot either:
-        - ≥1 NEW OPEN ledger entry the answer introduced — an underspecified
-          concept / a vague term / an in-scope omission / an open choice —
-          `{"id":…,"dimension":…,"status":"OPEN","source":"raised-by-answer-R#"}`, OR
-        - an explicit `No new gaps: <reason>` (the diminishing-returns signal).
-      Grice filter every candidate question: Clear + Relevant + Informative (its
-      answer increases what's known); drop generic filler; NEVER re-ask a RESOLVED
-      entry. A genuinely CLEAR card produces `No new gaps` in round 1 — do NOT
-      manufacture filler gaps to keep the loop alive.
-
-   5. CALL THE STOP-GATE and OBEY its exit code. Pipe the re-emitted ledger to the
-      script with the round number + this round's probe-scan outcome:
-        printf '%s' "$LEDGER_JSON" | python3 ../squad/scripts/refine_ledger.py \
-          verdict --round "$R" --last-probe <new_gaps|no_new_gaps>; V=$?
-        # 0 STOP-CLEAN → go to verify-before-done, then ⑤
-        # 1 CONTINUE   → loop to step 1 (R+1); the script says gaps remain
-        # 2 STOP-DEGRADED → cap hit with WHAT/SCOPE/ACCEPTANCE still OPEN (backstop)
-        # 3 STOP-ENOUGH → user escape (backstop)
-      The verdict is AUTHORITY. Exit 1 means MORE rounds are owed — do not synthesize.
-
-   6. BACKSTOPS (not the primary control — the probe-scan + OPEN count are):
-      - The user says "enough" at ANY point → run the gate with `--user-enough`
-        (STOP-ENOUGH, exit 3): synthesize now; any residual OPEN row → an
-        `## Open Questions` block in ⑤.
-      - The script's hard cap (exit 2, STOP-DEGRADED) → write the residual OPEN rows
-        into `## Open Questions` AND, since WHAT/SCOPE/ACCEPTANCE is still OPEN,
-        recommend `/squad-explore` or a card split rather than shipping a falsely-
-        "refined" card. (`--json` gives `core_unresolved` + `residual_open`.)
-      - A clean stop (exit 0) at the cap MAY still carry non-core residual OPEN rows
-        (WHAT/SCOPE/ACCEPTANCE resolved, only non-core gaps left) → write those rows
-        into `## Open Questions` too. (`--json` `residual_open` lists them; the script's
-        human output flags `N non-core row(s) → ## Open Questions`.) No explore/split
-        recommendation here — the core is covered, so the card is genuinely refined.
-
-   7. VERIFY-BEFORE-DONE (immediately before ⑤). Re-derive the OPEN count by
-      re-running the gate on the final ledger; if ANY row is still OPEN under a
-      synthesize verdict it can only be a cap/enough stop (exit 2/3) → carry the
-      residual into `## Open Questions`. A self-asserted "done" with an OPEN row on
-      a non-backstop path is impossible — the gate (exit 1) catches it.
-
-   Steering emit (best-effort): if an interview answer REDIRECTS the task's direction
-   (not a routine fill-in), emit one abstracted user_steering event (enums per ../squad/shared.md →
-   Abstraction Rubric: interview-redirect row). Skip for ordinary answers.
-   [ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$ID" --modality corrective \
-     --valence na --target scope --severity trivial --attributability latent_preference \
-     --comment "redirected during the interview" --correlation-id "$CID" || true
-
-   ── Clarification & Research (value-of-information) ──
-   Wired into step 2's question selection:
-   - VoI RULE: ask a question ONLY when its answer would MATERIALLY change what
-     gets built. Otherwise proceed and NOTE THE ASSUMPTION (don't ask filler).
-   - CLASSIFY each question you would ask:
-       · PREFERENCE / OWNERSHIP / IRREVERSIBLE-SCOPE fork → AskUserQuestion MENU,
-         each option carrying a one-line rationale (the user owns this call).
-       · ANALYSIS-RESOLVABLE (best practice / architecture / perf / library) →
-         RESEARCH it and present ONE recommendation WITH REASONING — not a menu.
-   - MODE-DETECTION → switch to research-then-recommend-ONE for the rest of the
-     thread (remember it for the session) when the user: re-sends a directive
-     verbatim, asks "what do you suggest", says "do web research / best practices",
-     grants "full freedom to re-architect", or rejects an option-set.
-   - PROPOSAL-NOT-COMMIT: every output is a recommendation + reasoning + a cheap
-     override (reject / edit / redirect), mirroring Plan Mode. Never read as locked.
-   - VALUE-GATED RESEARCH: research fires ONLY when value is high — the card is
-     design / architecture / re-architecture / high-uncertainty (best practices
-     materially shape the outcome) OR the user explicitly signals it. A clear /
-     trivial card does NO research (fast refine, near-zero extra tokens). DEPTH
-     scales with stakes: ONE targeted best-practices check for a moderate card; a
-     deeper sweep ONLY for a genuine architecture decision — never an always-on
-     fan-out. EDGE: a research keyword on a trivial card does NOT trigger a sweep —
-     the gate is VoI, not keyword-match.
-   - CONFIGURABLE aggressiveness `SQUAD_REFINE_RESEARCH = off | auto-by-value |
-     always`, default `auto-by-value`. Resolve env `SQUAD_REFINE_RESEARCH` >
-     committed `.squadrc` `SQUAD_REFINE_RESEARCH=` (the standard `SQUAD_*` ladder,
-     `../squad/shared.md` → Per-key resolution); `off` disables research entirely,
-     `always` researches every design-shaped question.
-
-⑤ Synthesize the refined SPEC
-   Build a structured spec OBJECT — NOT a description rewrite. The human's original
-   request stays in `description` and is NEVER overwritten; the refined spec is a
-   separate first-class artifact (the `tasks.spec` shape). If PRIOR_CONTEXT exists,
-   ground requirements in confirmed interfaces/file paths — not assumptions.
-
-   The spec has three authored fields (the server assigns `version`):
-
-   - goal:         1–2 sentences — what this task achieves and why.
-   - requirements: string[] — the COMPLETE, testable set, each item a discrete
-                   string. Describe WHAT, not HOW (no implementation hints/pseudo-code).
-                   Use soft prefixes so intent is explicit (author convention, not
-                   enforced by the API):
-                     "REQ: …"                              core requirement
-                     "AC: WHEN … THE SYSTEM SHALL …"       acceptance criterion (EARS)
-                     "SCOPE(IN): …" / "SCOPE(OUT): …"      the in / "Not Included" boundary
-                     "CONSTRAINT: …"                       technical constraint
-                     "EDGE: …"                             edge case
-                     "SOURCE: <url>"                       a research source (guarded; see below)
-
-                   GUARDED `## Sources` (the Sources convention; reuse note in
-                   `../squad/shared.md` → Sources Convention). EMIT `SOURCE:`
-                   entries ONLY when external research MATERIALLY informed the card
-                   (a non-research card carries NONE — the omit-empty rule). Two
-                   hard guards: (1) cite ONLY sources actually consulted THIS run
-                   as real, verifiable URLs — NEVER fabricate a citation or a
-                   plausible-looking arXiv id; (2) a codebase fact cites `file:line`,
-                   NOT a URL. The entries live IN `requirements[]` as `SOURCE: …`
-                   rows (the spec is a structured object — there is no free-markdown
-                   home for a `## Sources` section; the card view renders the rows
-                   as the Sources block).
-   - qa:           {question, answer}[] — one entry per interview question asked in ④
-                   (answer = the user's chosen value; null if a question went unanswered).
-
-   Example:
-   ```json
-   {
-     "goal": "Let admins invite members so teams can self-serve onboarding.",
-     "requirements": [
-       "REQ: An admin can send an invite by email from the members page.",
-       "AC: WHEN an admin submits a valid email THE SYSTEM SHALL create an invite and email a signed link.",
-       "SCOPE(OUT): bulk CSV invites are not included.",
-       "EDGE: re-inviting an existing member returns 'already a member' without creating a duplicate."
-     ],
-     "qa": [{ "question": "Email or OAuth invites?", "answer": "Email only for v1" }]
-   }
-   ```
-
-⑥ Present the refined SPEC + RE-ASSESS THE LEVEL
-   Paraphrase the resolved scope back, then show the spec in a readable form
-   (goal, the requirements list, the Q&A).
-
-   RE-ASSESS THE LEVEL from the REFINED scope (scope can grow materially during the
-   interview and the level must follow it — e.g. an L2 that grew to
-   RLS proofs + e2e + multi-job CI + deploy config stayed L2, skipping plan_review
-   AND test). Score the refined requirements against `../squad/shared.md` →
-   Pipeline Levels (L1 trivial / L2 single-layer / L3 new-feature · architecture ·
-   multi-layer — adds test/CI surface) + `../squad/principles.md` → Card-Split
-   Criteria. The L1/L2/L3 rubric itself is UNCHANGED; you only re-score against it.
-
-   Ask the user to confirm with AskUserQuestion:
-   - "Approve & save" (write the spec)
-   - "Edit more" (go back to interview)
-   - "Cancel" (discard changes)
-
-   If the re-assessed level DIFFERS from the current level, surface the change
-   INSIDE this approval as an explicit choice (the level is NEVER auto-applied;
-   re-leveling happens ONLY here in refine, never in squad-run):
-   - "Apply" (save with the re-assessed level, e.g. L2 → L3)
-   - "Keep" (save, keep the current level)
-   - "Adjust" (pick a different level)
-   The chosen level is written in ⑦ (the "Apply the re-assessed level" line).
-
-   Steering emit (best-effort): "Approve & save" emits nothing (routine approval).
-   On "Edit more" OR "Cancel" emit one abstracted user_steering event (enums per
-   ../squad/shared.md → Abstraction Rubric: the Edit-more / Cancel rows). Use the same $CID.
-   # "Edit more":
-   [ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$ID" --modality corrective \
-     --valence negative --target scope --severity moderate --attributability latent_preference \
-     --comment "sent the spec back for edits" --correlation-id "$CID" || true
-   # "Cancel":
-   [ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$ID" --modality corrective \
-     --valence negative --target scope --severity moderate --attributability ambiguous \
-     --comment "cancelled the refine" --correlation-id "$CID" || true
-
-⑦ Save
-   If approved:
-   - **Mint ONE `correlation_id` for THIS save occasion**, before the spec write. The SAME
-     value tags both the `/spec` write AND the Refiner `/activity` note below, so the board
-     groups the spec snapshot + the Refiner note into one timeline stage. A re-refine is a
-     new save → mint a fresh id (never cache/reuse it across saves; a re-refine = new id = a
-     distinct grouped entry):
-     ```bash
-     CORRELATION_ID=$(python3 -c 'import uuid;print(uuid.uuid4())')
-     ```
-   - **Write the SPEC via the dedicated endpoint** — the human `description` is NEVER touched.
-     The CAS token is the TASK `version` (same token every write uses); read it immediately
-     before writing. The endpoint writes `spec`, bumps `spec_version`, and emits the
-     `kind='spec'` provenance row. `spec.version` is server-assigned, so omit it from the body.
-     ```bash
-     # Build the spec object from ⑤ (no `version` — the server stamps it).
-     SPEC_JSON=$(jq -n --arg goal "$GOAL" \
-       --argjson reqs "$REQUIREMENTS_JSON_ARRAY" --argjson qa "$QA_JSON_ARRAY" \
-       '{goal:$goal, requirements:$reqs, qa:$qa}')
-     VER=$(api GET /task/$ID?fields=version -q version)
-     ERR=$(mktemp)
-     RESP=$(api POST /task/$ID/spec \
-       --json "$(jq -n --argjson spec "$SPEC_JSON" --argjson ev "$VER" --arg model "$MODEL_REFINER" --arg cid "$CORRELATION_ID" \
-             '{spec:$spec, expected_version:$ev, actor:"Refiner", model:$model, correlation_id:$cid}')" 2>"$ERR")
-     RC=$?
-     # RC 0 → RESP = { success, version, spec_version }. RC 4 → board rejected: the stderr body
-     # ($ERR) carries the board's 4xx — a 412 "Precondition failed" on a concurrent edit (re-read
-     # `version` and retry ONCE; if it still 412s, surface to the user — don't loop) or a 400
-     # malformed spec.
-     # (On a 412 retry, KEEP the same $CORRELATION_ID — it's still the same save occasion.)
-     rm -f "$ERR"
-     ```
-   - Apply the re-assessed level from ⑥ (and priority/tags if discussed) — PATCH the
-     `level` to the user's ⑥ choice (Apply / Keep / Adjust), and title/priority/tags
-     only if the interview changed them (PATCH — never `description`).
-   - **Declare dependencies structurally**: if the interview surfaced that this task is blocked by
-     another (#DEP), declare it via a `blocks` edge — NOT a `Depends on:` text line:
-     ```bash
-     # DEP blocks ID (ID is blocked_by DEP). `to` is an opaque <KEY>-<seq> id string — use --arg.
-     # Server returns 409 on a cycle (surfaced, no pre-check).
-     api POST /task/$DEP/relationships --json "$(jq -n --arg to "$ID" '{to:$to, type:"blocks"}')"
-     ```
-   - Append the short Refiner activity note (the `kind='spec'` row above carries the snapshot;
-     this records the round count). Carry the SAME `$CORRELATION_ID` minted at the top of this
-     step so the board threads this note with the spec snapshot into one timeline stage.
-     POST /api/task/$ID/activity:
-     { "actor": "Refiner", "model": "<MODEL_REFINER>", "message": "Requirements refined. N questions across M rounds.", "correlation_id": "$CORRELATION_ID" }
-```
-
-### Model Routing
-
-Resolve `MODEL_PROVIDER` + the `read_model` helper per `../squad/shared.md` → **Model Resolution**, then:
+### ⓪ Setup (once)
 
 ```bash
-MODEL_REFINER=$(read_model refiner)
+python3 ../squad/scripts/observe.py gate >/dev/null 2>&1; OBSERVE_OK=$?  # 0 = emit steering, else skip
+CID=$(python3 -c 'import uuid;print(uuid.uuid4())')                      # correlation id for steering emits
+MODEL_REFINER=$(python3 -c 'import json,os;c=json.load(open("../squad/models.json"));p=os.environ.get("SQUAD_MODEL_PROVIDER") or c.get("default_provider","claude");print(c["providers"][p]["refiner"])')
 ```
 
-### Coach (friction review of this run)
+Every steering emit below is best-effort — guard with the cached gate and `|| true` (rubric: `../squad/references/observation.md`).
 
-After step ⑦ Save completes (an approved refine), dispatch the **Coach** per `../squad/shared.md` → **Coach Dispatch** (reuse the Model Routing resolution above — `MODEL_PROVIDER` + helpers). Pass:
-- `skill_name` = `squad-refine`
-- `source_task` = `$ID`
-- `run_summary` = `"squad-refine refined the requirements for task $ID."`
-- `trajectory` = the interview Q/A rounds + the refined spec
-- `friction_signals` = any board-API friction during the spec write (`POST /task/:id/spec`); `none` if clean
+### ① Read the task + prior context (run the two reads in parallel)
 
-### Interview Tips
+```bash
+api GET /task/$ID?fields=title,description,priority,level,tags,card_type
+api GET /task/$ID/relationships
+```
 
-- If the user wrote "add login" → ask: OAuth/email? Session/JWT? Which pages need auth guards?
-- If the user wrote "improve performance" → ask: Which page/API? Current latency? Target latency? Measurement method?
-- If the user wrote "fix the UI" → ask: Which component? What's wrong now? Mockup/reference? Responsive?
-- Prefer showing concrete options over open-ended "what do you want?"
+- Epic target (`card_type:"epic"`) → containers are not refinable: point the user at `.children` and stop.
+- Terminal target (`done` — via the pipeline or `POST /task/$ID/complete`, incl. an epic rollup — or `cancelled`) → warn "reopen before refining" (`POST /task/$ID/reopen`) and stop.
+- Prior context: for each `.blocked_by[].id`, fetch `api GET /task/$DEP?fields=title,implementation_notes,plan` (batch in parallel) and confirm the interfaces/schemas/file paths in the actual codebase → PRIOR_CONTEXT. Ask the user "Is there a prior task this builds on? (ID or 'none')" ONLY when `.blocked_by` is empty AND the description hints at a dependency.
+
+### ② Show current state
+
+Show the raw title + description as-is, plus a PRIOR_CONTEXT summary if any.
+
+### ③ Gap analysis
+
+Identify what is missing or vague across: WHAT, WHY, SCOPE, ACCEPTANCE, CONSTRAINTS, EDGE, DEPS.
+
+### ④ Interview — the gap-ledger loop
+
+The stop decision is owned by `../squad/scripts/refine_ledger.py`; obey its exit code — never self-judge "looks done".
+
+1. Keep the ledger in a scratch file `$LEDGER`: a JSON list of `{"id","dimension","status","source"}` (dimension = the ③ vocab; status `OPEN|RESOLVED`; source `original` or `raised-by-answer-R#`). Seed it from ③. Each round, update the file but print only NEW or CHANGED rows — never the full list.
+2. Select the highest-value OPEN gaps (answers that most change scope/acceptance/level), recency-first; ask 1–4 as ONE AskUserQuestion round. Preference / ownership / irreversible-scope forks → an option menu with a one-line rationale each; analysis-resolvable questions → research and present ONE recommendation with reasoning. Read `references/interview.md` before any research round (value-of-information gate, research depth, `SQUAD_REFINE_RESEARCH`).
+3. Record answers → mark rows RESOLVED. Probe-scan every new answer: add ≥1 new OPEN row it raised, or state `No new gaps: <reason>`. Never re-ask a RESOLVED row; a genuinely clear card yields `No new gaps` in round 1 — do not manufacture filler.
+4. Call the stop-gate once per round and branch on the exit code:
+
+   ```bash
+   python3 ../squad/scripts/refine_ledger.py verdict --ledger "@$LEDGER" \
+     --round "$R" --last-probe <new_gaps|no_new_gaps> [--user-enough]
+   # 0 STOP-CLEAN    → ⑤; residual non-core OPEN rows → unanswered qa entries
+   # 1 CONTINUE      → next round (more rounds are owed — do not synthesize)
+   # 2 STOP-DEGRADED → cap hit with WHAT/SCOPE/ACCEPTANCE still open: synthesize with the
+   #                   residual as unanswered qa entries AND recommend /squad-explore or a card split
+   # 3 STOP-ENOUGH   → user said "enough" (pass --user-enough): synthesize; residual → unanswered qa
+   ```
+
+If an answer REDIRECTS the task's direction (not a routine fill-in):
+
+```bash
+[ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$ID" --modality corrective \
+  --valence na --target scope --severity trivial --attributability latent_preference \
+  --comment "redirected during the interview" --correlation-id "$CID" || true
+```
+
+### ⑤ Synthesize the spec
+
+Build a structured spec OBJECT — the human `description` is never rewritten. Ground requirements in PRIOR_CONTEXT facts, not assumptions. Three authored fields (the server assigns `version`):
+
+- `goal` — 1–2 sentences: what this task achieves and why.
+- `requirements` — string[]: the complete, testable set; WHAT, not HOW. Soft prefixes: `REQ:` · `AC: WHEN … THE SYSTEM SHALL …` · `SCOPE(IN):` / `SCOPE(OUT):` · `CONSTRAINT:` · `EDGE:` · `SOURCE: <url>` (only when research materially informed the card — guards in `references/interview.md`).
+- `qa` — `{question, answer}[]`: one entry per interview question (answer null if unanswered; residual OPEN ledger rows land here as open questions).
+
+```json
+{"goal": "Let admins invite members so teams can self-serve onboarding.",
+ "requirements": ["REQ: An admin can send an invite by email from the members page.",
+   "AC: WHEN an admin submits a valid email THE SYSTEM SHALL create an invite and email a signed link.",
+   "SCOPE(OUT): bulk CSV invites are not included."],
+ "qa": [{"question": "Email or OAuth invites?", "answer": "Email only for v1"}]}
+```
+
+### ⑥ Present + approve (one gate)
+
+Paraphrase the resolved scope, then show the spec readably (goal, requirements, Q&A). Re-assess the level from the REFINED scope against `../squad/shared.md` → Pipeline levels + `../squad/principles.md` → Card-Split Criteria (the rubric is unchanged; only re-score). Then ask ONE AskUserQuestion:
+
+- Question 1: **Approve & save** / **Edit more** (back to ④) / **Cancel** (discard).
+- Only if the re-assessed level differs from the current level, add a second question in the SAME call: **Apply <new level>** / **Keep <current>** / **Adjust**. The level is never auto-applied; re-leveling happens only here, never in squad-run.
+
+```bash
+# "Edit more":
+[ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$ID" --modality corrective \
+  --valence negative --target scope --severity moderate --attributability latent_preference \
+  --comment "sent the spec back for edits" --correlation-id "$CID" || true
+# "Cancel":
+[ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$ID" --modality corrective \
+  --valence negative --target scope --severity moderate --attributability ambiguous \
+  --comment "cancelled the refine" --correlation-id "$CID" || true
+```
+
+("Approve & save" emits nothing.)
+
+### ⑦ Save (approved only)
+
+```bash
+CORRELATION_ID=$(python3 -c 'import uuid;print(uuid.uuid4())')  # one per save occasion; never cache/reuse across saves — a re-refine mints a fresh one
+SPEC_JSON=$(jq -n --arg goal "$GOAL" --argjson reqs "$REQS_ARRAY" --argjson qa "$QA_ARRAY" \
+  '{goal:$goal, requirements:$reqs, qa:$qa}')
+VER=$(api GET /task/$ID?fields=version -q version)
+api POST /task/$ID/spec --json "$(jq -n --argjson spec "$SPEC_JSON" --argjson ev "$VER" \
+  --arg model "$MODEL_REFINER" --arg cid "$CORRELATION_ID" \
+  '{spec:$spec, expected_version:$ev, actor:"Refiner", model:$model, correlation_id:$cid}')"
+# 412 (concurrent edit) → re-read version and retry ONCE, KEEPING the same $CORRELATION_ID; still 412 → surface, stop.
+
+# Level per the ⑥ choice; title/priority/tags only if the interview changed them (never description):
+api PATCH /task/$ID --json "$(jq -n --argjson level "$LEVEL" '{level:$level}')"
+
+# Dependency surfaced in the interview → declare DEP blocks ID (409 cycle is surfaced, no pre-check):
+api POST /task/$DEP/relationships --json "$(jq -n --arg to "$ID" '{to:$to, type:"blocks"}')"
+
+```
+
+Finally append the Refiner note with the SAME id — `POST /task/$ID/activity`:
+
+```json
+{ "actor": "Refiner", "model": "<MODEL_REFINER>", "message": "Requirements refined. N questions across M rounds.", "correlation_id": "$CORRELATION_ID" }
+```
+
+### ⑧ Coach (background, after save)
+
+Dispatch the Coach per `../squad/references/friction.md` with `skill_name=squad-refine`, `source_task=$ID`, `run_summary="squad-refine refined the requirements for task $ID."`, `trajectory` = the interview rounds + refined spec, `friction_signals` = any board-API friction (`none` if clean). Launch in the background — do not block completion; surface only if it filed friction.
+
+### Interview tips
+
+- "add login" → OAuth/email? Session/JWT? Which pages need guards? · "improve performance" → which page/API, current vs target latency, measurement method? · "fix the UI" → which component, what's wrong, reference design, responsive?
+- Prefer concrete options over open-ended "what do you want?".

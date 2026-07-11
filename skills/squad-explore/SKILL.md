@@ -1,312 +1,134 @@
 ---
 name: squad-explore
-description: Codebase exploration skill for uncertain implementation direction. Deeply explores the codebase, produces a direction report, and creates phased squad tasks. Use when you don't know exactly how to implement something. NOT for direct implementation.
+description: 'Explores a codebase when the implementation direction is uncertain — an Explore subagent then a Plan subagent produce a direction report, the user picks a direction, and an epic plus phased tasks are created on the squad board. Use when the user does not know how to implement something: "/squad-explore <topic>", "explore how to …", "figure out an approach for …", "not sure how to build …". NOT for direct implementation — this skill never writes code.'
 license: MIT
 ---
 
-> Shared context: read `../squad/shared.md` for project config & auth, pipeline levels, status transitions, API endpoints, and error handling.
-> Safety principles: read `../squad/principles.md` — **mandatory, not optional.**
+> Read `../squad/shared.md` (bootstrap + levels + errors) and `../squad/principles.md` first.
+
+```bash
+api() { python3 ../squad/scripts/api.py "$@"; }
+```
 
 ## `/squad-explore [topic]` — Explore & Plan
 
-**When to use**: You have a vague idea or problem but don't know *how* to implement it.
-This skill explores first, reports direction, then seeds the squad board with phased tasks.
-**This skill does NOT write code.**
-
----
-
-### Procedure
-
-```
-⓪ Resolve the observation gate ONCE (the gate-seam — see ../squad/shared.md → Abstraction Rubric)
-   python3 ../squad/scripts/observe.py gate >/dev/null 2>&1; OBSERVE_OK=$?
-   # 0 = emit corrections, non-zero = skip. Cache it; the emit at ④ reuses it (best-effort, || true).
-   # Mint one correlation_id for this explore run: CID=$(python3 -c 'import uuid;print(uuid.uuid4())')
-
-① Receive and validate topic
-
-   If topic is missing (no argument):
-   → Immediately enter the clarification interview (skip to ①-B).
-
-   ①-A Check for missing context (NOT word count):
-   A topic lacks context if ANY of these are true:
-   - No indication of which part of the codebase is involved
-   - The "why" is completely absent (what problem does this solve?)
-   - The scope is unbounded ("improve everything", "refactor")
-
-   If context is missing → ①-B
-   If the topic is self-sufficient (e.g. "add dark mode toggle to settings page") → skip to ②
-
-   ①-B Clarification (one round, max 2 questions via AskUserQuestion):
-   - "What problem are you trying to solve or what outcome do you want?"
-   - "Is there a specific area of the codebase you suspect is involved, or is it unknown?"
-   Do NOT ask more than 2 questions in this round.
-
-② Deep codebase exploration (Task → Explore agent)
-
-   Launch a Task subagent with subagent_type="Explore".
-   Pass the following prompt — fill in <TOPIC> and <PROJECT> before launching:
-
-   ───────────────────────────────────────────────
-   You are performing a pre-implementation exploration for the topic: "<TOPIC>"
-   Project: <PROJECT>
-   Thoroughness: very thorough
-
-   Investigate the following areas IN ORDER and report findings for each:
-
-   A. PROJECT STRUCTURE
-      - List top-level directories and their roles (1 line each)
-      - Identify main entry files (main.ts, index.ts, app.ts, server.ts, etc.)
-      - Read key config files: package.json (dependencies), tsconfig, vite.config or equivalent
-
-   B. TOPIC-RELEVANT CODE
-      - Find all files, modules, and components directly related to "<TOPIC>"
-      - Identify existing patterns used for similar features (search by keyword)
-      - Trace the data flow: where does data enter, how does it move, where does it exit?
-      - Note any existing abstractions that could be extended vs. replaced
-
-   C. PAIN POINTS & GAPS
-      - Identify missing abstractions, obvious duplication, or inconsistent patterns
-      - List all modules that "<TOPIC>" would need to touch
-      - Identify potential conflicts with existing code or dependencies
-
-   D. TECHNOLOGY CONSTRAINTS
-      - Which libraries are already in use that are relevant? (from package.json)
-      - What patterns does the framework enforce? (routing, state, DI, etc.)
-      - What is the test/build/lint setup?
-
-   Return your findings as a structured report with section headers A–D.
-   For every claim, cite the exact file path and line number if possible.
-   If you cannot find evidence for something, say "not found" — do not guess.
-   ───────────────────────────────────────────────
-
-② ½ Architecture planning (Agent → Plan subagent)
-
-   Save the Explore agent's output as $EXPLORE_FINDINGS.
-   Launch a second Agent subagent with subagent_type="Plan".
-   Pass the following prompt — fill in <TOPIC>, <PROJECT>, and <EXPLORE_FINDINGS>:
-
-   ───────────────────────────────────────────────
-   You are performing architecture planning for the topic: "<TOPIC>"
-   Project: <PROJECT>
-
-   ## Codebase Findings (from Explore agent)
-   <EXPLORE_FINDINGS>
-
-   ## Your Task
-   Based on the above codebase findings, produce the following three sections:
-
-   ### 1. Possible Directions (2–3 options, only genuinely distinct ones)
-   For each direction:
-   - **Name**: concise label
-   - **Approach**: 1–2 sentences, concrete not abstract
-   - **Pros**: bulleted list
-   - **Cons**: bulleted list
-   - **Estimated complexity**: Low / Medium / High
-   - **Files likely touched**: list specific files cited in the findings
-   - **Risk**: any architectural risks or unknowns
-
-   ### 2. Recommended Direction
-   State which direction you recommend and WHY, citing specific file paths from the codebase findings.
-   If only one direction makes sense, say so — do not fabricate alternatives.
-
-   ### 3. Phased Task Breakdown (for the recommended direction)
-   3–7 tasks in logical implementation order. Each task must be completable independently.
-   The last task must always be E2E tests ("Add E2E tests for <topic>").
-
-   For each task:
-   - **Title**: concise imperative phrase
-   - **Phase**: sequential number
-   - **Rationale**: 1 sentence — why this step at this phase
-   - **Files**: specific files this task will touch (from findings)
-   - **Complexity**: Low / Medium / High
-
-   Honesty rules:
-   - Every claim must reference a file path from the Explore findings.
-   - If something is unclear from the codebase, say "unclear — needs investigation".
-   - Do not invent patterns that were not found in the codebase.
-   ───────────────────────────────────────────────
-
-   Save this output as $PLAN_OUTPUT.
-
-③ Write the Exploration Report
-
-   Using $EXPLORE_FINDINGS (Explore agent) and $PLAN_OUTPUT (Plan agent), write the following report.
-   This report will be stored permanently in the squad board.
-
-   ┌─────────────────────────────────────────────┐
-   ## Exploration Report: <topic>
-   *Explored: <ISO timestamp> | Project: <PROJECT>*
-
-   ### Current State
-   [2–4 sentences: what exists today that is directly relevant to this topic.
-    Reference specific files.]
-
-   ### Key Findings
-   - <finding> (`path/to/file.ts:line`)
-   - <finding> (`path/to/file.ts:line`)
-   - ... (list all significant findings)
-
-   ### Possible Directions
-
-   [Copy from $PLAN_OUTPUT § "Possible Directions" — do not paraphrase or rewrite]
-
-   ### Recommended Direction
-   [Copy from $PLAN_OUTPUT § "Recommended Direction" — do not paraphrase or rewrite]
-   └─────────────────────────────────────────────┘
-
-   Honesty rules:
-   - Directions and recommendation come verbatim from the Plan agent's output.
-   - If the Plan agent said "only one direction makes sense", present one. Do not fabricate alternatives.
-   - If the codebase gives no signal on something, say "unclear from codebase".
-
-④ Present report + ask user to choose direction
-
-   Print the full Exploration Report to the user.
-
-   Then use AskUserQuestion:
-   - One option per direction (e.g. "Direction A: <name>")
-   - "Cancel — save report only, don't create tasks"
-
-   If user selects Cancel → jump to ⑥-Cancel.
-
-   Steering emit (observation capture, best-effort): choosing the Plan agent's RECOMMENDED direction emits
-   nothing. If the user picks a NON-recommended direction, OR "Cancel", emit one abstracted
-   user_steering event (enums per ../squad/shared.md → Abstraction Rubric: the explore rows).
-   # non-recommended direction:
-   [ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$ID" --modality corrective \
-     --valence negative --target planning --severity moderate --attributability latent_preference \
-     --comment "chose a non-recommended direction" --correlation-id "$CID" || true
-   # Cancel:
-   [ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$ID" --modality corrective \
-     --valence negative --target planning --severity trivial --attributability ambiguous \
-     --comment "cancelled before creating tasks" --correlation-id "$CID" || true
-   ($ID = the report/epic id once known, else the topic's anchor; reuse the run's $CID.)
-
-⑤ Generate phased squad tasks
-
-   ⑤-A Use the task breakdown from $PLAN_OUTPUT.
-   The Plan agent already produced a phased task list — use it directly.
-   Re-derive tasks only if the user selected a direction other than the Plan agent's recommendation.
-
-   Map each task to squad fields:
-   - title: from Plan output (already imperative verb phrase)
-   - phase: sequential number (1, 2, 3…) — used as a tag
-   - priority: high (phase 1–2), medium (phase 3–4), low (phase 5+)
-   - level: L2 or L3 based on complexity from Plan output
-   - tags: ["explore-<topic-slug>", "phase:<N>", "<module-tag>"]  (JSON array — the canonical stored format)
-
-   **The LAST task must always be an E2E test task.**
-   Title format: "Add E2E tests for <topic>"
-   Description should cover: key user flows to verify, happy path + edge cases,
-   which pages/endpoints to test, and acceptance criteria.
-   Priority: medium, Level: L2, extra tag: "e2e-test"
-
-   ⑤-B Create the epic anchor FIRST.
-   This special **epic card** (`card_type:'epic'`) anchors the topic and stores the full
-   exploration report. It is a structured container — implementation tasks are attached to it via
-   `parent` edges (below), NOT via an `epic:` tag (that convention is retired — see
-   `../squad/shared.md` → **Task Relationships & Epics**).
-
-   card_type: "epic"
-   title: "[Explore] <topic>"
-   priority: low
-   tags: ["explore-<topic-slug>", "explore-report"]   (no `epic:` tag)
-   description:
-     <full Exploration Report from ③>
-
-     ---
-     ## Task Index
-     *(populated after all tasks are created — see below)*
-
-   Save the returned ID as $REPORT_ID (this is the epic id).
-
-   ⑤-C Create implementation tasks in phase order.
-   For each task, include this block at the bottom of the description:
-
-     ---
-     ## Exploration Context
-     *Auto-generated by /squad-explore on <timestamp>*
-     **Explore report**: #$REPORT_ID
-     **Direction chosen**: <Direction name>
-     **Phase**: <N> of <total>
-     **Rationale**: <1–2 sentences: why this step at this phase>
-
-   Save each returned ID in order: $IDS = [id1, id2, ...]
-
-   After creating each implementation task, attach it to the epic via a structured parent edge
-   (single-parent → 400 on a second parent, surfaced not pre-checked):
-   ```bash
-   api POST /task/$CHILD_ID/relationships --json "$(jq -n --arg to "$REPORT_ID" '{to:$to, type:"parent"}')"
-   ```
-
-   ⑤-D Patch the report anchor task with the task index.
-   After all tasks are created, PATCH $REPORT_ID description to append:
-
-     ## Task Index
-     | Phase | ID   | Title              | Priority | Level |
-     |-------|------|--------------------|----------|-------|
-     | 1     | #id1 | Add X              | high     | L3    |
-     | 2     | #id2 | Refactor Y         | medium   | L2    |
-     ...
-
-   Use API:
-   ```bash
-   # Create the epic anchor (⑤-B) — card_type:"epic"
-   api POST /task --json "{\"title\": \"[Explore] <topic>\", \"project\": \"$PROJECT\", \"card_type\": \"epic\",
-          \"priority\": \"low\", \"description\": \"...\", \"tags\": [\"explore-<topic-slug>\", \"explore-report\"]}"
-
-   # Create an implementation task (⑤-C) — no epic: tag
-   api POST /task --json "{\"title\": \"...\", \"project\": \"$PROJECT\", \"priority\": \"high\",
-          \"level\": 3, \"description\": \"...\", \"tags\": [\"explore-<topic-slug>\", \"phase:<N>\"]}"
-
-   # Attach the implementation task to the epic via a structured parent edge
-   api POST /task/$CHILD_ID/relationships --json "$(jq -n --arg to "$REPORT_ID" '{to:$to, type:"parent"}')"
-
-   # Patch report anchor (epic) description with the task index
-   api PATCH /task/$REPORT_ID --json "{\"description\": \"<updated description with task index>\"}"
-   ```
-
-⑥ Output final summary
-
-   Print:
-
-   | Phase | ID           | Title              | Priority | Level |
-   |-------|--------------|--------------------|----------|-------|
-   | —     | #$REPORT_ID  | [Explore] <topic>  | low      | L1    |
-   | 1     | #id1         | Add X              | high     | L3    |
-   | 2     | #id2         | Refactor Y         | medium   | L2    |
-   ...
-
-   Then print:
-   > Exploration complete. N tasks created in `todo` for project `<PROJECT>`.
-   > Full report stored in task #$REPORT_ID.
-   > Run `/squad-refine <ID>` on any task to add more detail before starting.
-   > Run `/squad-run <ID>` when ready to execute.
-
-   ⑥-Cancel (user chose Cancel):
-   Create only the report anchor task (⑤-B) with the full report, no implementation tasks.
-   Print:
-   > Report saved to task #$REPORT_ID. No implementation tasks created.
-   > Run `/squad-explore <topic>` again to generate tasks when you're ready.
+### 0. Setup (once)
+
+```bash
+python3 ../squad/scripts/observe.py gate >/dev/null 2>&1; OBSERVE_OK=$?  # 0 = emit steering, else skip
+CID=$(python3 -c 'import uuid;print(uuid.uuid4())')
 ```
 
-#### → Coach (friction review of this run)
+Steering emits below are best-effort — guard with the cached gate and `|| true` (rubric: `../squad/references/observation.md`).
 
-After the final summary (⑥ or ⑥-Cancel), dispatch the **Coach** per `../squad/shared.md` → **Coach Dispatch**. This skill does not resolve a provider during its own work, so resolve `MODEL_PROVIDER` + the `read_model` / `read_effort` helpers per `../squad/shared.md` → **Model Resolution** first, then pass:
-- `skill_name` = `squad-explore`
-- `source_task` = `$REPORT_ID`
-- `run_summary` = `"squad-explore generated an exploration report and phased tasks."`
-- `trajectory` = Explore-agent findings + Plan-agent output
-- `friction_signals` = any agent errors / empty-result retries; `none` if clean
+### 1. Validate the topic
 
----
+A topic lacks context (word count is irrelevant) if ANY hold: no indication of which part of the codebase is involved; the "why" is absent; the scope is unbounded ("improve everything"). Missing topic or missing context → one clarification round, max 2 AskUserQuestion questions ("What problem / outcome?", "Which area of the codebase, or unknown?"). Self-sufficient topic → proceed.
+
+### 2. Explore subagent
+
+Render the **Explore prompt** from `references/prompts.md` (fill `<TOPIC>`, `<PROJECT>`) and launch `Task(subagent_type="Explore", prompt=…)`. Save the output as `$EXPLORE_FINDINGS`.
+
+### 3. Plan subagent (sequential — it consumes the findings)
+
+Render the **Plan prompt** from `references/prompts.md` (fill `<TOPIC>`, `<PROJECT>`, `<EXPLORE_FINDINGS>`) and launch `Task(subagent_type="Plan", prompt=…)`. Save the output as `$PLAN_OUTPUT`.
+
+### 4. Write the Exploration Report
+
+This is the ONLY place the Plan output is transcribed; later steps reference it, never re-print it.
+
+```
+## Exploration Report: <topic>
+*Explored: <ISO timestamp> | Project: <PROJECT>*
+
+### Current State
+[2–4 sentences on what exists today, citing specific files]
+
+### Key Findings
+- <finding> (`path/to/file.ts:line`) …
+
+### Possible Directions
+[verbatim from $PLAN_OUTPUT § 1 — do not paraphrase]
+
+### Recommended Direction
+[verbatim from $PLAN_OUTPUT § 2 — do not paraphrase]
+```
+
+If the codebase gives no signal on something, say "unclear from codebase".
+
+### 5. Present + choose direction
+
+Print the report, then AskUserQuestion:
+
+- One option per direction, marking the Plan agent's recommendation, plus "Cancel — save report only".
+- If the Plan output has a single sensible direction, present it as the recommended default: "Proceed with <name> (recommended)" / "Pick a different approach" / "Cancel — save report only".
+
+Choosing the recommended direction emits nothing. After the epic exists (step 6 or 6-Cancel), emit for the other outcomes:
+
+```bash
+# non-recommended direction chosen:
+[ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$EPIC_ID" --modality corrective \
+  --valence negative --target planning --severity moderate --attributability latent_preference \
+  --comment "chose a non-recommended direction" --correlation-id "$CID" || true
+# Cancel:
+[ "$OBSERVE_OK" = 0 ] && python3 ../squad/scripts/observe.py emit "$EPIC_ID" --modality corrective \
+  --valence negative --target planning --severity trivial --attributability ambiguous \
+  --comment "cancelled before creating tasks" --correlation-id "$CID" || true
+```
+
+### 6. Create the epic + phased tasks — one script call
+
+Map the Plan breakdown to board fields (re-derive the breakdown only if the user picked a non-recommended direction):
+
+- title: imperative phrase from the Plan output · tags: `["explore-<topic-slug>", "phase:<N>"]` (JSON array) · priority: high (phase 1–2), medium (3–4), low (5+) · level: 2 or 3 from the Plan complexity.
+- Each description ends with an `## Exploration Context` block: direction chosen, phase N of M, 1–2 sentence rationale.
+- The LAST task is always "Add E2E tests for <topic>" (key flows, happy path + edge cases, acceptance criteria; priority medium, level 2, extra tag `"e2e-test"`).
+- `blocked_by`: the index/indices of the previous phase's task(s) in this batch — phase order becomes dependency edges. The script wires all edges itself: each task to the epic via a `type:"parent"` relationship, each `blocked_by` entry via `type:"blocks"`.
+
+Create everything with ONE call (stdin JSON per the script's `--help`; build it with `jq`/python, never inline board text into shell strings):
+
+```bash
+python3 ../squad/scripts/create_tasks.py <<'EOF'
+{"epic": {"title": "[Explore] <topic>", "priority": "low",
+          "tags": ["explore-<topic-slug>", "explore-report"],
+          "description": "<full Exploration Report from step 4>\n\n---\n## Task Index\n*(appended after creation)*"},
+ "tasks": [{"title": "…", "description": "…", "level": 3, "priority": "high",
+            "tags": ["explore-<topic-slug>", "phase:1"]},
+           {"title": "…", "level": 2, "priority": "high",
+            "tags": ["explore-<topic-slug>", "phase:2"], "blocked_by": [0]}]}
+EOF
+```
+
+The output is the created-id table (`epic`, `tasks[]`, `edges[]`); `$EPIC_ID` = `epic.id`. Then ONE PATCH appending the Task Index to the epic description:
+
+```bash
+api PATCH /task/$EPIC_ID --json "$(jq -n --arg d "<description + | Phase | ID | Title | Priority | Level | table>" '{description:$d}')"
+```
+
+**6-Cancel** (user chose Cancel): create only the report anchor —
+
+```bash
+api POST /task --json "$(jq -n --arg t "[Explore] <topic>" --arg d "<full report>" --arg p "$PROJECT" \
+  '{title:$t, project:$p, card_type:"epic", priority:"low", description:$d, tags:["explore-<topic-slug>","explore-report"]}')"
+```
+
+Print: `Report saved to #$EPIC_ID. No implementation tasks created. Re-run /squad-explore <topic> to generate tasks later.`
+
+### 7. Final summary
+
+Show only the created-id table from the `create_tasks.py` output (epic row + one row per task: phase, id, title, priority, level), then:
+
+> Exploration complete. N tasks created in `todo` for `<PROJECT>`; report stored in #$EPIC_ID.
+> `/squad-refine <ID>` to add detail · `/squad-run <ID>` when ready to execute.
+
+### 8. Coach (background)
+
+Dispatch the Coach per `../squad/references/friction.md` with `skill_name=squad-explore`, `source_task=$EPIC_ID`, `run_summary="squad-explore generated an exploration report and phased tasks."`, `trajectory` = Explore findings + Plan output, `friction_signals` = agent errors / empty-result retries (`none` if clean). Launch in the background — do not block completion; surface only if it filed friction.
 
 ### Guardrails
 
-- **No implementation**: This skill must NOT write, edit, or create source files.
-- **No assumptions**: If the codebase has no clear pattern for something, say so explicitly.
-- **Evidence-based**: Every claim in the report must cite a file path or code pattern found.
-- **Honest about uncertainty**: If there is only one sensible direction, present one — do not fabricate alternatives.
-- **Task granularity**: Each task should be completable independently in one pipeline run. Split tasks that touch more than 3 unrelated files.
-- **Report is permanent**: The exploration report MUST be saved to the squad board (report anchor task) regardless of whether the user proceeds to task creation.
+- Never write, edit, or create source files.
+- Every report claim cites a file path or found pattern; no clear pattern → say so explicitly.
+- Only one sensible direction → present one; do not fabricate alternatives.
+- Each task must be completable independently in one pipeline run; split tasks touching more than 3 unrelated files.
+- The report is always saved to the board (the epic anchor), even on Cancel.

@@ -1,6 +1,6 @@
 ---
 name: squad-kickstart
-description: Full project pipeline — SRS → Plan → Tasks + TDD → Rolling Wave Execute. Use when starting a new project or major feature from scratch. Default mode is Rolling Wave (implement one → verify → refine next → repeat). Use --big-bang for old all-upfront refine style.
+description: "Runs the full project pipeline from idea to rolling implementation: SRS → implementation plan → skeleton task creation (one batch call) → ordered Rolling Wave loop (refine → implement → verify, one task at a time). Use when starting a new project or a large feature (3+ tasks) that needs end-to-end structure. Flags: --auto (skip confirmation gates), --plan-only (stop after ordering), --big-bang (legacy all-upfront refinement, ≤3 independent tasks only)."
 license: MIT
 metadata:
   internal: true
@@ -8,261 +8,88 @@ metadata:
 
 # `/squad-kickstart [topic]` — Full Project Pipeline
 
-Runs the complete project lifecycle from idea to rolling implementation.
+> Shared context: `../squad/shared.md` (api bootstrap, config resolution, pipeline levels, JSON safety, error rules).
 
-> Shared context: read `../squad/shared.md` for auth resolution (**Personal Access Token**: `SQUAD_AUTH_TOKEN` env > bare `SQUAD_AUTH_TOKEN=` from `~/.squad/auth`; `SQUAD_ORG` = env > `.squadrc`), the `api` helper, API endpoints, pipeline levels, and the JSON-safety rule. Source the `api()` wrapper and resolve `PROJECT` from there before any API call.
+**Rolling Wave (default)**: plan near-term work in detail, keep future work high-level — refine task N+1 only after task N is implemented and verified, so each refinement is grounded in real code, not stale assumptions.
 
-**Default mode: Rolling Wave Planning**
 ```
-① SRS
-② Implementation Plan
-③ Create all tasks — title + high-level description only (lightweight skeleton)
-④ Lock execution order (dependency graph)
-⑤ Rolling Wave Loop:
-     refine(N) → implement(N) → verify(N) → refine(N+1) → implement(N+1) → ...
+① SRS → ② Plan → ③ Create skeleton tasks (one batch) → ④ Lock order → ⑤ refine(N) → implement(N) → verify(N) → …
 ```
 
-**`--big-bang` mode** (legacy, small projects only):
-```
-① SRS → ② Plan → ③ Tasks → ④ Refine all → ⑤ Batch plan → ⑥ Batch execute
-```
+## ① SRS
 
----
+1. Only if the topic is ambiguous (unclear goal, multiple plausible scopes), ask 1–2 clarifying questions first; otherwise start directly.
+2. Explore the codebase if needed.
+3. Write the SRS using the section headings in `references/srs-template.md`; save as `docs/srs-{project-slug}.md`.
+4. **Approval gate**: present a summary and get user approval before continuing.
 
-## What is Rolling Wave Planning?
+## ② Implementation Plan
 
-> **Rolling Wave Planning** (PMBOK): Plan near-term work in detail; keep future work high-level. Refine each task only after the previous one is implemented and verified — using real implementation outcomes to inform the next refinement.
-> Related: Progressive Elaboration, Just-in-Time (JIT) Refinement
+Write `docs/implementation-plan-{project-slug}.md`: epic/story structure, dependency graph, phase order, estimated size.
 
-Key principle: **refine task N+1 only after verifying task N's actual implementation.**
+## ③ Create skeleton tasks — one batch call
 
-- Refining everything upfront → earlier implementations change assumptions, later tasks become stale
-- Refining just-in-time → scope and interfaces are grounded in real code
+Skeleton only: title + 1–2-line goal per child; Acceptance Criteria stay blank until Refine. Levels per shared.md. Add one E2E validation task at the end of each epic (required).
 
----
-
-## When to use
-
-- Starting a new project
-- Large feature additions (3+ tasks)
-- Any "let's build this" request that needs structure end-to-end
-
----
-
-## Procedure (Default: Rolling Wave)
-
-### ① SRS
-
-1. If topic is underspecified, ask 1-2 clarifying questions via AskUserQuestion
-2. Explore codebase if needed (Explore agent)
-3. Write SRS:
-
-```markdown
-# [Project Name] — Software Requirements Specification
-
-## 1. Background & Motivation
-## 2. Goals & Non-Goals
-## 3. Scope
-## 4. Functional Requirements
-   - FR-1: ...
-   - FR-2: ...
-## 5. Non-Functional Requirements
-   - Performance, Security, Compatibility
-## 6. Architecture Overview
-   - System diagram / Component breakdown / Data flow
-## 7. Technology Stack
-## 8. Constraints & Assumptions
-## 9. Risk Assessment
-## 10. Success Criteria
-```
-
-4. Save: `docs/srs-{project-slug}.md`
-5. Present summary to user and get approval before continuing
-
----
-
-### ② Implementation Plan
-
-```markdown
-# [Project Name] — Implementation Plan
-
-## Epic / Story structure
-## Dependency graph (which card must follow which)
-## Phase order
-## Estimated size (stories, tests, LOC)
-```
-
-Save: `docs/implementation-plan-{project-slug}.md`
-
----
-
-### ③ Create all tasks — Lightweight skeleton
-
-**Do not write detailed descriptions upfront in Rolling Wave.**
-Create skeleton tasks: title + 1-2 line goal only. Acceptance Criteria left blank — filled during Refine.
-
-Hierarchy is **structured**, not tag-encoded: create a first-class **epic card** (`card_type:'epic'`)
-per epic and attach each child via a structured `parent` edge. **Do not write `epic:<name>` tags** —
-that convention is retired (see `../squad/shared.md` → **Task Relationships & Epics**). `phase:` tags
-remain valid free labels.
-
-**Create the epic card first** (one per epic; capture its id):
-```bash
-# Build JSON safely with jq (see ../squad/shared.md → JSON Safety).
-EPIC_PAYLOAD=$(jq -n --arg title "<epic title>" --arg project "$PROJECT" \
-  --arg description "$(printf '## Epic\nContainer for the <name> epic.')" \
-  --arg tags "phase:1" \
-  '{title:$title, project:$project, card_type:"epic", priority:"high", description:$description, tags: ($tags | split(",") | map(gsub("^ +| +$";"")))}')
-EPIC_ID=$(api POST /task --json "$EPIC_PAYLOAD" | jq -r '.id')
-```
-
-Minimum fields per child task:
-- `title`: clear unit of work
-- `description`: Goal (1-2 lines) + Scope keywords only
-- `tags`: `phase:` tags only (no `epic:` tags)
-- `level`: L1/L2/L3 based on implementation plan
+Create the epic + all children + all edges with ONE call (single-quoted heredoc — board text is data, never code):
 
 ```bash
-# Build JSON safely with jq (see ../squad/shared.md → JSON Safety); $PROJECT and text expand correctly.
-PAYLOAD=$(jq -n --arg title "<task title>" --arg project "$PROJECT" \
-  --arg description "$(printf '## Goal\nOne-line goal\n\n## Scope\n- In: ...\n- Out: ...')" \
-  --arg tags "phase:1" \
-  '{title:$title, project:$project, priority:"high", level:2, description:$description, tags: ($tags | split(",") | map(gsub("^ +| +$";"")))}')
-CHILD_ID=$(api POST /task --json "$PAYLOAD" | jq -r '.id')
-
-# Attach the child to its epic via a structured parent edge (single-parent → 400 on a second parent).
-api POST /task/$CHILD_ID/relationships --json "$(jq -n --arg to "$EPIC_ID" '{to:$to, type:"parent"}')"
+python3 ../squad/scripts/create_tasks.py <<'EOF'
+{"epic": {"title": "<epic title>", "description": "Container for the <name> epic.", "priority": "high", "tags": ["phase:1"]},
+ "tasks": [
+   {"title": "<task 1>", "description": "## Goal\n...\n\n## Scope\n- In: ...\n- Out: ...", "level": 2, "priority": "high", "tags": ["phase:1"]},
+   {"title": "<task 2>", "description": "...", "level": 2, "blocked_by": [0]},
+   {"title": "E2E validation: <epic>", "description": "...", "level": 3, "blocked_by": [0, 1]}
+ ]}
+EOF
 ```
 
-**Cross-card dependencies** (a child blocks another) are declared via a structured `blocks` edge —
-NOT a `Depends on:` text line. The server enforces acyclicity and returns **409** on a cycle (surfaced,
-no client pre-check):
-```bash
-# BLOCKER blocks BLOCKED (BLOCKED is blocked_by BLOCKER). `to` is an opaque <KEY>-<seq> id string — use --arg.
-api POST /task/$BLOCKER_ID/relationships --json "$(jq -n --arg to "$BLOCKED_ID" '{to:$to, type:"blocks"}')"
-```
+- `blocked_by` ints are indexes of earlier tasks in the same batch (strings = existing board ids) — ordering the array by execution order yields the dependency DAG directly.
+- The script creates the epic container (`card_type: "epic"`) and wires every edge via `POST /task/$ID/relationships` — `{type: "parent"}` child→epic, `{type: "blocks"}` for dependencies. Never encode hierarchy in tags (`phase:` tags remain valid; `epic:` tags are retired).
+- It prints the created id table (epic + children + edge results) — report that list, with order, to the user.
 
-**E2E test task**: add one E2E validation task at the end of each epic (required).
+Edge/epic semantics on demand: `../squad/references/epics.md`.
 
-Print full ID list (epic + children) and order after creation.
+## ④ Lock execution order
 
----
+Write `docs/execution-order-{project-slug}.md` (phases + per-task dependency notes) from the plan's dependency graph. Confirm the order with the user — skip this confirmation under `--auto`.
 
-### ④ Lock execution order
+## ⑤ Rolling Wave loop
 
-Finalize execution sequence based on dependency graph:
+For each task N in execution order:
 
-```markdown
-# Rolling Wave Execution Order
+- **A. Refine(N)** — read task N-1's actual implementation from the codebase plus its board record (`api GET /task/$PREV?fields=implementation_notes,decision_log`), then call `/squad-refine #N` to write the spec grounded in the confirmed interfaces/schema (the human `description` stays untouched — never PATCH it).
+  Split during Refine when any: >5 acceptance criteria, >5 expected files, multiple layers at once (DB + API + UI), >1 session (~30–60 min) of work → break into 2–3 sub-cards, insert into the order, report, continue automatically.
+- **B. Implement(N)** — run `/squad-run #N`.
+- **C. Verify(N)** — one git check to confirm what actually landed (`git log --oneline -1 && git diff HEAD~1 --stat`, or `git status --short && git diff --stat` when uncommitted), then one event recording the impact:
+  `python3 ../squad/scripts/pipeline.py event $ID --actor Orchestrator --message "Impact on next tasks: ..."` (appends a `POST /task/$ID/activity` note). Adjust downstream task descriptions if the implementation changed assumptions.
 
-Phase 1: #id1 → #id2 → #id3
-Phase 2: #id4 → #id5
-Phase 3: #id6 (E2E)
+Loop exceptions: blocker → report to the user and pause · E2E task fails → review that epic's tasks · review-loop circuit breaker per shared.md.
 
-Dependency notes:
-- #id2 depends on #id1's API interface
-- #id4 depends on #id3's DB schema
-```
+## Options
 
-Save: `docs/execution-order-{project-slug}.md`
-
-Confirm order with user before starting the loop.
-
----
-
-### ⑤ Rolling Wave Loop
-
-**Repeat until all tasks are done:**
-
-```
-for each task N in execution order:
-
-  A. Refine(N)
-     - Read prior task (N-1) actual implementation from codebase
-     - Elaborate N's requirements based on confirmed interfaces/schema/components from N-1
-     - Add to the spec: Acceptance Criteria, Edge Cases, code reference paths
-     - Call /squad-refine #N to write the spec (the human `description` is the original
-       request — it stays untouched; NEVER PATCH it)
-
-     **Card split rules (auto-applied during Refine)**:
-     Split if any of these are true:
-     - Acceptance Criteria exceeds 5 items
-     - Expected file changes exceed 5 files
-     - Touches multiple layers simultaneously (e.g. DB + API + UI)
-     - Estimated to exceed one session (~30–60 min)
-
-     Split procedure:
-     1. Break N into 2–3 sub-cards (create via squad API)
-     2. Delete or convert original N to an epic description card
-     3. Insert sub-cards into execution order (N-a, N-b, N-c)
-     4. Report split to user, then continue automatically
-
-  B. Implement(N)
-     - Run /squad-run #N
-     - Pipeline: plan → (plan_review) → impl → (impl_review) → (test) → done
-
-  C. Verify(N)
-     - Inspect actual output: git diff, created files, test results
-     - Note any changes that affect subsequent task refinements
-     - Record an activity event: POST /api/task/$ID/activity {actor:"Orchestrator", model:"system", message:"Impact on next tasks: ..."}
-
-  → Move to N+1
-```
-
-**Loop exceptions:**
-- Unexpected implementation change found during Verify → adjust downstream task descriptions proactively
-- Blocker encountered → report to user and pause
-- E2E task fails → review tasks in that epic
-
----
-
-## Execution Options
-
-### (default) — Rolling Wave
-Sequential: refine → implement → verify → refine next.
-For L2/L3 tasks: pause at plan_review / impl_review for user confirmation.
-
-### `--auto`
-Auto-approve all implement stages. Refine and Verify always run.
-
-### `--plan-only`
-Run steps ①–④ only. Lock execution order, do not start the loop.
-User manually triggers each task later with `refine → /squad-run #N`.
-
-### `--big-bang`
-Legacy all-upfront: refine all tasks at once, then batch execute.
-Use only for small projects (≤3 tasks) with no inter-task dependencies.
-
----
+| Flag | Effect |
+|------|--------|
+| (default) | Rolling Wave; L2/L3 pause at plan_review / impl_review for user confirmation |
+| `--auto` | auto-approve implement stages AND skip the ④ order confirmation; Refine + Verify always run |
+| `--plan-only` | run ①–④ only; the user later triggers each task manually (refine → `/squad-run #N`) |
+| `--big-bang` | legacy all-upfront: refine everything, then batch execute — only for ≤3 tasks with no inter-task dependencies |
 
 ## Guardrails
 
-- Never create tasks without SRS
-- Every epic must have at least one E2E test task
-- In Rolling Wave: N+1 refine must happen after N is verified — no exceptions
-- Never refine the next card without checking the prior card's actual implementation
-- No large implementations in a single card — split immediately when scope exceeds limits during Refine
-- Card splits proceed automatically; report to user after splitting
-- Run /squad-init first if project is not registered
-
----
+- Never create tasks without an approved SRS; every epic gets an E2E test task.
+- Refine N+1 only after N is verified — always against the prior card's real implementation.
+- Run `/squad-init` first if the project is not registered.
 
 ## Output
 
-Print progress after each step:
+Print one progress line per step, e.g.:
 
 ```
 ✅ ① SRS: docs/srs-project.md (12 requirements)
-✅ ② Plan: docs/implementation-plan-project.md (3 epics, 8 stories)
-✅ ③ Tasks: #201–#208 (8 skeleton tasks created)
-✅ ④ Order: docs/execution-order-project.md (Phase 1→2→3)
-
-Rolling Wave Loop:
+✅ ③ Tasks: epic + 8 children created (1 batch)
   ✅ Refine #201 — scope locked from codebase
   ✅ Impl  #201 — done (commit: a1b2c3d)
   ✅ Verify #201 — confirmed: POST /api/items interface
-  ✅ Refine #202 — scope updated based on #201 interface
-  ✅ Impl  #202 — done (commit: d4e5f6a)
-  ✅ Verify #202 — confirmed: items table schema
-  ⏳ Refine #203 — in progress...
+  ⏳ Refine #202 — in progress...
 ```

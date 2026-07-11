@@ -1,166 +1,41 @@
 ---
 name: squad-init
-description: "Register the current project on the Squad board so /squad commands target it. Usage: /squad-init or /squad-init my-project-name. Run with /squad-init."
+description: "Registers the current project on the Squad board so /squad commands target it — writes the committed .squadrc (project name + org slug), detects auth presence, and registers the project via the board API. Use when a repo is not yet connected to the board, when /squad reports an unknown project, or when pointing a repo at a different board project, org, or deployment URL. Usage: /squad-init [project-name] [board-url]."
 license: MIT
 ---
 
-Registers the current project in **PostgreSQL** (shared central DB) and creates a local config so `/squad` knows which project to use.
-No per-project DB file is created — the central PostgreSQL server handles storage for all projects automatically.
+Registers the current project on the shared Squad board (one central server — no per-project database) and writes the local `.squadrc` that targets it.
 
-## Usage
+## Run
 
-```
-/squad-init                                      — project name = basename of current directory, board = https://squad-api-285415501393.asia-south1.run.app
-/squad-init my-project-name                      — explicit project name, board = https://squad-api-285415501393.asia-south1.run.app
-/squad-init my-project-name https://board.example.com
-                                                 — explicit project name + custom board URL
-/squad-init https://board.example.com           — current directory name + custom board URL
-```
-
-If a URL argument is present, treat it as `base_url`. Strip any leading dashes from the project token: `squad-init -unahouse.finance` → project `unahouse.finance`.
-
-## Procedure
-
-### 1. Determine project name and board URL
+Map the slash-command args, then run the script — name/org resolution, `.squadrc`, auth detection, and board registration all happen inside:
 
 ```bash
-# Split raw args
-set -- $ARG
-ARG1="${1:-}"
-ARG2="${2:-}"
-
-# Accept either:
-#   /squad-init my-project
-#   /squad-init my-project https://board.example.com
-#   /squad-init https://board.example.com
-if printf '%s' "$ARG1" | grep -Eq '^https?://'; then
-  PROJECT=$(basename "$(pwd)")
-  BASE_URL="$ARG1"
-else
-  PROJECT=$(printf '%s' "$ARG1" | sed 's/^-*//')
-  [ -z "$PROJECT" ] && PROJECT=$(basename "$(pwd)")
-  BASE_URL="${ARG2:-https://squad-api-285415501393.asia-south1.run.app}"
-fi
+# /squad-init [name] [url] — an https?:// arg is --base-url; any other token is --project.
+python3 scripts/init.py [--project NAME] [--org SLUG] [--base-url URL] [--force]
 ```
 
-### 2. Write local project config
+| Flag | Meaning | Default |
+|------|---------|---------|
+| `--project NAME` | project name (leading dashes stripped) | existing `.squadrc` > directory name |
+| `--org SLUG` | org slug — REQUIRED overall; every board call is org-scoped | env `SQUAD_ORG` > existing `.squadrc` |
+| `--base-url URL` | custom board deployment; persisted to `~/.squad/config` | standard resolution (`../squad/shared.md`) |
+| `--force` | overwrite an existing `.squadrc` | refuse conflicting values, print current ones |
 
-Create **one** tool-agnostic file at the **current project root**, committed to git so the whole team's agents target the same board project:
+The script prints one JSON summary: `project`, `org`, `base_url`, `squadrc` (written/updated/kept/overwritten), `auth` (env/file/none), `registered`, `board_url`.
 
-`.squadrc`
-```
-SQUAD_PROJECT=<PROJECT_NAME>
-SQUAD_ORG=<ORG_SLUG>          # REQUIRED — every board call is org-scoped (/api/orgs/<org>/...)
-```
+- No resolvable org → exit 2 with `ERROR: SQUAD_ORG is not set` — take the slug from the mint dialog's `SQUAD_ORG=<slug>` line and re-run with `--org`. It never registers without one.
+- Registration goes through the shared helper (`api POST /projects`) and is best-effort: a board failure is a warning, init still succeeds locally.
+- The token is never stored, prompted for, or printed; `.squadrc` holds only the non-secret project + org (safe to commit).
 
-**`.squadrc` holds the project name and the org slug** (both non-secret → safe to commit). The `SQUAD_ORG=<slug>` line is **REQUIRED** and **ALWAYS** written — every board call is org-scoped (`/api/orgs/<org>/...`), including squad-init's own `POST /api/orgs/<org>/projects`. Resolve the slug from an explicit init arg or the mint dialog's `SQUAD_ORG=<slug>` line (env or an existing `.squadrc`):
+## Existing config
 
-```bash
-# Org slug — env (the mint dialog exports it) > existing .squadrc. REQUIRED.
-SQUAD_ORG="${SQUAD_ORG:-}"
-[ -z "$SQUAD_ORG" ] && [ -f .squadrc ] && SQUAD_ORG=$(grep '^SQUAD_ORG=' .squadrc | cut -d= -f2-)
-if [ -z "$SQUAD_ORG" ]; then
-  echo "ERROR: SQUAD_ORG is not set. Every board call is org-scoped (/api/orgs/<org>/...)." >&2
-  echo "Set it from the mint dialog's \`SQUAD_ORG=<slug>\` line — add \`SQUAD_ORG=<slug>\` to .squadrc" >&2
-  echo "(committed) or export SQUAD_ORG=<slug> for this shell. Resolution order: env > .squadrc." >&2
-  exit 1
-fi
-```
+Exit 2 with "differs from the requested values" means `.squadrc` already exists. Ask the user — default is keep:
 
-The slug is **never** auto-derived from the board (the project API exposes no org slug today — a noted follow-up). The token never lives in `.squadrc`; it lives in `~/.squad/auth` as the bare `SQUAD_AUTH_TOKEN=` line.
+1. **Keep** (default) — re-run without the conflicting flag (existing values are used).
+2. **Overwrite** — re-run with `--force`.
 
-Use the Write tool to create `.squadrc` with **both** the `SQUAD_PROJECT=` and the `SQUAD_ORG=<slug>` lines (always write `SQUAD_ORG`; if no slug can be resolved, stop with the error above — do NOT register without it).
+## Tell the user
 
-### 2b. Detect auth (no token store here)
-
-The token is resolved via the shared.md chain (env > bare `SQUAD_AUTH_TOKEN=`). squad-init **never** stores a token, **never** echoes/cats it, and **never** asks for a pasted one — the token-store command lives **only** at the web mint UI — Settings → Personal Access Tokens (the single place the real token exists). On no token, squad-init just prints a one-line POINTER to that UI:
-
-```bash
-# Detect whether a token is configured (env > bare `SQUAD_AUTH_TOKEN=`) to decide the warning
-# below — never echo it. The board call itself goes through api.py, which owns the header.
-SQUAD_ORG="${SQUAD_ORG:-}"
-[ -z "$SQUAD_ORG" ] && [ -f .squadrc ] && SQUAD_ORG=$(grep '^SQUAD_ORG=' .squadrc | cut -d= -f2-)
-AUTH_TOKEN="${SQUAD_AUTH_TOKEN:-}"; AUTH_SOURCE=$([ -n "$AUTH_TOKEN" ] && echo env || echo none)
-if [ -z "$AUTH_TOKEN" ] && [ -f "$HOME/.squad/auth" ]; then
-  AUTH_TOKEN=$(grep '^SQUAD_AUTH_TOKEN=' "$HOME/.squad/auth" | cut -d= -f2-)
-  [ -n "$AUTH_TOKEN" ] && AUTH_SOURCE=file
-fi
-
-if [ -z "$AUTH_TOKEN" ]; then
-  echo "No Squad Personal Access Token configured — mint one in your Squad board's web UI (Settings → Personal Access Tokens) and run the store command it shows."
-fi
-
-# Persist a custom (non-default) board URL only — to ~/.squad/config
-if [ -n "$BASE_URL" ] && [ "$BASE_URL" != "https://squad-api-285415501393.asia-south1.run.app" ]; then
-  mkdir -p "$HOME/.squad"
-  grep -q '^SQUAD_BASE_URL=' "$HOME/.squad/config" 2>/dev/null || printf 'SQUAD_BASE_URL=%s\n' "$BASE_URL" >> "$HOME/.squad/config"
-fi
-```
-
-### 2c. Auto-register project in projects table
-
-After writing the config, upsert the current project to the projects table via POST /api/projects.
-Infer project metadata from the local environment:
-
-```bash
-# Category defaults to "personal"; change it on the board if needed.
-CATEGORY="personal"
-echo "$PROJECT" | grep -qiE 'skill|squad' && CATEGORY="skills"
-echo "$PROJECT" | grep -qiE 'tool|api|cli'  && CATEGORY="tools"
-
-# Infer purpose + stack from CLAUDE.md (best-effort)
-PURPOSE=""; STACK=""
-if [ -f "CLAUDE.md" ]; then
-  PURPOSE=$(grep -v '^#' CLAUDE.md | grep -v '^---' | grep -v '^[[:space:]]*$' | head -1 | cut -c1-300)
-  STACK=$(grep -iE 'stack|tech|typescript|javascript|python|react|vue|next|node|vite' CLAUDE.md | head -1 | cut -c1-200)
-fi
-REPO_URL=$(git remote get-url origin 2>/dev/null || echo "")
-
-# Build the payload safely with jq — never interpolate file/user text into code (see shared.md "JSON Safety").
-PROJ_PAYLOAD=$(jq -n \
-  --arg id "$PROJECT" --arg name "$PROJECT" --arg category "$CATEGORY" \
-  --arg purpose "$PURPOSE" --arg stack "$STACK" --arg repo_url "$REPO_URL" \
-  '{id: $id, name: $name, category: $category,
-    purpose:  (if $purpose  == "" then null else $purpose  end),
-    stack:    (if $stack    == "" then null else $stack    end),
-    repo_url: (if $repo_url == "" then null else $repo_url end)}')
-api POST /projects --json "$PROJ_PAYLOAD" > /dev/null 2>&1 || true
-```
-
-This is best-effort — if the API call fails (e.g., board unreachable), init still succeeds.
-
-### 3. Output confirmation
-
-Output:
-```
-✅ Project '<PROJECT_NAME>' registered in squad.
-
-  Config:  .squadrc (committed)
-  Org:     <ORG_SLUG>   (required — written to .squadrc; every board call is org-scoped)
-  DB:      PostgreSQL (shared central DB)
-  Board:   <BASE_URL>/?project=<PROJECT_NAME>
-  Auth:    Personal Access Token — SQUAD_AUTH_TOKEN env / ~/.squad/auth (global secret; configured / empty, value-free)
-
-Add tasks with /squad add <title>
-```
-
-## Notes
-
-### Existing config detection
-
-If `.squadrc` already exists, read `SQUAD_PROJECT` and ask before overwriting:
-
-```
-.squadrc already exists:
-  Current project: "<name>"
-
-Options:
-1. Overwrite — update SQUAD_PROJECT
-2. Keep as-is — leave .squadrc unchanged
-```
-
-- `/squad-init` defaults to `https://squad-api-285415501393.asia-south1.run.app` unless you provide another deployment URL.
-- Tokens are **Personal Access Tokens (PATs)** stored globally in `~/.squad/auth` (mode 600) as a bare `SQUAD_AUTH_TOKEN=` line — or the `SQUAD_AUTH_TOKEN` env var; NEVER in `.squadrc`. This keeps secrets out of git; `SQUAD_ORG` still selects the tenant per repo.
-- `.squadrc` carries the project name + the **required** non-secret `SQUAD_ORG=<slug>` selector (every board call is org-scoped `/api/orgs/<org>/...`). squad-init ALWAYS writes `SQUAD_ORG` (resolved from an explicit init arg or the mint dialog's `SQUAD_ORG=<slug>` line); it is **not** board-derived (the project API exposes no org slug; auto-derive + verify is a noted follow-up). With no slug, squad-init stops with an actionable error rather than registering without one.
-- squad-init **never stores or prompts for a token**: minting + the store command live only in the board's web UI — **Settings → Personal Access Tokens**. On no token it prints a one-line pointer to that UI (the breadcrumb, NOT a URL — the skill only knows the API `BASE_URL`, not the web host).
-- For remote private boards, mint a **Personal Access Token** in the web UI (**Settings → Personal Access Tokens**) and run the store command it prints (writes `~/.squad/auth`, mode 600), or set `SQUAD_AUTH_TOKEN` in the shell before running `/squad-init`.
+- ✅ Project '<project>' registered — board: `<board_url>` · config: `.squadrc` (committed) · add tasks with `/squad add <title>`.
+- `auth: "none"` → relay: mint a Personal Access Token in the board web UI (**Settings → Personal Access Tokens**) and run the store command it shows. Never ask for the token to be pasted here.
