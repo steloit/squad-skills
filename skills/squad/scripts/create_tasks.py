@@ -43,6 +43,9 @@ def _create(payload):
 
 
 def main():
+    if any(a in ("-h", "--help") for a in sys.argv[1:]):
+        print(__doc__)
+        return 0
     try:
         spec = json.load(sys.stdin)
     except json.JSONDecodeError as exc:

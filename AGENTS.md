@@ -54,6 +54,32 @@ Hold these constraints on **every** change:
   wire contract. Enforced by `tests/test_no_internal_ids_in_skills.py`. (`tests/` itself is dev-only —
   not installed — so these two rules apply to `skills/**` only.)
 
+## Authoring standard (the efficiency contract — hold on every skill change)
+
+Skills are architected **engine-first with progressive disclosure** (decision record:
+`claudedocs/eval-framework-redesign.md` §2 + the 2026-07 re-architecture). Mechanical parts
+enforced by `tests/test_authoring_standard.py`:
+
+- **Scripts before prose.** Deterministic work (API sequences, rendering, validation, batch
+  writes) lives in a packaged script, never as step-by-step instructions the agent re-derives.
+  Scripts are zero-dependency python3, expose `--help`, follow api.py's exit-code taxonomy
+  (0/2/3/4/5/6), and are invoked as **black boxes** — a skill never tells the agent to read a
+  script's source. New behavior = script subcommand first; prose only for judgment calls.
+- **SKILL.md is common-path-only, ≤ 200 lines** (target ≤ 150). Rarely-needed detail goes in
+  the skill's `references/` (loaded on demand, exactly ONE level deep — a reference never
+  points at another reference). Every rule stated once; no rationale/meta in shipped files.
+- **Frontmatter `description` is the trigger contract**: third person, WHAT + WHEN with
+  concrete trigger phrases, ≤ 1024 chars. Auto-trigger conditions live here, not in the body.
+- **Subagent prompts are self-contained.** Shared rules are injected at render time
+  (`templates/_shared.md` via `<shared_rules>`); a rendered prompt never sends the subagent
+  off to read shared context files.
+- **Batch and background.** Skills instruct parallel execution of independent reads/creates,
+  and telemetry (Coach dispatch, observation emits) never blocks the critical path.
+- **Every skill ships evals before extensive docs**: a contract (`evals/contracts/<skill>.yaml`)
+  plus ≥ 3 scenarios asserting **contract items only** (promised board mutations, invariants,
+  exit conditions — never implementation details). Outcome-graded; the LLM judge never gates.
+  (Framework: `claudedocs/eval-framework-redesign.md`; rollout tracked on the board.)
+
 Mechanics:
 
 - Add a skill: create `skills/<name>/SKILL.md` with `name` + `description` frontmatter (`name` must match the directory).

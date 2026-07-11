@@ -23,6 +23,9 @@ def _api(path):
 
 
 def main():
+    if any(a in ("-h", "--help") for a in sys.argv[1:]):
+        print(__doc__)
+        return
     board = _api("/board?summary=true")
     stats = _api("/activity/stats")
 
