@@ -44,7 +44,7 @@ Split a card (or send it back to `/squad-refine`) if **any** hold:
 - Fixing friction with Squad itself inline, or leaving your task to chase it — if you notice friction with
   Squad itself — the skills/board/orchestrator you work *with*, not the project you work *on* (an ambiguous skill instruction, an awkward board API, a clunky orchestrator
   step, a weak template, a bug), **report it, don't fix it**: file a `friction` report per
-  shared.md → "Squad Friction Reports" and continue your actual task. The worked project's own bugs
+  `references/friction.md` and continue your actual task. The worked project's own bugs
   are NOT friction reports — those belong on that project's board.
 - Planning from assumptions without reading the codebase
 - **Weakening a safeguard to pass review** — deleting or skipping tests, suppressing

@@ -45,7 +45,7 @@ Hold these constraints on **every** change:
 - **Language / tool / framework portable.** Skills run against any stack — Go, Rust, Java, Python,
   TS, Elixir, … NEVER hardcode a toolchain (`pnpm` / `vitest` / `biome` / `cargo` / `go test`).
   Resolve a repo's real build/lint/test/format commands via the ladder in
-  `skills/squad/shared.md` → **Command Resolution**: the loaded project context (AGENTS.md canonical /
+  `skills/squad/templates/_shared.md` → **Command resolution**: the loaded project context (AGENTS.md canonical /
   CLAUDE.md / GEMINI.md / `.cursor/rules` / `.github/copilot-instructions.md`) → the repo task runner
   (make / just / Taskfile / mise / npm scripts) → auto-detect by language. Tool names appear only as
   *examples*, never as THE command.

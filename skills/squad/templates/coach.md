@@ -73,7 +73,7 @@ The order is load-bearing: **push cards → collect their ids → POST the audit
 
 **3a — Push material rows as `friction, triage` cards (cap N=3).**
 For each rubric row that cleared the materiality bar (Step 2), file a card following
-`../squad/shared.md` → **Squad Friction Reports** EXACTLY (it owns the schema + the POST):
+`../squad/references/friction.md` EXACTLY (it owns the schema + the POST):
 - Dedup ONLY against `friction`-tagged cards from the documented summary query; match `area` +
   normalized title. On a duplicate: SKIP by default; you MAY append evidence ONLY to a card that is
   itself tagged `friction`. NEVER write to / append to / modify any card NOT tagged `friction`.
@@ -87,7 +87,7 @@ For each rubric row that cleared the materiality bar (Step 2), file a card follo
 
 **3b — ALWAYS POST the full run audit (every run, clean AND friction).**
 Build a single JSON body with Python (so the JSON fields are real JSON, not text) and POST it
-best-effort to `POST /api/orgs/{org}/run-audit?project=squad` (documented in shared.md → **Run Audit**):
+best-effort to `POST /api/orgs/{org}/run-audit?project=squad` (documented in `../squad/references/friction.md` → **Run audit**):
 
 ```bash
 # Resolve run context (shell vars — NOT template placeholders, to keep render --strict clean).
@@ -103,7 +103,7 @@ SOURCE_TASK=$(cat <<'SOURCE_TASK_EOF'
 SOURCE_TASK_EOF
 )
 LEVEL="${SQUAD_LEVEL:-}"           # task level if known; else empty -> null
-# MODEL_PROVIDER resolved per shared.md → Model Resolution (claude|codex); empty -> null.
+# MODEL_PROVIDER: SQUAD_MODEL_PROVIDER env > runtime env signals > models.json default_provider; empty -> null.
 
 # overall_status: friction if >=1 row cleared the bar (ANY_MATERIAL=1 from Step 2 — covers the
 # >3-capped case where cards<material), else clean. Decoupled from the N=3 card cap.
@@ -148,7 +148,7 @@ rm -f "$ERR"
 
 ## Output format
 
-> Markdown authoring — when quoting fenced content, wrap it in a `~~~` outer fence: see `../squad/shared.md` → **Markdown Authoring**.
+> Markdown authoring — when quoting fenced content, wrap it in a `~~~` outer fence; never a bare ``` mid-sentence.
 
 Always print a short audit, even (especially) when you file nothing:
 
@@ -176,7 +176,7 @@ Always print a short audit, even (especially) when you file nothing:
 - Cap N=3 per run. Dedup against the board before every file. Evidence + a suggestion direction are REQUIRED.
 - NEVER file the worked project's own bugs — those belong on `<source_project>`'s board.
 - NEVER edit/fix anything. You report; a human triages. You do not move cards or touch the worked task.
-- Tag every friction card `friction, triage` (the shared.md snippet already does this — don't override it).
+- Tag every friction card `friction, triage` (the friction.md snippet already does this — don't override it).
 - NEVER write to, append to, or modify any non-`friction` card. Your ONLY board write is creating a new
   `friction`-tagged card (or appending to an existing `friction` card).
 - ALWAYS POST the run audit (clean and friction); cards are capped at N=3 but the audit records every material
