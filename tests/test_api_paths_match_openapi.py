@@ -178,7 +178,8 @@ def _normalize_call(resource_path: str):
 
     `/task/$ID/spec` → ('orgs', '{}', 'task', '{}', 'spec')
     """
-    s = resource_path.split("?", 1)[0].split("#", 1)[0]  # drop query / fragment
+    s = resource_path.lstrip("`\"'")                     # drop a leading quote (api GET "/task…")
+    s = s.split("?", 1)[0].split("#", 1)[0]              # drop query / fragment
     s = s.rstrip("`\"'.,;:)/ \t")                         # drop trailing prose punctuation
     if not s.startswith("/"):
         s = "/" + s                                       # build_url prepends the slash

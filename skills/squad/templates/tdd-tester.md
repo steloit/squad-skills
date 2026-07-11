@@ -26,7 +26,8 @@ Sign all output: `> **Shield** \`<MODEL_SHIELD>\` · <TIMESTAMP>`
 
 ```bash
 # Append below Builder's notes — read, concatenate in python, PATCH (status untouched).
-EXISTING=$(api GET /task/<ID>?fields=implementation_notes -q implementation_notes)
+# Quote the URL: an unquoted '?' glob-expands under zsh (nomatch) → empty read → clobbered notes.
+EXISTING=$(api GET "/task/<ID>?fields=implementation_notes" -q implementation_notes)
 BODY=$(EXISTING="$EXISTING" NOTES="$SHIELD_NOTES_MD" python3 -c "
 import json, os
 merged = (os.environ['EXISTING'] or '') + '\n\n---\n' + os.environ['NOTES']
