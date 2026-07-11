@@ -136,14 +136,23 @@ def test_plan_batch_main_fails_fast_at_runtime_when_squad_org_unset(plan_batch, 
 
 
 def test_shared_documents_squad_org_required(repo_root):
-    """shared.md fails fast (exit 1) on an unset SQUAD_ORG with the actionable, id-free error
-    pointing at the mint dialog's SQUAD_ORG=<slug> line / .squadrc. Resolution order env > .squadrc."""
-    text = (repo_root / "skills" / "squad" / "shared.md").read_text()
-    assert "ERROR: SQUAD_ORG is not set" in text, "shared.md must fail-fast on unset SQUAD_ORG"
-    assert "/api/orgs/" in text, "shared.md error must reference the org-scoped surface"
-    assert "SQUAD_ORG=<slug>" in text, "error must point at the mint dialog's SQUAD_ORG=<slug> line"
-    assert ".squadrc" in text, "error must point at .squadrc"
-    assert "env > .squadrc" in text, "resolution order (env > .squadrc) must be documented"
+    """The fail-fast contract on an unset SQUAD_ORG now lives in api.py (the single resolver):
+    an actionable, id-free pre-flight error pointing at .squadrc / the mint dialog's
+    SQUAD_ORG=<slug> line, sent before any request. shared.md documents the requirement
+    and the resolution order (env > .squadrc)."""
+    shared = (repo_root / "skills" / "squad" / "shared.md").read_text()
+    assert "/api/orgs/" in shared, "shared.md must reference the org-scoped surface"
+    assert "SQUAD_ORG" in shared and "required" in shared.lower(), (
+        "shared.md must document SQUAD_ORG as required"
+    )
+    assert ".squadrc" in shared, "shared.md must point at .squadrc"
+    api_src = (repo_root / "skills" / "squad" / "scripts" / "api.py").read_text()
+    assert "SQUAD_ORG could not be resolved" in api_src, (
+        "api.py must fail-fast with an actionable error on unset SQUAD_ORG"
+    )
+    assert "no request was sent" in api_src, "the org pre-flight must run before any request"
+    assert "SQUAD_ORG=<slug>" in api_src, "the error must point at the mint dialog's SQUAD_ORG=<slug> line"
+    assert ".squadrc" in api_src, "the error must point at .squadrc"
 
 
 def test_squad_init_always_writes_squad_org(repo_root):

@@ -2,22 +2,36 @@
 
 #314 migrated every squad skill + docs + templates off the dropped `agent_log`/`notes` JSON
 columns onto the board's `task_activities`/`task_comments` model: machine work is recorded as
-immutable events via `POST /api/task/:id/activity` `{actor, model, message, tokens?}`; the
+immutable events via `POST .../task/:id/activity` `{actor, model, message, tokens?}`; the
 human `/comment` channel is never written by a skill; readers use a full GET (embedded
-`activity`) or `GET /api/task/:id/activity`; cross-task token stats use the single
-`GET /api/activity/stats` aggregate.
+`activity`) or `GET .../task/:id/activity`; cross-task token stats use the single
+`GET .../activity/stats` aggregate.
 
-These are deterministic grep invariants (mirroring test_coach_dispatch_centralization.py) that
-keep the migration from silently regressing — a re-inlined `/note` POST, a creeping
-`?fields=agent_log`, or a re-introduced read-modify-write of the old JSON blob.
+Post skills-efficiency re-architecture the contract's homes moved (the CONTRACTS are unchanged):
+  - the activity endpoint doc (body, actor vocabulary, reader, embedding caveat) →
+    `skills/squad/references/api.md`;
+  - the orchestration write path → pipeline.py `event` / `record` (both POST /task/:id/activity;
+    unit-tested here with a stubbed `_req` — no network). Skills that used to inline the POST
+    now call `pipe event` / `pipe record`; that mediation satisfies the writer contract;
+  - token stats → scripts/stats.py (one `/activity/stats` aggregate call, no per-task loop).
+
+These deterministic invariants keep the migration from silently regressing — a re-inlined
+`/note` POST, a creeping `?fields=agent_log`, or a re-introduced read-modify-write of the
+old JSON blob.
 """
+import argparse
+import json
 import re
 
 
-# The two canonical contract docs MUST document every endpoint (including the human /comment
+# The canonical contract docs MUST document every endpoint (including the human /comment
 # channel and the ?fields= embedding caveat) — they are the source of truth, not writers.
 # The operational guards below therefore scope to the executable skill files, excluding these.
-_CONTRACT_DOCS = {"skills/squad/shared.md", "skills/squad/schema.md"}
+_CONTRACT_DOCS = {
+    "skills/squad/shared.md",
+    "skills/squad/schema.md",
+    "skills/squad/references/api.md",
+}
 
 
 def _skill_files(repo_root, exclude_contract_docs=False):
@@ -31,9 +45,9 @@ def _skill_files(repo_root, exclude_contract_docs=False):
 
 def test_no_skill_posts_to_human_channel(repo_root):
     """No operational skill POSTs to /note (gone) or /comment (human-only) — machine records
-    are events. shared.md/schema.md legitimately *document* the human channel and are excluded."""
-    post_note = re.compile(r"POST[^\n]*/api/task/[^\n]*/note")
-    post_comment = re.compile(r"POST[^\n]*/api/task/[^\n]*/comment(?![a-zA-Z])")
+    are events. The contract docs legitimately *document* the human channel and are excluded."""
+    post_note = re.compile(r"POST[^\n]*/task/[^\n]*/note")
+    post_comment = re.compile(r"POST[^\n]*/task/[^\n]*/comment(?![a-zA-Z])")
     offenders = []
     for p in _skill_files(repo_root, exclude_contract_docs=True):
         text = p.read_text()
@@ -81,29 +95,42 @@ def test_no_pathless_append_to_agent_log(repo_root):
     assert not offenders, f"'append to agent_log' guidance must be gone: {offenders}"
 
 
-def test_token_stats_use_single_aggregate(repo_root):
-    """squad/SKILL.md token stats use the single GET /api/activity/stats aggregate (no per-task loop)."""
+def test_token_stats_use_single_aggregate(repo_root, stats_mod):
+    """(Was: the SKILL.md python-heredoc stats block.) /squad stats now delegates to
+    scripts/stats.py, which uses the single GET /activity/stats aggregate — no per-task loop,
+    no dropped agent_log column."""
+    import inspect
+
+    src = inspect.getsource(stats_mod.main)
+    assert "/activity/stats" in src, "stats.py must call the single GET /activity/stats aggregate"
+    assert "/task/" not in src, "stats.py must not loop per-task — one aggregate call only"
+    full = (repo_root / "skills" / "squad" / "scripts" / "stats.py").read_text()
+    assert "agent_log" not in full, "stats.py must not reference the dropped agent_log column"
     text = (repo_root / "skills" / "squad" / "SKILL.md").read_text()
-    assert "/api/activity/stats" in text, "token stats must call GET /api/activity/stats"
-    # The aggregate replaces the old per-task agent_log loop entirely.
+    assert "stats.py" in text, "/squad stats must delegate to scripts/stats.py"
     assert "agent_log" not in text, "squad/SKILL.md must not reference the dropped agent_log column"
 
 
 def test_shared_documents_activity_contract(repo_root):
-    """shared.md documents the POST /activity path, the {actor, model, message, tokens?} body,
-    the actor vocabulary, and the full-read-only embedding rule."""
-    text = (repo_root / "skills" / "squad" / "shared.md").read_text()
-    assert "POST /api/task/:id/activity" in text, "shared.md must document the activity append path"
+    """references/api.md documents the POST /activity path, the {actor, model, message, tokens?}
+    body, the actor vocabulary, and the projected-read (?fields=) embedding caveat."""
+    text = (repo_root / "skills" / "squad" / "references" / "api.md").read_text()
+    assert re.search(r"api POST /task/\$ID/activity", text), (
+        "references/api.md must document the activity append path"
+    )
     # The literal body contract: all four keys named together.
     for key in ("actor", "model", "message", "tokens"):
         assert key in text
     # Actor vocabulary.
     for actor in ("Planner", "Critic", "Builder", "Shield", "Inspector", "Ranger",
                   "Orchestrator", "Heartbeat", "Refiner"):
-        assert actor in text, f"shared.md missing actor {actor} in vocabulary"
-    # Full-read-only embedding rule.
-    assert "GET /api/task/:id/activity" in text
-    assert "?fields=" in text, "shared.md must explain the ?fields= embedding caveat"
+        assert actor in text, f"references/api.md missing actor {actor} in vocabulary"
+    # Dedicated reader + the embedding rule (a projected ?fields= read does NOT embed activity).
+    assert re.search(r"api GET /task/\$ID/activity", text)
+    assert "?fields=" in text, "references/api.md must document the ?fields= projected read"
+    assert re.search(r"does NOT embed activity|not embed", text, re.IGNORECASE), (
+        "references/api.md must state a ?fields= projected read does not embed activity"
+    )
 
 
 def test_schema_documents_child_tables(repo_root):
@@ -134,7 +161,7 @@ def test_templates_drop_self_append_comment(repo_root):
 # silently regressing through partial rewrites or copy-paste of old patterns.
 # ──────────────────────────────────────────────────────────────────────────────
 
-# Writer skills that MUST reference POST /activity (they all produce machine events).
+# Writer skills that MUST have an activity write path (they all produce machine events).
 _WRITER_SKILLS = [
     "squad-run",
     "squad-refine",
@@ -143,36 +170,87 @@ _WRITER_SKILLS = [
     "squad-kickstart",
 ]
 
+# A direct POST reference OR the pipeline.py mediation (`pipe event` / `pipe record` /
+# `pipeline.py event`) — pipeline.py itself POSTs /task/:id/activity (unit-tested below).
+_ACTIVITY_WRITE_PAT = re.compile(
+    r"POST[^\n]*/activity|/activity\?project=|pipe (?:event|record)\b|pipeline\.py['\" ]+event\b",
+    re.IGNORECASE,
+)
+
 
 def test_each_writer_skill_references_post_activity(repo_root):
-    """Every skill that produces machine events must reference POST /activity (or /activity?project=).
-    This ensures a skill migrated off /note today can't silently lose its write path on the next edit."""
-    # A bare reference to /activity (in a POST context) is the minimum bar.
-    # We accept: "POST /api/task/:id/activity", "POST.*activity", or "curl_post(...activity..."
-    activity_pat = re.compile(r"(?:POST[^\n]*/activity|/activity\?project=|curl_post\b)", re.IGNORECASE)
+    """Every skill that produces machine events must carry an activity write path — either the
+    direct POST /activity reference or the pipeline.py mediation (`pipe event`/`pipe record`).
+    This ensures a skill migrated off /note can't silently lose its write path on the next edit."""
     missing = []
     for name in _WRITER_SKILLS:
         text = (repo_root / "skills" / name / "SKILL.md").read_text()
-        if not activity_pat.search(text):
+        if not _ACTIVITY_WRITE_PAT.search(text):
             missing.append(name)
     assert not missing, (
-        f"These writer skills have no reference to POST /activity — "
+        f"These writer skills have no activity write path (POST /activity or pipe event/record) — "
         f"migration may be incomplete: {missing}"
     )
 
 
+def test_pipeline_event_and_record_post_activity(pipeline_mod, monkeypatch, capsys):
+    """The pipeline.py mediation actually writes the activity channel: `event` and `record`
+    both POST /task/:id/activity with the {actor, model, message} body (correlation_id when
+    given; tokens omitted when unknown, never null). Stubbed board; no network."""
+    calls = []
+    task = {"id": "SQD-7", "status": "impl", "level": 2,
+            "plan_review_count": 0, "impl_review_count": 0}
+
+    def fake_req(method, path, body=None):
+        calls.append((method, path, body))
+        return (0, task) if method == "GET" else (0, {})
+
+    monkeypatch.setattr(pipeline_mod, "_req", fake_req)
+
+    capsys.readouterr()
+    pipeline_mod.cmd_event(argparse.Namespace(
+        id="SQD-7", actor="Orchestrator", message="note", model="system",
+        cid="cid-1", tokens=None))
+    method, path, body = calls[0]
+    assert (method, path) == ("POST", "/task/SQD-7/activity")
+    assert body["actor"] == "Orchestrator" and body["model"] == "system"
+    assert body["message"] == "note" and body["correlation_id"] == "cid-1"
+    assert "tokens" not in body, "tokens must be omitted when unknown (never null)"
+
+    calls.clear()
+    capsys.readouterr()
+    pipeline_mod.cmd_record(argparse.Namespace(
+        id="SQD-7", agent="builder", message="built it", tokens=None, cid="cid-2"))
+    posts = [c for c in calls if c[0] == "POST"]
+    assert posts and posts[0][1] == "/task/SQD-7/activity", "record must POST the activity event"
+    assert posts[0][2]["actor"] == "Builder", "record must attribute the event to the agent"
+    assert posts[0][2]["correlation_id"] == "cid-2"
+    out = json.loads(capsys.readouterr().out)
+    assert out["proposed_next"] == "impl_review", "record must report the step verdict bundle"
+
+
 def test_shared_documents_orchestrator_appends_not_agents(repo_root):
-    """shared.md must say agents do NOT self-append (the :585 All-agents→append line is gone).
-    The orchestrator does the appending; agents write only their domain field."""
-    text = (repo_root / "skills" / "squad" / "shared.md").read_text()
-    # Positive assertion: the correct orchestrator-appends wording must be present.
-    assert "do NOT self-append" in text or "agents do not self-append" in text.lower(), (
-        "shared.md must state that pipeline agents do NOT self-append — "
-        "the orchestrating skill appends on their behalf"
+    """Agents do NOT self-append activity — the orchestrator appends on their behalf.
+    Post-rewrite this is structural: no agent template instructs an /activity write (agents
+    record only their domain artifact/verdict), and squad-run's orchestrator records each step
+    via `pipe record` after the agent Task completes."""
+    tpl_dir = repo_root / "skills" / "squad" / "templates"
+    self_append = re.compile(r"POST[^\n]*/activity|api POST /task/\$ID/activity|pipe (?:event|record)\b")
+    offenders = []
+    for p in sorted(tpl_dir.glob("*.md")):
+        if self_append.search(p.read_text()):
+            offenders.append(p.name)
+    assert not offenders, (
+        f"agent templates must not instruct an activity self-append (orchestrator-only): {offenders}"
     )
-    # Negative assertion: the old wrong guidance must NOT be present.
-    assert "All agents" not in text or "All agents → append" not in text, (
-        "shared.md still contains the old 'All agents → append to agent_log' line — must be removed"
+    run = (repo_root / "skills" / "squad-run" / "SKILL.md").read_text()
+    assert "pipe record" in run, (
+        "squad-run's orchestrator must append the step activity via `pipe record` after the Task"
+    )
+    # Negative assertion: the old wrong guidance must NOT creep back anywhere.
+    shared = (repo_root / "skills" / "squad" / "shared.md").read_text()
+    assert "All agents → append" not in shared, (
+        "shared.md must not resurrect the old 'All agents → append to agent_log' line"
     )
 
 
@@ -190,12 +268,12 @@ def test_no_bare_note_url_anywhere(repo_root):
 
 
 def test_heartbeat_reads_activity_endpoint_not_fields_param(repo_root):
-    """squad-heartbeat must read last-activity via GET /api/task/:id/activity (dedicated reader),
+    """squad-heartbeat must read last-activity via GET .../task/:id/activity (dedicated reader),
     NOT via ?fields=agent_log (dropped column) or ?fields=activity (does not embed)."""
     text = (repo_root / "skills" / "squad-heartbeat" / "SKILL.md").read_text()
     # Must use the dedicated activity reader path.
     assert "/activity" in text, (
-        "squad-heartbeat must read activity via GET /api/task/:id/activity"
+        "squad-heartbeat must read activity via GET .../task/:id/activity"
     )
     # Must NOT use the dropped ?fields=agent_log.
     assert "fields=agent_log" not in text, (
@@ -207,23 +285,20 @@ def test_heartbeat_reads_activity_endpoint_not_fields_param(repo_root):
     )
 
 
-def test_squad_stats_env_vars_exported_before_python(repo_root):
-    """squad/SKILL.md stats block must export BOARD and STATS in the bash layer before the
-    python3 heredoc runs — both must appear as `export <VAR>=` assignments so the subprocess
-    inherits them via os.environ."""
-    text = (repo_root / "skills" / "squad" / "SKILL.md").read_text()
-    assert "export BOARD=" in text, (
-        "squad/SKILL.md stats block must export BOARD= so the python3 heredoc can read os.environ['BOARD']"
-    )
-    assert "export STATS=" in text, (
-        "squad/SKILL.md stats block must export STATS= so the python3 heredoc can read os.environ['STATS']"
-    )
-    # And the python layer must consume them via os.environ (not stdin or hardcoded)
-    assert "os.environ['BOARD']" in text or 'os.environ["BOARD"]' in text, (
-        "squad/SKILL.md python stats block must read BOARD via os.environ"
-    )
-    assert "os.environ['STATS']" in text or 'os.environ["STATS"]' in text, (
-        "squad/SKILL.md python stats block must read STATS via os.environ"
+def test_squad_stats_env_vars_exported_before_python(repo_root, stats_mod):
+    """(Was: `export BOARD=`/`export STATS=` before the SKILL.md python3 heredoc.) The bash→python
+    env handoff is structurally gone: stats.py now fetches BOTH datasets itself through api.py —
+    no environment-variable data handoff exists to break. The surviving contract is that the
+    renderer really receives the board + stats payloads it renders."""
+    import inspect
+
+    src = inspect.getsource(stats_mod.main)
+    assert "/board?summary=true" in src, "stats.py must fetch the board summary itself"
+    assert "/activity/stats" in src, "stats.py must fetch the activity aggregate itself"
+    full = (repo_root / "skills" / "squad" / "scripts" / "stats.py").read_text()
+    assert "os.environ" not in full, (
+        "stats.py must not depend on an env-var data handoff (the failure mode the old "
+        "export-before-heredoc guard protected against)"
     )
 
 

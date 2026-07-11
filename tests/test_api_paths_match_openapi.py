@@ -331,9 +331,11 @@ def test_executable_api_calls_match_openapi(repo_root):
     spec_keys = _load_spec_keys(repo_root)
     files = _doc_files(repo_root)
     calls = list(_iter_api_calls(files))
-    assert len(calls) >= 50, (
+    assert len(calls) >= 25, (
         f"the api() extractor found only {len(calls)} calls — it looks broken (a vacuous "
-        "guard); the migrated skills issue ~100 `api <METHOD> <path>` calls"
+        "guard); the skills issue ~40 explicit `api <METHOD> <path>` calls (most board I/O "
+        "now lives inside the packaged scripts, which have their own path coverage via "
+        "the consumer contract)"
     )
     offenders = _api_call_offenders(files, spec_keys, repo_root)
     assert not offenders, (

@@ -1,23 +1,11 @@
 [
   {
     "method": "DELETE",
-    "path": "/orgs/{}/projects/{}"
-  },
-  {
-    "method": "DELETE",
     "path": "/orgs/{}/projects/{}/links"
   },
   {
     "method": "DELETE",
     "path": "/orgs/{}/task/{}"
-  },
-  {
-    "method": "DELETE",
-    "path": "/orgs/{}/task/{}/attachment/{}"
-  },
-  {
-    "method": "GET",
-    "path": "/orgs/{}/activity/stats"
   },
   {
     "method": "GET",
@@ -33,19 +21,11 @@
   },
   {
     "method": "GET",
-    "path": "/orgs/{}/projects/{}/links"
-  },
-  {
-    "method": "GET",
     "path": "/orgs/{}/task/{}"
   },
   {
     "method": "GET",
     "path": "/orgs/{}/task/{}/activity"
-  },
-  {
-    "method": "GET",
-    "path": "/orgs/{}/task/{}/attachment"
   },
   {
     "method": "GET",
@@ -60,16 +40,8 @@
     "path": "/orgs/{}/task/{}"
   },
   {
-    "method": "PATCH",
-    "path": "/orgs/{}/task/{}/reorder"
-  },
-  {
     "method": "POST",
     "path": "/orgs/{}/projects"
-  },
-  {
-    "method": "POST",
-    "path": "/orgs/{}/projects/{}/links"
   },
   {
     "method": "POST",
@@ -85,23 +57,11 @@
   },
   {
     "method": "POST",
-    "path": "/orgs/{}/task/{}/attachment"
-  },
-  {
-    "method": "POST",
     "path": "/orgs/{}/task/{}/cancel"
   },
   {
     "method": "POST",
-    "path": "/orgs/{}/task/{}/comment"
-  },
-  {
-    "method": "POST",
     "path": "/orgs/{}/task/{}/complete"
-  },
-  {
-    "method": "POST",
-    "path": "/orgs/{}/task/{}/override-review"
   },
   {
     "method": "POST",

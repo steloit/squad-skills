@@ -40,5 +40,20 @@ def refine_ledger():
 
 
 @pytest.fixture(scope="session")
+def pipeline_mod():
+    return _load("skills/squad/scripts/pipeline.py", "pipeline")
+
+
+@pytest.fixture(scope="session")
+def create_tasks_mod():
+    return _load("skills/squad/scripts/create_tasks.py", "create_tasks")
+
+
+@pytest.fixture(scope="session")
+def stats_mod():
+    return _load("skills/squad/scripts/stats.py", "stats")
+
+
+@pytest.fixture(scope="session")
 def repo_root():
     return ROOT

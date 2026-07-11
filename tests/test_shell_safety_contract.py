@@ -128,12 +128,18 @@ def _violations(text):
 
 
 def test_shell_safety_box_present(repo_root):
-    """Non-brittle: assert several independent stable stems, not one exact phrase, so
-    a copyedit of the box's wording doesn't spuriously break this test."""
-    text = (repo_root / "skills/squad-run/SKILL.md").read_text(encoding="utf-8")
+    """The doctrine moved from squad-run/SKILL.md's Shell Safety box to shared.md's
+    'JSON safety (injection defense)' section (loaded by every skill), with the per-agent
+    rule injected into every rendered prompt via templates/_shared.md. Non-brittle: assert
+    several independent stable stems, not one exact phrase."""
+    text = (repo_root / "skills/squad/shared.md").read_text(encoding="utf-8")
 
-    assert re.search(r"Shell Safety", text), (
-        "squad-run/SKILL.md must carry a 'Shell Safety' heading/box"
+    assert re.search(r"JSON safety", text), (
+        "shared.md must carry the 'JSON safety' section"
+    )
+    agent_rules = (repo_root / "skills/squad/templates/_shared.md").read_text(encoding="utf-8")
+    assert re.search(r"data,\s*never\s*code", agent_rules), (
+        "templates/_shared.md must carry the 'data, never code' rule for every agent prompt"
     )
     assert re.search(r"injection.defense", text, re.IGNORECASE), (
         "the box must frame itself as injection defense"

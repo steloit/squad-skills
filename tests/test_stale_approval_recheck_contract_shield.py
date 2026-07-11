@@ -1,263 +1,209 @@
-"""Gap-coverage tests for the stale-approval recheck contract (SQD-872).
+"""Gap-coverage tests for the stale-approval recheck contract.
 
-These tests EXTEND ``test_stale_approval_recheck_contract.py`` (19 assertions by Builder) — added
-by Shield (sonnet) in the same TDD pass.  Do NOT duplicate the Builder's 19 assertions; cover the
-gaps identified during review:
+Companion to ``test_stale_approval_recheck_contract.py`` — covers gaps rather
+than duplicating it. Post-re-architecture, both seams (the advance-time capture
+and the finalize-time recheck) call the SAME engine primitive
+(``pipeline.py::_tree_hash``), so the old Seam-A/Seam-B bash-duplication checks
+(temp-index form, ``git add -A``, mktemp/rm ordering, post-use cleanup in each
+seam) are structurally obsolete: there is one primitive and it cannot drift
+between seams. What replaces them:
 
-(A) Seam B (Done Transition) also uses the non-destructive temp-index primitive — GIT_INDEX_FILE
-    and ``git write-tree`` must appear inside the Done Transition section, not just in Seam A.
+(shared primitive)  cmd_advance and cmd_finalize both call ``_tree_hash()`` —
+                    asserted at source level so a future fork of the primitive
+                    per-seam is caught.
+(threat model)      an untracked-file-only change after approval (the Ranger
+                    threat) is detected by the finalize recheck end-to-end.
+(no new status)     the stale branch introduces no new pipeline column/status —
+                    the engine's transition table only ever yields the
+                    canonical statuses, and no `stale`-named status exists.
+(reject loop)       ``changes_requested`` at impl_review and ``fail`` at test
+                    both route back to ``impl`` — the EXISTING reject loop.
+(re-snapshot)       after a send-back, the re-approved impl_review→test advance
+                    captures a FRESH approval_tree (the new tree, not the old).
+(x-ref trigger)     test-runner.md names the working-tree CHANGE as the re-fire
+                    trigger, not just the gate in the abstract.
 
-(B) Seam B also uses ``git add -A`` (tracked + untracked) — the Builder only asserts this in
-    Seam A; the Seam B recheck must stage the whole tree identically.
+Deleted (structurally obsolete): the markdown section-extractor self-tests —
+no markdown section extraction remains in this suite.
 
-(C) Seam B's ``mktemp + rm -f`` ordering (remove BEFORE the git read) must hold in Seam B too —
-    the Builder verifies it in Seam A only, but the same corrupt-index pitfall applies at recheck.
-
-(D) Seam A has an ``rm -f "$TMPIDX"`` AFTER ``git write-tree`` (cleanup), not just the pre-use
-    removal — the Builder asserts the pre-use ordering but not the post-use cleanup.
-
-(E) Seam B has the same post-write-tree ``rm -f "$TMPIDX"`` cleanup — must appear after the
-    ``PRECOMMIT_TREE=`` assignment in Seam B as well.
-
-(F) No new pipeline column or status string is introduced — the Seam B stale branch text must
-    explicitly state it is NOT a new column/status, ruling out the introduction of e.g. a
-    ``stale_review`` status.
-
-(G) The ``changes_requested`` re-review path in Seam B routes back to ``impl`` — the EXISTING
-    reject loop, not a new status — so the stale path reuses the standard impl_review→impl table.
-
-(H) The cross-reference in test-runner.md is about a TREE CHANGE re-firing impl_review — it must
-    mention that the tree (working-tree change / tree modification) triggers the re-fire, not just
-    that the gate fires in the abstract.
-
-(I) Non-vacuous self-test for Shield's own section extractor: an injected Seam B with known text
-    produces a non-empty extraction, and an absent section yields empty.
-
-Hermetic: reads committed skill files only, no network. Stdlib (``re``) only.
+Hermetic: ``_req`` stubbed, git in tmp_path repos, no network.
 """
+import inspect
+import json
 import re
+import subprocess
+from types import SimpleNamespace
 
-SKILL = "skills/squad-run/SKILL.md"
 TEST_RUNNER = "skills/squad/templates/test-runner.md"
 
 
+def _stub_req(monkeypatch, pipeline_mod, handler=None):
+    calls = []
+
+    def fake_req(method, path, body=None):
+        calls.append((method, path, body))
+        if handler:
+            return handler(method, path, body)
+        return 0, {}
+
+    monkeypatch.setattr(pipeline_mod, "_req", fake_req)
+    return calls
+
+
+def _repo_with_commit(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "commit.gpgsign", "false"], cwd=repo, check=True)
+    (repo / "src.txt").write_text("v1\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True,
+                   capture_output=True)
+    return repo
+
+
+def _advance_args(**kw):
+    base = dict(id="7", human_reject=False, reason=None, cid=None, force=False)
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
 # ---------------------------------------------------------------------------
-# helpers (mirrors Builder's helpers — no import to avoid coupling)
+# (shared primitive) both seams use the ONE _tree_hash primitive
 # ---------------------------------------------------------------------------
 
-def _read(repo_root, rel: str) -> str:
-    return (repo_root / rel).read_text(encoding="utf-8")
-
-
-def _section(text: str, heading_regex: str) -> str:
-    """Body from a heading up to the next same-or-higher-level heading or EOF."""
-    m = re.search(
-        heading_regex + r".*?\n(?:.*?(?=^#{2,6}\s)|.*\Z)",
-        text,
-        re.MULTILINE | re.DOTALL,
+def test_advance_and_finalize_share_the_one_tree_hash_primitive(pipeline_mod):
+    """Capture (cmd_advance) and recheck (cmd_finalize) must both call
+    ``_tree_hash()`` — one primitive, so the two seams cannot drift apart the
+    way the old duplicated bash blocks could."""
+    assert "_tree_hash()" in inspect.getsource(pipeline_mod.cmd_advance), (
+        "cmd_advance must capture the approval snapshot via _tree_hash()"
     )
-    return m.group(0) if m else ""
-
-
-def _approval_snapshot_section(text: str) -> str:
-    return _section(text, r"^#####\s+L3 Approval Snapshot \(Inspector → test\)")
-
-
-def _done_transition_section(text: str) -> str:
-    return _section(text, r"^####\s+→ Done Transition\b")
-
-
-# ---------------------------------------------------------------------------
-# (A) Seam B: non-destructive temp-index primitive present in Done Transition
-# ---------------------------------------------------------------------------
-
-def test_seam_b_uses_git_index_file_primitive(repo_root):
-    """The Done Transition recheck must use ``GIT_INDEX_FILE`` — the same throwaway temp-index
-    primitive as Seam A — NOT a plain ``git diff`` or stash-based approach."""
-    section = _done_transition_section(_read(repo_root, SKILL))
-    assert "GIT_INDEX_FILE" in section, (
-        "Done Transition must use GIT_INDEX_FILE for the non-destructive recheck primitive "
-        "(same primitive as Seam A — verified in Seam B independently of Seam A)"
-    )
-
-
-def test_seam_b_uses_git_write_tree(repo_root):
-    """The Done Transition recheck must compute the tree SHA via ``git write-tree`` — the
-    primitive must be verbatim-consistent with Seam A, not a different hash mechanism."""
-    section = _done_transition_section(_read(repo_root, SKILL))
-    assert "git write-tree" in section, (
-        "Done Transition must compute the content hash via `git write-tree` "
-        "(same as the Seam A approval snapshot — verified in Seam B independently)"
-    )
-
-
-# ---------------------------------------------------------------------------
-# (B) Seam B: git add -A stages tracked + untracked in the recheck primitive
-# ---------------------------------------------------------------------------
-
-def test_seam_b_includes_untracked_via_add_all(repo_root):
-    """The Done Transition recheck must use ``git add -A`` so that a new untracked file added by
-    Ranger (the primary threat model) changes the tree hash and triggers re-review."""
-    section = _done_transition_section(_read(repo_root, SKILL))
-    assert re.search(r"git add (-A|--all)\b", section), (
-        "Done Transition must use `git add -A` in the recheck primitive so untracked files "
-        "change the hash — the Builder only asserts this for Seam A; Seam B must also do it"
+    assert "_tree_hash()" in inspect.getsource(pipeline_mod.cmd_finalize), (
+        "cmd_finalize must recheck via the same _tree_hash() primitive"
     )
 
 
 # ---------------------------------------------------------------------------
-# (C) Seam B: mktemp + rm -f ordering (remove BEFORE git reads the path)
+# (threat model) untracked-file-only change is detected at the recheck seam
 # ---------------------------------------------------------------------------
 
-def test_seam_b_mktemp_rm_ordering_before_use(repo_root):
-    """The Done Transition recheck must pair ``TMPIDX=$(mktemp) && rm -f "$TMPIDX"`` immediately
-    before the ``GIT_INDEX_FILE="$TMPIDX" git add`` use.
+def test_finalize_stale_detects_untracked_only_change(pipeline_mod, tmp_path, monkeypatch, capsys):
+    """The primary threat model: Ranger adds a NEW (untracked) file after the
+    Inspector approval. The finalize recheck must flag it stale end-to-end."""
+    repo = _repo_with_commit(tmp_path)
+    monkeypatch.chdir(repo)
+    approval = pipeline_mod._tree_hash()
+    (repo / "ranger-added.txt").write_text("post-approval file\n")
 
-    The same corrupt-index pitfall applies at Seam B: mktemp pre-creates an empty file that git
-    rejects as a corrupt index unless removed first.  The Builder checks Seam A only."""
-    section = _done_transition_section(_read(repo_root, SKILL))
-    m = re.search(
-        r'TMPIDX=\$\(mktemp\)\s*&&\s*rm -f "\$TMPIDX".*?'
-        r'GIT_INDEX_FILE="\$TMPIDX"\s+git add',
-        section,
-        re.DOTALL,
+    def handler(method, path, body):
+        if method == "GET":
+            return 0, {"id": 7, "title": "t", "level": 3, "status": "test"}
+        return 0, {"success": True}
+
+    calls = _stub_req(monkeypatch, pipeline_mod, handler)
+    pipeline_mod.cmd_finalize(SimpleNamespace(id="7", approval_tree=approval))
+
+    out = json.loads(capsys.readouterr().out)
+    assert out.get("stale_approval") is True, (
+        "an untracked-file-only change after approval must be flagged stale"
     )
-    assert m, (
-        "Done Transition must pair `TMPIDX=$(mktemp) && rm -f \"$TMPIDX\"` immediately before "
-        "`GIT_INDEX_FILE=\"$TMPIDX\" git add` — the rm must precede the git read to avoid the "
-        "corrupt-index error (verified in Seam B independently of Seam A)"
-    )
-
-
-# ---------------------------------------------------------------------------
-# (D) Seam A: rm -f cleanup AFTER git write-tree (post-use cleanup)
-# ---------------------------------------------------------------------------
-
-def test_seam_a_has_rm_cleanup_after_write_tree(repo_root):
-    """Seam A must include an ``rm -f "$TMPIDX"`` AFTER the ``APPROVAL_TREE=$(… git write-tree)``
-    assignment — the throwaway index must be cleaned up after use, not just removed before use.
-
-    The Builder's ``test_snapshot_mktemp_rm_ordering_before_use`` checks that rm precedes the
-    git read; this test checks the post-read cleanup is also present."""
-    section = _approval_snapshot_section(_read(repo_root, SKILL))
-    # Locate write-tree, then assert rm -f follows it
-    approval_assign = section.find("APPROVAL_TREE=")
-    assert approval_assign != -1, "APPROVAL_TREE= not found in Seam A"
-    rm_after = re.search(r'rm -f "\$TMPIDX"', section[approval_assign:])
-    assert rm_after, (
-        "Seam A must have `rm -f \"$TMPIDX\"` AFTER the `APPROVAL_TREE=$(…git write-tree)` "
-        "assignment — the throwaway index must be cleaned up after use"
+    assert not [c for c in calls if c[0] in ("PATCH", "POST")], (
+        "no move / no commit event may be issued on a stale approval"
     )
 
 
 # ---------------------------------------------------------------------------
-# (E) Seam B: rm -f cleanup AFTER git write-tree (post-use cleanup)
+# (no new status) the stale branch reuses the existing pipeline, no new column
 # ---------------------------------------------------------------------------
 
-def test_seam_b_has_rm_cleanup_after_write_tree(repo_root):
-    """Seam B must include an ``rm -f "$TMPIDX"`` AFTER the ``PRECOMMIT_TREE=$(… git write-tree)``
-    assignment — the same post-use cleanup requirement as Seam A."""
-    section = _done_transition_section(_read(repo_root, SKILL))
-    precommit_assign = section.find("PRECOMMIT_TREE=")
-    assert precommit_assign != -1, "PRECOMMIT_TREE= not found in Seam B (Done Transition)"
-    rm_after = re.search(r'rm -f "\$TMPIDX"', section[precommit_assign:])
-    assert rm_after, (
-        "Done Transition must have `rm -f \"$TMPIDX\"` AFTER the `PRECOMMIT_TREE=$(…git write-tree)` "
-        "assignment — the throwaway index must be cleaned up after use (same as Seam A)"
+_CANONICAL = {"todo", "plan", "plan_review", "impl", "impl_review", "test",
+              "done", "cancelled"}
+
+
+def test_engine_transition_table_yields_only_canonical_statuses(pipeline_mod):
+    seen = set()
+    for status in ("todo", "plan", "plan_review", "impl", "impl_review", "test"):
+        for level in (1, 2, 3):
+            for verdict in (None, "approved", "changes_requested", "pass", "fail"):
+                nxt = pipeline_mod._next_status(status, level, verdict)
+                if nxt is not None:
+                    seen.add(nxt)
+    assert seen <= _CANONICAL, (
+        f"_next_status must only ever yield canonical statuses, got {seen - _CANONICAL}"
+    )
+
+
+def test_no_stale_named_status_exists_in_the_engine(pipeline_mod):
+    src = inspect.getsource(pipeline_mod)
+    assert "stale_review" not in src, (
+        "the stale branch must reuse the existing impl_review gate, not a new status"
+    )
+    assert set(pipeline_mod.STATUS_AGENT) <= _CANONICAL
+
+
+# ---------------------------------------------------------------------------
+# (reject loop) changes_requested / fail route back to impl — the EXISTING loop
+# ---------------------------------------------------------------------------
+
+def test_stale_rereview_changes_requested_routes_to_impl(pipeline_mod):
+    assert pipeline_mod._next_status("impl_review", 3, "changes_requested") == "impl", (
+        "a changes_requested re-review must fire the EXISTING impl_review→impl reject loop"
+    )
+    assert pipeline_mod._next_status("impl_review", 2, "changes_requested") == "impl"
+
+
+def test_test_fail_routes_to_impl(pipeline_mod):
+    assert pipeline_mod._next_status("test", 3, "fail") == "impl", (
+        "a test failure must fire the EXISTING test→impl reject loop"
     )
 
 
 # ---------------------------------------------------------------------------
-# (F) No new pipeline column or status introduced — explicit in Seam B text
+# (re-snapshot) re-approval captures a FRESH approval_tree
 # ---------------------------------------------------------------------------
 
-def test_stale_branch_does_not_introduce_new_status(repo_root):
-    """The Seam B stale branch must explicitly state it is NOT a new column/status — the
-    no-new-status constraint is a load-bearing requirement (REQ in the spec) and must be
-    self-documenting in the instruction so agents cannot misread it as a new gate.
+def test_reapproval_recaptures_fresh_snapshot(pipeline_mod, tmp_path, monkeypatch, capsys):
+    """After a stale send-back the tree has changed; the re-approved
+    impl_review→test advance must return the NEW tree hash, never the old."""
+    repo = _repo_with_commit(tmp_path)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(pipeline_mod, "_emit_steering", lambda *a, **k: None)
 
-    The Builder tests that ``impl_review`` is re-used; this test asserts the negative statement
-    is present in the text."""
-    section = _done_transition_section(_read(repo_root, SKILL))
-    assert re.search(r"NOT a new column/status", section), (
-        "Done Transition stale branch must say 'NOT a new column/status' — the no-new-status "
-        "constraint must be self-documenting (REQ: the re-review reuses the existing impl_review gate)"
-    )
+    def handler(method, path, body):
+        if method == "GET":
+            return 0, {"status": "impl_review", "level": 3, "version": 4,
+                       "impl_review_count": 2, "last_review_status": "approved"}
+        return 0, {"success": True}
 
+    _stub_req(monkeypatch, pipeline_mod, handler)
+    pipeline_mod.cmd_advance(_advance_args())
+    first = json.loads(capsys.readouterr().out)["approval_tree"]
 
-# ---------------------------------------------------------------------------
-# (G) changes_requested path routes back to impl — the EXISTING reject loop
-# ---------------------------------------------------------------------------
+    (repo / "src.txt").write_text("reworked after send-back\n")
+    pipeline_mod.cmd_advance(_advance_args())
+    second = json.loads(capsys.readouterr().out)["approval_tree"]
 
-def test_stale_changes_requested_routes_to_impl(repo_root):
-    """When the stale re-review returns ``changes_requested``, the path must route back to
-    ``impl`` via the EXISTING ``impl_review → impl`` reject loop — NOT a new status.
-
-    The Builder verifies ``impl_review_count > 3`` is respected; this test checks that
-    ``changes_requested`` → ``impl`` is the explicit instruction in the text."""
-    section = _done_transition_section(_read(repo_root, SKILL))
-    m = re.search(
-        r"changes_requested.*impl(?:_review)?\s*→\s*impl\b|"
-        r"changes_requested.*impl reject loop|"
-        r"changes_requested.*route back to.*impl\b",
-        section, re.IGNORECASE | re.DOTALL,
-    )
-    assert m, (
-        "Done Transition must state that a stale re-review `changes_requested` verdict fires the "
-        "EXISTING `impl_review → impl` reject loop (routes back to Builder/impl) — "
-        "not a new status or column"
-    )
+    assert second != first, "the re-approval snapshot must be FRESH (new tree)"
+    assert second == pipeline_mod._tree_hash()
 
 
 # ---------------------------------------------------------------------------
-# (H) test-runner.md cross-ref mentions TREE CHANGE as the trigger
+# (x-ref trigger) test-runner.md names the tree CHANGE as the trigger
 # ---------------------------------------------------------------------------
 
 def test_test_runner_cross_ref_mentions_tree_change(repo_root):
-    """The test-runner.md cross-reference must say that a working-tree change (or equivalent
-    tree modification) triggers the impl_review re-fire — not just that the gate fires in the
-    abstract.  This ensures Ranger understands WHY the backstop exists."""
-    text = _read(repo_root, TEST_RUNNER)
+    """The test-runner.md cross-reference must say a working-tree change (or
+    equivalent tree modification) triggers the impl_review re-fire — Ranger
+    needs the condition, not just the effect."""
+    text = (repo_root / TEST_RUNNER).read_text()
     assert re.search(
         r"modif(?:y|ies|ied|ication)|change[sd]?.*(?:tree|working)|tree.*change[sd]?|"
         r"working.tree|working tree",
-        text, re.IGNORECASE
+        text, re.IGNORECASE,
     ), (
-        "test-runner.md cross-reference must mention a working-tree change / tree modification "
-        "as the trigger for re-firing the impl_review gate — not just 're-fires the gate' "
-        "in the abstract (Ranger needs to understand the condition, not just the effect)"
-    )
-
-
-# ---------------------------------------------------------------------------
-# (I) Non-vacuous self-test for Shield's own section extractor
-# ---------------------------------------------------------------------------
-
-def test_shield_section_extractor_self_test():
-    """Shield's ``_done_transition_section`` must extract the right text from a planted snippet
-    and return empty for an absent heading — confirming the helper is non-vacuous.
-
-    This is a different self-test from the Builder's (which tests ``_approval_snapshot_section``
-    and the extractor against a two-section document).  Here we verify Seam B extraction
-    independently and confirm the fallback to empty is correct."""
-    # Planted: a Done Transition section with known text, followed by another heading
-    planted = (
-        "## Pipeline\n\n"
-        "#### → Done Transition (all levels)\n\n"
-        "PRECOMMIT_TREE=$(git write-tree)\n"
-        'if [ "$PRECOMMIT_TREE" = "$APPROVAL_TREE" ]; then\n'
-        "  echo ok\n"
-        "fi\n\n"
-        "#### Other Section\n\n"
-        "unrelated\n"
-    )
-    extracted = _done_transition_section(planted)
-    assert "PRECOMMIT_TREE" in extracted, (
-        "Shield's _done_transition_section must extract PRECOMMIT_TREE from the planted snippet"
-    )
-    assert "unrelated" not in extracted, (
-        "Shield's _done_transition_section must NOT bleed into the next section"
-    )
-    assert _done_transition_section("## Pipeline\n\nno done section here\n") == "", (
-        "Shield's _done_transition_section must return empty when the heading is absent"
+        "test-runner.md must mention a working-tree change / modification as the "
+        "trigger for re-firing the impl_review gate"
     )

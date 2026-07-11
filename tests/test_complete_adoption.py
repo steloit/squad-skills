@@ -2,23 +2,51 @@
 
 The board grew an administrative completion action: a task can be completed from ANY non-terminal
 status via `POST /api/orgs/{org}/task/{id}/complete` (optional `completion_note`), landing on the
-existing `done` terminal. It records `completed_via` (`"admin"` vs the gated `"pipeline"`), it is
-history-preserving and idempotent, a cancelled target returns `409`, and it is reversible via the
-generalized reopen action (`cancelled` OR `done` → `todo`, which now also nulls `completion_note` +
-`completed_via`). These deterministic grep invariants keep the skills aligned with that action so the
-adoption can't silently regress — a re-narrowed reopen, a dispatch that forgets `done` is terminal, a
-missing `/complete` verb, or a readiness note that treats the derived epic `complete` rollup as a
-dependency-satisfaction signal.
+existing `done` terminal. It records `completed_via` (`"admin"` vs the gated `"pipeline"` vs the
+epic `"rollup"`), it is history-preserving and idempotent, a cancelled target returns `409`, and it
+is reversible via the generalized reopen action (`cancelled` OR `done` → `todo`, which also nulls
+`completion_note` + `completed_via`).
+
+Post skills-efficiency re-architecture the contract's homes moved (the CONTRACTS are unchanged):
+  - endpoint + 409-on-cancelled + reopen-nulls semantics → `skills/squad/references/api.md`
+    (`skills/squad/shared.md` stays the hub carrying the move-matrix mention of `/complete`);
+  - epic-blocker readiness semantics (readiness = STORED status; the derived epic `complete`
+    rollup is display-only) → `skills/squad/references/epics.md`;
+  - squad-run's terminal refusal + readiness gate → `skills/squad/scripts/pipeline.py`
+    `preflight`, unit-tested here with a stubbed `_req` (no network);
+  - `/squad complete` + `/squad reopen` → still `skills/squad/SKILL.md` (complete/cancel now
+    share ONE "Terminal actions" section — the pairing is structural, not prose).
 
 `/complete` is the symmetric twin of the `cancelled` adoption; this mirrors test_cancel_adoption.py
-1:1 (hermetic; reads the committed skill files). The key divergence: readiness logic is NOT touched —
-`done` is already in the resolved `{done, cancelled}` set, so there is no jq change to assert.
+(hermetic; reads the committed skill files / stubs board I/O).
 """
+import argparse
+import json
 import re
 
 
 def _read(repo_root, rel):
     return (repo_root / rel).read_text()
+
+
+def _preflight(pipeline_mod, monkeypatch, capsys, task, rel):
+    """Run pipeline.py's `preflight` against a stubbed board — read-only, no network."""
+    def fake_req(method, path, body=None):
+        assert method == "GET", f"preflight must be read-only, got {method} {path}"
+        if path.endswith("/relationships"):
+            return 0, rel
+        return 0, task
+    monkeypatch.setattr(pipeline_mod, "_req", fake_req)
+    capsys.readouterr()
+    pipeline_mod.cmd_preflight(argparse.Namespace(id=task["id"]))
+    return json.loads(capsys.readouterr().out)
+
+
+def _task(**over):
+    base = {"id": "SQD-1", "title": "T", "status": "todo", "level": 2,
+            "card_type": "task", "plan_review_count": 0, "impl_review_count": 0}
+    base.update(over)
+    return base
 
 
 # ── schema.md: the completion_note + completed_via fields + /complete prose ────
@@ -50,136 +78,150 @@ def test_schema_lists_completion_fields_and_complete_prose(repo_root):
     )
 
 
-# ── shared.md: move-matrix, endpoint, reopen prose, epic-blocker readiness ─────
+# ── shared.md hub + references/api.md: move-matrix, endpoint, reopen prose ─────
 
 
 def test_shared_documents_complete_terminal_reachable(repo_root):
-    """shared.md documents `done` reachable via `/complete` from any non-terminal status (in addition
-    to the gated pipeline path)."""
-    text = _read(repo_root, "skills/squad/shared.md")
-    assert re.search(r"non-terminal", text, re.IGNORECASE), (
-        "shared.md must state /complete is reachable from any NON-TERMINAL status"
+    """The docs state `done` is reachable via `/complete` from any non-terminal status: shared.md
+    (hub) keeps the move-matrix mention; references/api.md carries the endpoint semantics."""
+    hub = _read(repo_root, "skills/squad/shared.md")
+    assert re.search(r"/complete", hub), "shared.md must reference the /complete action"
+    api = _read(repo_root, "skills/squad/references/api.md")
+    assert re.search(r"/complete", api), "references/api.md must document the /complete action"
+    assert re.search(r"non-terminal", api, re.IGNORECASE), (
+        "references/api.md must state /complete is reachable from any NON-TERMINAL status"
     )
-    assert re.search(r"/complete", text), "shared.md must reference the /complete action"
 
 
 def test_shared_documents_complete_endpoint(repo_root):
-    """shared.md's API Endpoints block adds an executable `api POST /task/$ID/complete` call with an
-    optional completion_note and the completed_via/409 semantics."""
-    text = _read(repo_root, "skills/squad/shared.md")
+    """references/api.md's lifecycle block carries the executable `api POST /task/$ID/complete`
+    call with an optional completion_note and the completed_via semantics."""
+    text = _read(repo_root, "skills/squad/references/api.md")
     assert re.search(r"api POST /task/\$ID/complete", text), (
-        "shared.md must document the executable `api POST /task/$ID/complete` endpoint"
+        "references/api.md must document the executable `api POST /task/$ID/complete` endpoint"
     )
-    assert "completion_note" in text, "shared.md complete endpoint must mention completion_note"
-    assert "completed_via" in text, "shared.md must mention completed_via"
+    assert "completion_note" in text, "the complete endpoint doc must mention completion_note"
+    assert "completed_via" in text, "references/api.md must mention completed_via"
 
 
 def test_shared_reopen_prose_nulls_completion_fields(repo_root):
-    """The reopen prose must null completion_note AND completed_via (the un-complete path), alongside
-    cancel_reason — the done-only reopen wording stays gone."""
-    text = _read(repo_root, "skills/squad/shared.md")
-    # The reopen sentence must name both new fields it now clears.
+    """The reopen prose (now in references/api.md) must null completion_note AND completed_via
+    (the un-complete path), alongside cancel_reason — the done-only reopen wording stays gone."""
+    text = _read(repo_root, "skills/squad/references/api.md")
+    # The reopen sentence must name both fields it clears.
     assert re.search(
-        r"reopen[^.]*completion_note[^.]*completed_via|completion_note[^.]*\bcompleted_via\b",
+        r"[Rr]eopen clears[^.]*completion_note[^.]*completed_via",
         text,
-        re.IGNORECASE | re.DOTALL,
-    ), "shared.md reopen prose must null completion_note AND completed_via"
-    # The old narrow claim must still be gone (mirrors the cancel-adoption guard).
-    assert not re.search(r"only a\s+`?done`?\s+task can be reopened", text, re.IGNORECASE), (
-        "shared.md still carries the old done-only reopen wording"
+        re.DOTALL,
+    ), "references/api.md reopen prose must null completion_note AND completed_via"
+    assert re.search(r"[Rr]eopen clears[^.]*cancel_reason", text, re.DOTALL), (
+        "references/api.md reopen prose must also null cancel_reason"
     )
+    # The old narrow claim must still be gone from the hub AND the reference.
+    for rel in ("skills/squad/shared.md", "skills/squad/references/api.md"):
+        assert not re.search(
+            r"only a\s+`?done`?\s+task can be reopened", _read(repo_root, rel), re.IGNORECASE
+        ), f"{rel} still carries the old done-only reopen wording"
 
 
 def test_shared_complete_endpoint_documents_409_on_cancelled(repo_root):
-    """shared.md must document /complete's 409-on-a-cancelled-target (reopen-first) guard — the third
-    arm of AC#1 (endpoint + 409-on-cancelled + reopen-nulls-both). The sibling endpoint/reopen guards
-    above never assert the 409 path, so without this a future edit could drop the `cancelled → 409`
-    contract from the docs while every other complete guard stays green."""
-    text = _read(repo_root, "skills/squad/shared.md")
-    assert re.search(
-        r"cancelled target returns\s+`?409`?|`?409`?\s+on a cancelled target", text, re.IGNORECASE
-    ), "shared.md must document that /complete on a CANCELLED target returns 409 (reopen first)"
+    """references/api.md must document /complete's 409-on-a-cancelled-target (reopen-first) guard —
+    the third arm of AC#1 (endpoint + 409-on-cancelled + reopen-nulls-both). Without this a future
+    edit could drop the `cancelled → 409` contract while every other complete guard stays green."""
+    text = _read(repo_root, "skills/squad/references/api.md")
+    assert re.search(r"cancelled target[^\n]{0,40}409", text, re.IGNORECASE), (
+        "references/api.md must document that /complete on a CANCELLED target returns 409"
+    )
+    assert re.search(r"reopen first", text, re.IGNORECASE), (
+        "the 409-on-cancelled doc must point at reopen-first"
+    )
 
 
 def test_shared_readiness_epic_blocker_complete_note(repo_root):
-    """shared.md's readiness gate carries the epic-blocker `/complete`-to-unblock note: status-based
-    readiness, the derived epic `complete` rollup is display-only (not a dependency signal)."""
-    text = _read(repo_root, "skills/squad/shared.md")
-    assert re.search(r"epic[^\n]*blocker|blocker[^\n]*/complete|epic[^\n]*/complete", text, re.IGNORECASE), (
-        "shared.md must note an epic used as a blocker should be /complete'd to unblock dependents"
+    """references/epics.md carries the epic-blocker readiness semantics: readiness is the STORED
+    status (an epic blocker satisfies the gate when its stored status is terminal — the rollup
+    sets it, `completed_via:"rollup"`); the derived epic `complete` flag is display-only."""
+    text = _read(repo_root, "skills/squad/references/epics.md")
+    assert re.search(r"epic[^\n]*blocker|blocker[^\n]*epic", text, re.IGNORECASE), (
+        "references/epics.md must cover an epic used as a blocker satisfying the readiness gate"
     )
-    assert re.search(r"status-based", text, re.IGNORECASE), (
-        "shared.md must state readiness stays status-based"
+    assert re.search(r"stored status|status-based", text, re.IGNORECASE), (
+        "references/epics.md must state readiness keys on the STORED status"
     )
     assert re.search(r"display-only|display\s*/\s*reporting", text, re.IGNORECASE), (
-        "shared.md must state the derived epic `complete` rollup is display-only"
+        "references/epics.md must state the derived epic `complete` rollup is display-only"
     )
-    # The resolved set is unchanged — no jq/set edit for /complete.
-    assert re.search(r"\{done,\s*cancelled\}", text), (
-        "shared.md must keep {done, cancelled} as the resolved set (unchanged for /complete)"
+    assert "rollup" in text, (
+        "references/epics.md must document the completed_via rollup that resolves epic blockers"
+    )
+    # The resolved set is unchanged: done + cancelled.
+    assert re.search(r"`done`\s+or\s+`cancelled`", text), (
+        "references/epics.md must keep done/cancelled as the resolved (terminal) set"
     )
 
 
-# ── squad-run: done terminal refusal (no special-casing on HOW it reached done) ─
+# ── squad-run readiness gate = pipeline.py preflight (done terminal refusal) ───
 
 
-def test_squad_run_refuses_done_target(repo_root):
-    """squad-run refuses a `done` target before dispatch (terminal — reopen to re-run), with no
-    special-casing on how it reached done."""
+def test_squad_run_refuses_done_target(repo_root, pipeline_mod, monkeypatch, capsys):
+    """squad-run's preflight (pipeline.py) refuses a `done` target before dispatch
+    (terminal — reopen to run), with no special-casing on HOW it reached done."""
+    out = _preflight(pipeline_mod, monkeypatch, capsys, _task(status="done"),
+                     {"blocked_by": [], "children": [], "children_progress": None})
+    assert out["runnable"] is False, "preflight must refuse a done target"
+    assert "terminal" in out["reason"], "the done refusal must label it terminal"
+    assert "reopen" in out["reason"].lower(), "the done refusal must point at reopen"
+    # And the orchestrating skill acts on that verdict with the reopen pointer.
     text = _read(repo_root, "skills/squad-run/SKILL.md")
-    assert re.search(r'STATUS"\s*=\s*"done"', text), (
-        "squad-run must branch on STATUS == done before dispatch"
+    assert "reopen to run" in text, "squad-run must relay 'reopen to run' on a terminal target"
+
+
+def test_squad_run_readiness_jq_unchanged_for_done(pipeline_mod, monkeypatch, capsys):
+    """(Was: the BLOCKERS readiness jq.) The readiness gate — now pipeline.py preflight —
+    still treats a `done` dependency as resolved: /complete needs no readiness change
+    (the key divergence from the cancel adoption)."""
+    out = _preflight(pipeline_mod, monkeypatch, capsys, _task(),
+                     {"blocked_by": [{"id": "SQD-9", "title": "dep", "status": "done"}],
+                      "children": [], "children_progress": None})
+    assert out["blockers"] == [], "a done dep must not appear as a blocker"
+    assert out["runnable"] is True, "a task whose only dep is done must be runnable"
+
+
+def test_squad_run_readiness_jq_not_wired_to_derived_epic_complete(pipeline_mod, monkeypatch, capsys):
+    """NEGATIVE guard for the key divergence: readiness must key on the dep's `.status` ONLY —
+    never on the derived epic rollup (`complete` / `children_progress` / `epic_status`). A dep
+    carrying a truthy derived `complete` flag but a non-terminal STORED status must still block
+    (the derived flag is display-only); a dep with a terminal stored status resolves regardless
+    of its derived fields."""
+    rollup_dep = {"id": "SQD-9", "title": "epic dep", "status": "impl",
+                  "complete": True, "children_progress": {"done": 5, "total": 5},
+                  "epic_status": "done", "card_type": "epic"}
+    out = _preflight(pipeline_mod, monkeypatch, capsys, _task(),
+                     {"blocked_by": [rollup_dep], "children": [], "children_progress": None})
+    assert out["runnable"] is False and out["blockers"], (
+        "readiness must stay status-based — a derived epic `complete` rollup must NOT satisfy "
+        "a dependency whose stored status is non-terminal"
     )
-    assert "done (terminal)" in text, "squad-run done refusal must label it terminal"
-    assert "reopen" in text.lower(), "squad-run done refusal must point at reopen"
-
-
-def test_squad_run_readiness_jq_unchanged_for_done(repo_root):
-    """squad-run's BLOCKERS readiness jq is UNCHANGED — `done` was already excluded, so /complete
-    needs no jq edit (the key divergence from the cancel adoption)."""
-    text = _read(repo_root, "skills/squad-run/SKILL.md")
-    assert re.search(
-        r'\.blocked_by\[\]\?[^\n]*select\(\.status\s*!=\s*"done"\s+and\s+\.status\s*!=\s*"cancelled"\)',
-        text,
-    ), "squad-run BLOCKERS jq must still exclude done and cancelled (unchanged for /complete)"
-
-
-def test_squad_run_readiness_jq_not_wired_to_derived_epic_complete(repo_root):
-    """NEGATIVE guard for the key divergence: the readiness `.blocked_by` jq must key on `.status`
-    ONLY — it must NOT wire the derived epic rollup (`.complete` / `children_progress` / `epic_status`
-    / `card_type`) into dependency satisfaction. The positive `..._unchanged_for_done` guard above
-    only matches the existing select form; it would still pass if an agent ADDED a second
-    `.blocked_by` filter that treated a derived epic `complete` rollup as a resolved dep — the exact
-    mistake the schema/shared/run prose warns against (the derived flag is display-only). This scans
-    every `.blocked_by` jq line and fails if any references the rollup fields. (The unrelated epic
-    `children_progress` PROGRESS read elsewhere in the skill is not a `.blocked_by` line, so it is
-    correctly out of scope.)"""
-    text = _read(repo_root, "skills/squad-run/SKILL.md")
-    blocked_by_jq = [
-        ln for ln in text.splitlines() if ".blocked_by" in ln and "jq" in ln
-    ]
-    assert blocked_by_jq, (
-        "expected at least one executable `.blocked_by` jq line in squad-run's readiness gate"
+    resolved_dep = dict(rollup_dep, status="done", complete=False)
+    out = _preflight(pipeline_mod, monkeypatch, capsys, _task(),
+                     {"blocked_by": [resolved_dep], "children": [], "children_progress": None})
+    assert out["runnable"] is True and out["blockers"] == [], (
+        "a dep with a terminal STORED status resolves regardless of derived fields"
     )
-    forbidden = (".complete", "children_progress", "epic_status", "card_type")
-    for ln in blocked_by_jq:
-        for tok in forbidden:
-            assert tok not in ln, (
-                "squad-run readiness must stay status-based — a `.blocked_by` jq line wires the "
-                f"derived epic rollup field {tok!r} into dependency satisfaction: {ln.strip()!r}"
-            )
 
 
 def test_squad_run_carries_epic_blocker_complete_note(repo_root):
-    """squad-run's readiness gate carries the epic-blocker `/complete`-to-unblock note (status-based;
-    derived rollup display-only)."""
-    text = _read(repo_root, "skills/squad-run/SKILL.md")
-    assert re.search(r"/complete", text), "squad-run must reference /complete in the readiness note"
-    assert re.search(r"status-based", text, re.IGNORECASE), (
-        "squad-run readiness note must state readiness stays status-based"
-    )
-    assert re.search(r"display-only", text, re.IGNORECASE), (
-        "squad-run readiness note must call the derived epic `complete` rollup display-only"
+    """(Was: the readiness note inlined in squad-run/SKILL.md.) squad-run now delegates readiness
+    to `pipe preflight`; the epic-blocker note (status-based readiness, display-only derived
+    rollup) lives in references/epics.md, which shared.md points every skill at."""
+    run = _read(repo_root, "skills/squad-run/SKILL.md")
+    assert "pipe preflight" in run, "squad-run must delegate readiness to pipeline.py preflight"
+    epics = _read(repo_root, "skills/squad/references/epics.md")
+    assert re.search(r"stored status|status-based", epics, re.IGNORECASE)
+    assert re.search(r"display-only", epics, re.IGNORECASE)
+    hub = _read(repo_root, "skills/squad/shared.md")
+    assert "references/epics.md" in hub, (
+        "shared.md must point skills at references/epics.md for readiness/rollup semantics"
     )
 
 
@@ -207,54 +249,54 @@ def test_squad_refine_treats_complete_done_target_as_terminal(repo_root):
 
 def test_squad_skill_has_non_interactive_complete_calling_post_complete(repo_root):
     """squad/SKILL.md has a /squad complete command that calls POST .../complete and is
-    non-interactive (no AskUserQuestion / confirmation in the complete section)."""
+    non-interactive (declares it, and never invokes AskUserQuestion in its section)."""
     text = _read(repo_root, "skills/squad/SKILL.md")
     assert "/squad complete" in text, "squad/SKILL.md must document the /squad complete command"
     assert re.search(r"api POST /task/\$ID/complete", text), (
         "/squad complete must call `api POST /task/$ID/complete`"
     )
-    # Isolate the complete section and assert it is non-interactive.
+    # Isolate the (now combined complete·cancel) Terminal-actions section.
     m = re.search(r"### `/squad complete.*?(?=\n### )", text, re.DOTALL)
     assert m, "could not isolate the /squad complete section"
     section = m.group(0)
     assert "non-interactive" in section.lower(), (
         "the /squad complete section must declare itself non-interactive"
     )
-    assert re.search(r"no\s+`?AskUserQuestion`?", section), (
-        "the /squad complete section must explicitly disclaim AskUserQuestion (non-interactive)"
+    assert "AskUserQuestion" not in section, (
+        "the /squad complete section must not invoke AskUserQuestion (non-interactive)"
     )
 
 
 def test_squad_skill_complete_paired_with_cancel_before_remove(repo_root):
-    """squad/SKILL.md positions /squad complete before the irreversible /squad remove and frames it as
-    the paired twin of /squad cancel (complete = finished, cancel = won't-do)."""
+    """squad/SKILL.md positions /squad complete before the irreversible /squad remove and pairs it
+    with /squad cancel (complete = finished, cancel = won't-do). Post-rewrite the pairing is
+    structural: both verbs share ONE 'Terminal actions' section."""
     text = _read(repo_root, "skills/squad/SKILL.md")
     complete_idx = text.find("### `/squad complete")
     remove_idx = text.find("### `/squad remove")
     assert complete_idx != -1 and remove_idx != -1, "both /squad complete and /squad remove must exist"
     assert complete_idx < remove_idx, "/squad complete must be documented BEFORE /squad remove"
-    # Paired-with-cancel framing.
+    # Paired-with-cancel framing: one shared section documents both verbs.
+    m = re.search(r"### `/squad complete.*?(?=\n### )", text, re.DOTALL)
+    assert m and "/squad cancel" in m.group(0), (
+        "/squad complete and /squad cancel must be documented as a pair (one shared section)"
+    )
     assert re.search(r"finished", text, re.IGNORECASE) and re.search(r"won't-do|won.t-do", text, re.IGNORECASE), (
         "squad/SKILL.md must frame complete=finished vs cancel=won't-do"
-    )
-    assert re.search(r"paired|twin", text, re.IGNORECASE), (
-        "squad/SKILL.md must frame /squad complete as paired with /squad cancel"
     )
 
 
 def test_squad_skill_reopen_nulls_completion_fields(repo_root):
-    """squad/SKILL.md's /squad reopen section nulls completion_note + completed_via (the un-complete
-    path), and still calls POST .../reopen."""
+    """squad/SKILL.md's /squad reopen command still calls POST .../reopen; the field-nulling
+    detail (completion_note + completed_via cleared) lives in references/api.md."""
     text = _read(repo_root, "skills/squad/SKILL.md")
     assert "/squad reopen" in text, "squad/SKILL.md must document the /squad reopen command"
     assert re.search(r"api POST /task/\$ID/reopen", text), (
         "/squad reopen must call `api POST /task/$ID/reopen`"
     )
-    m = re.search(r"### `/squad reopen.*?(?=\n### )", text, re.DOTALL)
-    assert m, "could not isolate the /squad reopen section"
-    section = m.group(0)
-    assert "completion_note" in section and "completed_via" in section, (
-        "the /squad reopen section must state it nulls completion_note + completed_via"
+    api = _read(repo_root, "skills/squad/references/api.md")
+    assert re.search(r"[Rr]eopen clears[^.]*completion_note[^.]*completed_via", api, re.DOTALL), (
+        "references/api.md must state reopen nulls completion_note + completed_via"
     )
 
 

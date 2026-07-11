@@ -1,37 +1,38 @@
-"""Structural guards for the stale-approval recheck contract (SQD-872).
+"""Contract guards for the stale-approval recheck.
 
-When the Inspector records ``approved`` at the L3 ``impl_review`` gate, the orchestrator
-captures a content-hash snapshot of the whole working tree (``APPROVAL_TREE``). Before the
-``test → done`` commit it re-captures the tree (``PRECOMMIT_TREE``) and compares: if the
-tree changed after approval (e.g. Ranger edited source post-review), the approval is STALE
-and the orchestrator re-fires the EXISTING ``impl_review`` gate before committing — closing
-the gate-bypass that let a Ranger-introduced change reach commit unreviewed.
+The contract survived the skills-efficiency re-architecture but the mechanism
+moved out of squad-run/SKILL.md prose into the engine
+(``skills/squad/scripts/pipeline.py``):
 
-Load-bearing properties guarded here (read against the committed skill files):
+- the whole-tree content snapshot is ``_tree_hash()`` (throwaway temp-index +
+  ``git write-tree``; tracked + untracked via ``git add -A``; non-destructive);
+- Seam A (capture): ``cmd_advance`` returns ``approval_tree`` ONLY on the L3
+  ``impl_review → test`` move (Inspector approved);
+- Seam B (recheck): ``cmd_finalize --approval-tree <sha>`` re-hashes the tree
+  BEFORE the done PATCH; a mismatch prints ``stale_approval: true`` and issues
+  NO move — the orchestrator re-enters the loop at the EXISTING impl_review
+  gate (squad-run/SKILL.md documents the re-entry).
 
-(A capture)    a named ``##### L3 Approval Snapshot (Inspector → test)`` sub-section assigns
-               ``APPROVAL_TREE`` at the Inspector-``approved`` impl_review→test seam.
-(L3 guard)     the capture is guarded by a ``LEVEL == 3`` check (L1/L2 excluded).
-(primitive)    the snapshot is the non-destructive temp-index / ``git write-tree`` form:
-               ``GIT_INDEX_FILE`` AND ``git write-tree`` both appear, and the corrected
-               ``mktemp`` + ``rm -f "$TMPIDX"`` ordering (remove BEFORE git reads it) is present.
-(no stash)     ``git stash create`` is FORBIDDEN — it omits untracked files.
-(untracked)    the capture uses ``git add -A`` so untracked files are in the hash.
-(no commit)    the snapshot block does not mutate the real tree (no ``git commit`` inside it).
-(compare seam) the test→done section re-captures ``PRECOMMIT_TREE`` and compares it to
-               ``APPROVAL_TREE`` BEFORE the ``{"status": "done"}`` commit PATCH.
-(whole-tree)   detection is content equality — NO ``grep -v '.test.'`` / ``tests/`` suffix
-               heuristic in the recheck logic.
-(reuse gate)   the stale branch re-fires the EXISTING impl_review gate / Inspector /
-               ``impl_review_count > 3`` breaker — NOT a new column/status.
-(re-snapshot)  on re-approve a FRESH approval snapshot is captured.
-(principle)    a one-sentence staleness-principle note exists at the impl_review→test→done seam.
-(x-ref)        test-runner.md carries the orchestrator-backstop cross-reference line.
-(instruction)  the shipped SKILL.md + test-runner.md additions carry NO ``SQD-<n>`` board id.
+Also guarded: the primitive source still uses the temp-index/write-tree form
+(never ``git stash create``, which drops untracked files); the SKILL.md loop
+instructions still route the stale branch through impl_review; test-runner.md
+still carries the orchestrator-backstop cross-reference; no board id ships.
 
-Hermetic: reads committed skill files only, no network. Stdlib (``re``) only.
+Deleted from the old suite (structurally obsolete):
+- All assertions on the removed SKILL.md bash blocks (APPROVAL_TREE=/
+  PRECOMMIT_TREE=/mktemp ordering/LEVEL guards) — that bash no longer exists;
+  the same properties are unit-tested against ``_tree_hash``/``cmd_advance``/
+  ``cmd_finalize`` directly.
+- The markdown section-extractor self-tests (no markdown extraction remains).
+
+Hermetic: ``_req`` is always stubbed (no network); git operations run in
+tmp_path repos.
 """
+import inspect
+import json
 import re
+import subprocess
+from types import SimpleNamespace
 
 SKILL = "skills/squad-run/SKILL.md"
 TEST_RUNNER = "skills/squad/templates/test-runner.md"
@@ -41,229 +42,282 @@ TEST_RUNNER = "skills/squad/templates/test-runner.md"
 # helpers
 # ---------------------------------------------------------------------------
 
-def _read(repo_root, rel: str) -> str:
-    return (repo_root / rel).read_text(encoding="utf-8")
+def _stub_req(monkeypatch, pipeline_mod, handler=None):
+    calls = []
+
+    def fake_req(method, path, body=None):
+        calls.append((method, path, body))
+        if handler:
+            return handler(method, path, body)
+        return 0, {}
+
+    monkeypatch.setattr(pipeline_mod, "_req", fake_req)
+    return calls
 
 
-def _section(text: str, heading_regex: str) -> str:
-    """Body from a heading up to the next same-or-higher-level ``#`` heading or EOF.
-
-    The heading line is consumed first (``.*\n``) so the closing lookahead does not match
-    the section's own heading at offset 0. The terminator matches only real markdown
-    headings (``##``..``######``) — never a single-``#`` bash comment inside a code fence.
-    """
-    m = re.search(
-        heading_regex + r".*?\n(?:.*?(?=^#{2,6}\s)|.*\Z)",
-        text,
-        re.MULTILINE | re.DOTALL,
-    )
-    return m.group(0) if m else ""
+def _init_repo(path):
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=path, check=True)
+    subprocess.run(["git", "config", "commit.gpgsign", "false"], cwd=path, check=True)
 
 
-def _approval_snapshot_section(text: str) -> str:
-    return _section(text, r"^#####\s+L3 Approval Snapshot \(Inspector → test\)")
+def _commit_all(path, msg="init"):
+    subprocess.run(["git", "add", "-A"], cwd=path, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-q", "-m", msg], cwd=path, check=True, capture_output=True)
 
 
-def _done_transition_section(text: str) -> str:
-    return _section(text, r"^####\s+→ Done Transition\b")
-
-
-# ---------------------------------------------------------------------------
-# (A capture) Seam A — named sub-section assigns APPROVAL_TREE
-# ---------------------------------------------------------------------------
-
-def test_approval_snapshot_subsection_exists(repo_root):
-    section = _approval_snapshot_section(_read(repo_root, SKILL))
-    assert section, (
-        "SKILL.md must contain a '##### L3 Approval Snapshot (Inspector → test)' sub-section"
-    )
-
-
-def test_approval_snapshot_assigns_approval_tree(repo_root):
-    section = _approval_snapshot_section(_read(repo_root, SKILL))
-    assert re.search(r"APPROVAL_TREE\s*=", section), (
-        "the L3 Approval Snapshot sub-section must assign APPROVAL_TREE"
-    )
+def _repo_with_commit(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_repo(repo)
+    (repo / "src.txt").write_text("v1\n")
+    _commit_all(repo)
+    return repo
 
 
 # ---------------------------------------------------------------------------
-# (L3 guard) capture is L3-only
+# the snapshot primitive: _tree_hash
 # ---------------------------------------------------------------------------
 
-def test_capture_is_level_3_guarded(repo_root):
-    section = _approval_snapshot_section(_read(repo_root, SKILL))
-    assert re.search(r'\[\s*"\$LEVEL"\s*=\s*"3"\s*\]', section), (
-        "the approval-snapshot capture must be guarded by a LEVEL == 3 check (L1/L2 excluded)"
+def test_tree_hash_is_deterministic(pipeline_mod, tmp_path, monkeypatch):
+    repo = _repo_with_commit(tmp_path)
+    monkeypatch.chdir(repo)
+    assert pipeline_mod._tree_hash() == pipeline_mod._tree_hash(), (
+        "the same working-tree state must always hash to the same value"
     )
 
 
-# ---------------------------------------------------------------------------
-# (primitive) non-destructive temp-index / write-tree, with the corrected ordering
-# ---------------------------------------------------------------------------
-
-def test_snapshot_uses_nondestructive_primitive(repo_root):
-    section = _approval_snapshot_section(_read(repo_root, SKILL))
-    assert "GIT_INDEX_FILE" in section, "snapshot must use a throwaway GIT_INDEX_FILE temp index"
-    assert "git write-tree" in section, "snapshot must compute a tree SHA via git write-tree"
-
-
-def test_snapshot_mktemp_rm_ordering_before_use(repo_root):
-    """The temp index path must be removed (`rm -f "$TMPIDX"`) AFTER mktemp and BEFORE the
-    `GIT_INDEX_FILE=…git add` use — otherwise git rejects the pre-created empty file as a
-    corrupt index ('index file smaller than expected')."""
-    section = _approval_snapshot_section(_read(repo_root, SKILL))
-    m = re.search(
-        r'TMPIDX=\$\(mktemp\)\s*&&\s*rm -f "\$TMPIDX".*?'
-        r'GIT_INDEX_FILE="\$TMPIDX"\s+git add',
-        section,
-        re.DOTALL,
-    )
-    assert m, (
-        "snapshot must pair `TMPIDX=$(mktemp) && rm -f \"$TMPIDX\"` immediately and then use "
-        "`GIT_INDEX_FILE=\"$TMPIDX\" git add` — the rm must precede the git read"
+def test_tree_hash_changes_on_content_change(pipeline_mod, tmp_path, monkeypatch):
+    repo = _repo_with_commit(tmp_path)
+    monkeypatch.chdir(repo)
+    before = pipeline_mod._tree_hash()
+    (repo / "src.txt").write_text("v2 — changed after approval\n")
+    assert pipeline_mod._tree_hash() != before, (
+        "a content change must change the tree hash (detection is content "
+        "equality, not a filename heuristic)"
     )
 
 
-def test_snapshot_does_not_mutate_real_tree(repo_root):
-    """The snapshot block must not issue a real `git commit` (it is read-only)."""
-    section = _approval_snapshot_section(_read(repo_root, SKILL))
-    assert "git commit" not in section, (
-        "the approval-snapshot block must not run `git commit` (non-destructive)"
+def test_tree_hash_includes_untracked_files(pipeline_mod, tmp_path, monkeypatch):
+    """A NEW untracked file (the Ranger threat model) must change the hash —
+    the reason `git stash create` (which drops untracked files) is forbidden."""
+    repo = _repo_with_commit(tmp_path)
+    monkeypatch.chdir(repo)
+    before = pipeline_mod._tree_hash()
+    (repo / "sneaky-new-file.txt").write_text("added post-approval\n")
+    assert pipeline_mod._tree_hash() != before, (
+        "an untracked file must be part of the content hash"
     )
 
 
-# ---------------------------------------------------------------------------
-# (no stash) git stash create is FORBIDDEN
-# ---------------------------------------------------------------------------
+def test_tree_hash_is_nondestructive(pipeline_mod, tmp_path, monkeypatch):
+    """The snapshot must not mutate the real index, working tree, or HEAD."""
+    repo = _repo_with_commit(tmp_path)
+    (repo / "dirty.txt").write_text("uncommitted\n")
+    monkeypatch.chdir(repo)
 
-def test_snapshot_does_not_use_git_stash_create(repo_root):
-    """`git stash create` omits untracked files — it would silently break the
-    untracked-file EDGE and is explicitly excluded."""
-    text = _read(repo_root, SKILL)
-    section_a = _approval_snapshot_section(text)
-    section_b = _done_transition_section(text)
-    assert "git stash create" not in section_a, (
-        "git stash create is forbidden in the approval-snapshot primitive (omits untracked files)"
+    def _state():
+        status = subprocess.run(["git", "status", "--porcelain"], cwd=repo,
+                                capture_output=True, text=True).stdout
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                              capture_output=True, text=True).stdout
+        return status, head
+
+    before = _state()
+    pipeline_mod._tree_hash()
+    assert _state() == before, (
+        "_tree_hash must be read-only: no staging, no commit, no tree mutation"
     )
-    assert "git stash create" not in section_b, (
-        "git stash create is forbidden in the recheck primitive (omits untracked files)"
+
+
+def test_tree_hash_primitive_is_temp_index_write_tree_not_stash(pipeline_mod):
+    """The primitive must stay the throwaway temp-index / `git write-tree` form
+    with `git add -A` (tracked + untracked); `git stash create` is forbidden
+    anywhere in the engine (it omits untracked files)."""
+    src = inspect.getsource(pipeline_mod._tree_hash)
+    assert "GIT_INDEX_FILE" in src, "snapshot must use a throwaway GIT_INDEX_FILE"
+    assert "write-tree" in src, "snapshot must compute the SHA via git write-tree"
+    assert re.search(r'"add",\s*"-A"', src), "snapshot must stage via git add -A"
+    full = inspect.getsource(pipeline_mod)
+    assert "git stash" not in full and '"stash"' not in full, (
+        "git stash create is forbidden (drops untracked files)"
     )
 
 
 # ---------------------------------------------------------------------------
-# (untracked) git add -A captures untracked files
+# Seam A: cmd_advance captures approval_tree only on L3 impl_review → test
 # ---------------------------------------------------------------------------
 
-def test_snapshot_includes_untracked_via_add_all(repo_root):
-    section = _approval_snapshot_section(_read(repo_root, SKILL))
-    assert re.search(r"git add (-A|--all)\b", section), (
-        "the snapshot must use `git add -A` so untracked files are in the content hash"
+def _advance_args(**kw):
+    base = dict(id="7", human_reject=False, reason=None, cid=None, force=False)
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def test_advance_captures_approval_tree_on_l3_impl_review_to_test(
+        pipeline_mod, tmp_path, monkeypatch, capsys):
+    repo = _repo_with_commit(tmp_path)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(pipeline_mod, "_emit_steering", lambda *a, **k: None)
+
+    def handler(method, path, body):
+        if method == "GET":
+            return 0, {"status": "impl_review", "level": 3, "version": 4,
+                       "impl_review_count": 1, "last_review_status": "approved"}
+        return 0, {"success": True}
+
+    calls = _stub_req(monkeypatch, pipeline_mod, handler)
+    pipeline_mod.cmd_advance(_advance_args())
+
+    out = json.loads(capsys.readouterr().out)
+    assert out["moved"] is True and out["to"] == "test"
+    assert out["approval_tree"] == pipeline_mod._tree_hash(), (
+        "the L3 impl_review→test move must return the approval-tree snapshot"
+    )
+    patches = [c for c in calls if c[0] == "PATCH"]
+    assert patches and patches[0][2]["status"] == "test"
+
+
+def test_advance_l2_impl_review_approved_has_no_snapshot_and_defers_to_finalize(
+        pipeline_mod, monkeypatch, capsys):
+    """L2 (no test column): approved impl_review → next is done → advance does
+    NOT move and does NOT snapshot; finalize owns the done path."""
+    monkeypatch.setattr(pipeline_mod, "_emit_steering", lambda *a, **k: None)
+
+    def handler(method, path, body):
+        if method == "GET":
+            return 0, {"status": "impl_review", "level": 2, "version": 4,
+                       "impl_review_count": 1, "last_review_status": "approved"}
+        return 0, {"success": True}
+
+    calls = _stub_req(monkeypatch, pipeline_mod, handler)
+    pipeline_mod.cmd_advance(_advance_args())
+
+    out = json.loads(capsys.readouterr().out)
+    assert out["moved"] is False and out["action"] == "finalize"
+    assert "approval_tree" not in out, "the snapshot is L3-only (L1/L2 excluded)"
+    assert not [c for c in calls if c[0] == "PATCH"], (
+        "advance must not issue the done move itself"
     )
 
 
-# ---------------------------------------------------------------------------
-# (compare seam) PRECOMMIT_TREE re-captured + compared BEFORE the done PATCH
-# ---------------------------------------------------------------------------
+def test_advance_l3_test_pass_defers_to_finalize_without_snapshot(
+        pipeline_mod, monkeypatch, capsys):
+    monkeypatch.setattr(pipeline_mod, "_emit_steering", lambda *a, **k: None)
 
-def test_done_transition_recaptures_and_compares(repo_root):
-    section = _done_transition_section(_read(repo_root, SKILL))
-    assert re.search(r"PRECOMMIT_TREE\s*=", section), (
-        "the Done Transition must re-capture PRECOMMIT_TREE before the commit"
-    )
-    assert re.search(r'\[\s*"\$PRECOMMIT_TREE"\s*=\s*"\$APPROVAL_TREE"\s*\]', section), (
-        "the Done Transition must compare PRECOMMIT_TREE to APPROVAL_TREE"
-    )
+    def handler(method, path, body):
+        if method == "GET":
+            return 0, {"status": "test", "level": 3, "version": 9,
+                       "last_test_status": "pass"}
+        return 0, {"success": True}
 
+    calls = _stub_req(monkeypatch, pipeline_mod, handler)
+    pipeline_mod.cmd_advance(_advance_args())
 
-def test_compare_precedes_done_commit_patch(repo_root):
-    """The compare must occur BEFORE the `{"status": "done"}` move PATCH."""
-    section = _done_transition_section(_read(repo_root, SKILL))
-    compare_at = section.find('"$PRECOMMIT_TREE"')
-    done_at = section.find('"status": "done"')
-    assert compare_at != -1, "PRECOMMIT_TREE compare not found in Done Transition"
-    assert done_at != -1, '{"status": "done"} PATCH not found in Done Transition'
-    assert compare_at < done_at, (
-        "the stale-approval compare must precede the {status: done} commit PATCH"
-    )
-
-
-def test_recheck_is_level_3_and_nonempty_guarded(repo_root):
-    section = _done_transition_section(_read(repo_root, SKILL))
-    assert re.search(r'\[\s*"\$LEVEL"\s*=\s*"3"\s*\]', section), (
-        "the recheck must be L3-guarded"
-    )
-    assert re.search(r'\[\s*-n\s*"\$APPROVAL_TREE"\s*\]', section), (
-        "the recheck must be a no-op when APPROVAL_TREE is empty (L1/L2 path)"
-    )
-
-
-# ---------------------------------------------------------------------------
-# (whole-tree) no test-vs-source classification heuristic
-# ---------------------------------------------------------------------------
-
-def test_recheck_has_no_test_vs_source_classification(repo_root):
-    section = _done_transition_section(_read(repo_root, SKILL))
-    assert "grep -v '.test.'" not in section and "grep -v \".test.\"" not in section, (
-        "detection must be whole-tree content equality, NOT a test-vs-source grep heuristic"
-    )
-    assert not re.search(r"diff --name-only.*grep", section, re.DOTALL), (
-        "detection must not classify changed files by name (whole-tree content equality only)"
-    )
-
-
-# ---------------------------------------------------------------------------
-# (reuse gate) re-fire EXISTING impl_review gate + breaker, no new column/status
-# ---------------------------------------------------------------------------
-
-def test_stale_branch_reuses_impl_review_gate(repo_root):
-    section = _done_transition_section(_read(repo_root, SKILL))
-    assert "impl_review" in section, (
-        "the stale branch must re-dispatch through the EXISTING impl_review gate"
-    )
-    assert re.search(r"impl_review_count\s*>\s*3", section), (
-        "the stale branch must respect the EXISTING impl_review_count > 3 circuit breaker"
-    )
-    assert "Inspector" in section, "the stale branch must re-dispatch the Inspector"
-
-
-def test_stale_branch_mints_fresh_correlation_id(repo_root):
-    section = _done_transition_section(_read(repo_root, SKILL))
-    assert re.search(r"fresh.*correlation_id", section, re.IGNORECASE), (
-        "the stale re-review must mint a FRESH per-step correlation_id"
-    )
+    out = json.loads(capsys.readouterr().out)
+    assert out["moved"] is False and out["action"] == "finalize"
+    assert "approval_tree" not in out
+    assert not [c for c in calls if c[0] == "PATCH"]
 
 
 # ---------------------------------------------------------------------------
-# (re-snapshot) on re-approve a FRESH approval snapshot is captured
+# Seam B: cmd_finalize rechecks the tree BEFORE the done move
 # ---------------------------------------------------------------------------
 
-def test_reapprove_recaptures_fresh_snapshot(repo_root):
-    section = _done_transition_section(_read(repo_root, SKILL))
-    assert re.search(r"FRESH\s+APPROVAL_TREE", section), (
-        "on re-review approved, a FRESH APPROVAL_TREE must be re-captured"
+def test_finalize_stale_approval_blocks_done_move(pipeline_mod, tmp_path, monkeypatch, capsys):
+    """A tree that changed after approval → stale_approval: true, NO PATCH,
+    NO commit event — the approval covers only the diff as approved."""
+    repo = _repo_with_commit(tmp_path)
+    monkeypatch.chdir(repo)
+
+    def handler(method, path, body):
+        if method == "GET":
+            return 0, {"id": 7, "title": "t", "level": 3, "status": "test"}
+        return 0, {"success": True}
+
+    calls = _stub_req(monkeypatch, pipeline_mod, handler)
+    stale_hash = "0" * 40  # never the current tree
+    pipeline_mod.cmd_finalize(SimpleNamespace(id="7", approval_tree=stale_hash))
+
+    out = json.loads(capsys.readouterr().out)
+    assert out["finalized"] is False and out["stale_approval"] is True
+    assert "impl_review" in out["note"] and "Inspector" in out["note"], (
+        "the stale branch must route back through the EXISTING impl_review gate"
+    )
+    assert not [c for c in calls if c[0] in ("PATCH", "POST")], (
+        "a stale approval must block the done PATCH and the commit event"
+    )
+
+
+def test_finalize_matching_tree_moves_done_and_commits(pipeline_mod, tmp_path, monkeypatch, capsys):
+    repo = _repo_with_commit(tmp_path)
+    (repo / "src.txt").write_text("approved change\n")
+    monkeypatch.chdir(repo)
+    approval = pipeline_mod._tree_hash()
+
+    def handler(method, path, body):
+        if method == "GET":
+            return 0, {"id": 7, "title": "Ship it", "level": 3, "status": "test"}
+        return 0, {"success": True}
+
+    calls = _stub_req(monkeypatch, pipeline_mod, handler)
+    pipeline_mod.cmd_finalize(SimpleNamespace(id="7", approval_tree=approval))
+
+    out = json.loads(capsys.readouterr().out)
+    assert out["finalized"] is True
+    patches = [c for c in calls if c[0] == "PATCH"]
+    assert patches and patches[0][2] == {
+        "status": "done", "current_agent": None, "actor": "Orchestrator"}
+    subject = subprocess.run(["git", "log", "-1", "--format=%s"], cwd=repo,
+                             capture_output=True, text=True).stdout.strip()
+    assert subject == "feat: Ship it [squad #7]", (
+        "finalize must commit pending changes with the feat: <title> [squad #ID] message"
+    )
+    posts = [c for c in calls if c[0] == "POST"]
+    assert posts and posts[0][2]["message"].startswith("Committed "), (
+        "finalize must record the commit activity event"
     )
 
 
 # ---------------------------------------------------------------------------
-# (principle) one-sentence staleness-principle note at the seam
+# SKILL.md still routes the stale branch through the existing impl_review gate
 # ---------------------------------------------------------------------------
 
-def test_staleness_principle_documented(repo_root):
-    section = _done_transition_section(_read(repo_root, SKILL))
-    assert re.search(r"approval covers the diff", section, re.IGNORECASE), (
-        "a staleness-principle note must state an approval covers the diff as approved"
+def test_skill_documents_stale_recheck_reenters_impl_review(repo_root):
+    text = (repo_root / SKILL).read_text()
+    assert "stale-approval recheck" in text, (
+        "SKILL.md finalize step must name the L3 stale-approval recheck"
     )
-    assert re.search(r"re-review", section, re.IGNORECASE), (
-        "the staleness-principle note must say a later change requires re-review"
+    assert re.search(r"stale_approval.*does NOT move", text, re.DOTALL), (
+        "SKILL.md must state the stale branch does NOT move to done"
+    )
+    assert re.search(r"re-enter the loop at `?impl_review`?", text), (
+        "SKILL.md must route the stale branch back through the EXISTING "
+        "impl_review gate (a fresh Inspector dispatch, not a new column/status)"
+    )
+    assert "fresh dispatch" in text, (
+        "SKILL.md must re-dispatch freshly on staleness (fresh correlation id "
+        "is minted per dispatch by the engine)"
+    )
+
+
+def test_skill_documents_approval_tree_handoff_to_finalize(repo_root):
+    text = (repo_root / SKILL).read_text()
+    assert re.search(r"`approval_tree`.*save it for finalize", text), (
+        "SKILL.md must instruct saving advance's approval_tree for finalize"
+    )
+    assert "--approval-tree" in text, (
+        "SKILL.md must pass --approval-tree to finalize"
     )
 
 
 # ---------------------------------------------------------------------------
-# (x-ref) test-runner.md cross-reference
+# test-runner.md cross-reference + instruction-only guard
 # ---------------------------------------------------------------------------
 
 def test_test_runner_carries_backstop_cross_reference(repo_root):
-    text = _read(repo_root, TEST_RUNNER)
+    text = (repo_root / TEST_RUNNER).read_text()
     assert re.search(r"impl_review gate", text), (
         "test-runner.md must cross-reference the orchestrator's impl_review re-fire backstop"
     )
@@ -272,27 +326,9 @@ def test_test_runner_carries_backstop_cross_reference(repo_root):
     )
 
 
-# ---------------------------------------------------------------------------
-# (instruction) shipped additions carry no board id
-# ---------------------------------------------------------------------------
-
-def test_shipped_additions_carry_no_board_id(repo_root):
-    for rel in (SKILL, TEST_RUNNER):
-        text = _read(repo_root, rel)
+def test_shipped_files_carry_no_board_id(repo_root):
+    for rel in (SKILL, TEST_RUNNER, "skills/squad/scripts/pipeline.py"):
+        text = (repo_root / rel).read_text()
         assert not re.search(r"SQD-\d+", text), (
             f"{rel} must not embed an SQD-<n> board id (instruction-only)"
         )
-
-
-# ---------------------------------------------------------------------------
-# self-test — keep the suite non-vacuous
-# ---------------------------------------------------------------------------
-
-def test_section_extractor_is_non_vacuous():
-    planted = (
-        "## X\n\n##### L3 Approval Snapshot (Inspector → test)\n\nAPPROVAL_TREE=$(...)\n\n"
-        "#### → Done Transition (all levels)\n\nbody\n"
-    )
-    assert "APPROVAL_TREE" in _approval_snapshot_section(planted)
-    assert "body" in _done_transition_section(planted)
-    assert _approval_snapshot_section("## X\n\nnothing\n") == ""

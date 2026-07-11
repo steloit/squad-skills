@@ -1,27 +1,30 @@
-"""Contract guards for the token-honesty reframe (#SQD-983).
+"""Contract guards for the token-honesty rule.
 
-Builder reworded the per-agent `tokens` guidance (squad-run/SKILL.md step ⑥ +
-squad/schema.md Token Usage Guide) from a flat "the orchestrator captures the runtime's
-reported usage" statement to an explicit honesty contract: `tokens` is OPTIONAL and
-best-effort, populated only from the runtime's OWN reported per-subagent usage when the
-runtime exposes one at Task completion, omitted otherwise (never null, never forced 0),
-and NEVER orchestrator-estimated (an orchestrator only sees a subagent's final result,
-not its internal LLM/tool calls, so any local estimate would structurally undercount).
-Per-agent token stats are therefore not presented as a guaranteed or complete accounting.
+The contract survived the skills-efficiency re-architecture but its touch
+points moved: the SKILL.md step-⑥ prose was replaced by (a) one orchestrator
+instruction in squad-run/SKILL.md — ``--tokens`` is passed ONLY when the
+runtime itself reported per-subagent usage, never estimated — and (b) the
+engine's omission behavior in ``pipeline.py`` (``record``/``event`` include a
+``tokens`` key only for a truthy reported figure: never null, never a forced
+0). schema.md's Token Usage Guide (unchanged location) still carries the full
+honesty contract: OPTIONAL / best-effort, runtime-sourced, never
+orchestrator-derived, not a guaranteed or complete accounting.
 
-`actor` + `model` (the reliable per-agent attribution landed by SQD-981) are unchanged
-and out of scope here — see test_agent_attribution_contract.py.
+The maintainer-only capability note (Claude Code background-Task usage
+exposure, Codex unverified, OTel ``gen_ai.usage.*``) stays in the repo's own
+AGENTS.md and out of shipped ``skills/**``.
 
-A companion maintainer-only capability note (Claude Code exposes usage on background
-Task completions, undocumented; Codex unverified; OTel `gen_ai.usage.*` as the portable
-target) was added to the repo's own AGENTS.md — it must stay out of shipped `skills/**`,
-per the instruction-only / no-runtime-internals constraint.
+Deleted from the old suite (structurally obsolete): the SKILL.md step-⑥
+section assertions (OPTIONAL/best-effort/never-orchestrator-estimated/
+not-guaranteed wording) — that section no longer exists; the instruction
+survives as the one-line ``--tokens`` rule asserted here, the behavior is
+unit-tested against the engine, and the full wording lives in schema.md
+(still asserted).
 
-These are deterministic grep/structural invariants (mirroring
-test_agent_attribution_contract.py) — stdlib-only, hermetic, using the shared
-`repo_root` fixture.
+Hermetic: ``_req`` stubbed; no network.
 """
 import re
+from types import SimpleNamespace
 
 
 SKILL_PATH = "skills/squad-run/SKILL.md"
@@ -29,21 +32,26 @@ SCHEMA_PATH = "skills/squad/schema.md"
 AGENTS_PATH = "AGENTS.md"
 
 
-def _step6_section(text):
-    """Extract the '#### ⑥ Agent-attributed step event' subsection (heading through the
-    next '#### ' heading), same scoping used by test_agent_attribution_contract.py."""
-    match = re.search(
-        r"#### ⑥ Agent-attributed step event(.*?)\n#### ",
-        text,
-        re.DOTALL,
-    )
-    assert match, "SKILL.md must have a '#### ⑥ Agent-attributed step event' subsection"
-    return match.group(1)
+def _stub_req(monkeypatch, pipeline_mod, handler=None):
+    calls = []
+
+    def fake_req(method, path, body=None):
+        calls.append((method, path, body))
+        if handler:
+            return handler(method, path, body)
+        return 0, {}
+
+    monkeypatch.setattr(pipeline_mod, "_req", fake_req)
+    return calls
+
+
+def _record_handler(method, path, body):
+    if method == "GET":
+        return 0, {"status": "impl", "level": 2}
+    return 0, {"success": True}
 
 
 def _schema_token_guide(text):
-    """Extract the schema.md 'Token Usage Guide' paragraph, scoped away from the rest of
-    the file (mirrors the '## Table' boundary used by the attribution-contract test)."""
     lowered = text.lower()
     assert "token usage guide" in lowered, "schema.md must have a 'Token Usage Guide' section"
     tail = text[lowered.index("token usage guide"):]
@@ -53,26 +61,73 @@ def _schema_token_guide(text):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 1. Both touch-points state tokens is OPTIONAL / best-effort, runtime-per-subagent
-#    sourced when exposed, omitted (never null/0) otherwise.
+# 1. The orchestrator instruction: tokens only from runtime-reported usage
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def test_skill_step6_states_tokens_optional_best_effort(repo_root):
+def test_skill_passes_tokens_only_from_runtime_reported_usage(repo_root):
     text = (repo_root / SKILL_PATH).read_text()
-    section = _step6_section(text)
-    assert "OPTIONAL" in section, (
-        "step-⑥ section must state tokens is OPTIONAL"
+    m = re.search(r"`--tokens`[^\n]*", text)
+    assert m, "squad-run/SKILL.md must carry the --tokens instruction"
+    line = m.group(0)
+    assert re.search(r"runtime reported per-subagent usage", line), (
+        "--tokens must be sourced from the runtime's own reported per-subagent usage"
     )
-    assert "best-effort" in section, (
-        "step-⑥ section must state tokens is best-effort"
+    assert "never estimate" in line, (
+        "squad-run/SKILL.md must forbid estimating tokens — an orchestrator "
+        "only sees a subagent's final result, so any local figure undercounts"
     )
-    assert "runtime" in section.lower() and "per-subagent" in section.lower(), (
-        "step-⑥ section must source tokens from the runtime's own per-subagent usage"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 2. Engine omission behavior: never null, never a forced 0
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def test_record_omits_tokens_when_unreported(pipeline_mod, monkeypatch, capsys):
+    monkeypatch.setenv("SQUAD_MODEL_PROVIDER", "claude")
+    calls = _stub_req(monkeypatch, pipeline_mod, _record_handler)
+    pipeline_mod.cmd_record(SimpleNamespace(
+        id="7", agent="ranger", message="ran checks", tokens=None, cid=None))
+    capsys.readouterr()
+    body = [c for c in calls if c[0] == "POST"][0][2]
+    assert "tokens" not in body, "unreported usage must omit the tokens key entirely"
+    assert None not in body.values(), "no field may be sent as null"
+
+
+def test_record_never_forces_zero_tokens(pipeline_mod, monkeypatch, capsys):
+    monkeypatch.setenv("SQUAD_MODEL_PROVIDER", "claude")
+    calls = _stub_req(monkeypatch, pipeline_mod, _record_handler)
+    pipeline_mod.cmd_record(SimpleNamespace(
+        id="7", agent="ranger", message="ran checks", tokens=0, cid=None))
+    capsys.readouterr()
+    body = [c for c in calls if c[0] == "POST"][0][2]
+    assert "tokens" not in body, (
+        "a zero/absent runtime figure must never be forced into tokens: 0"
     )
-    assert re.search(r"never\s+(send\s+)?null.{0,20}never.{0,20}0|omit(ted)?.{0,60}never null", section, re.IGNORECASE) or (
-        "omit" in section.lower() and "null" in section.lower()
-    ), "step-⑥ section must say tokens is omitted (never null/0) when unavailable"
+
+
+def test_event_applies_the_same_omission_guard(pipeline_mod, monkeypatch, capsys):
+    calls = _stub_req(monkeypatch, pipeline_mod)
+    pipeline_mod.cmd_event(SimpleNamespace(
+        id="7", actor="Orchestrator", message="note", model="system",
+        cid=None, tokens=None))
+    capsys.readouterr()
+    body = [c for c in calls if c[0] == "POST"][0][2]
+    assert "tokens" not in body
+
+    calls = _stub_req(monkeypatch, pipeline_mod)
+    pipeline_mod.cmd_event(SimpleNamespace(
+        id="7", actor="Orchestrator", message="note", model="system",
+        cid=None, tokens=4200))
+    capsys.readouterr()
+    body = [c for c in calls if c[0] == "POST"][0][2]
+    assert body["tokens"] == 4200, "a genuinely reported figure is forwarded"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 3. schema.md keeps the full honesty wording (location unchanged)
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 def test_schema_token_guide_states_optional_best_effort(repo_root):
@@ -91,29 +146,10 @@ def test_schema_token_guide_states_optional_best_effort(repo_root):
     )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 2. Both touch-points say tokens is NOT orchestrator-estimated. SKILL.md has no
-#    guard on the word "estimate"; schema.md's existing
-#    test_schema_token_guide_is_runtime_sourced_not_estimated forbids "estimate" /
-#    "context size" there, so schema.md must instead use the portable phrasing the
-#    Builder chose ("never orchestrator-derived, never locally computed").
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-def test_skill_step6_states_not_orchestrator_estimated(repo_root):
-    text = (repo_root / SKILL_PATH).read_text()
-    section = _step6_section(text)
-    assert "orchestrator-estimated" in section.lower(), (
-        "step-⑥ section must explicitly say tokens are never orchestrator-estimated"
-    )
-
-
 def test_schema_token_guide_uses_portable_not_estimated_phrasing(repo_root):
     text = (repo_root / SCHEMA_PATH).read_text()
     guide = _schema_token_guide(text)
     lowered = guide.lower()
-    # Portable phrasing required, NOT the literal words forbidden by
-    # test_schema_token_guide_is_runtime_sourced_not_estimated.
     assert "orchestrator-derived" in lowered or "locally computed" in lowered, (
         "schema.md Token Usage Guide must state tokens are not orchestrator-derived / "
         "not locally computed (portable phrasing for 'not estimated')"
@@ -124,23 +160,6 @@ def test_schema_token_guide_uses_portable_not_estimated_phrasing(repo_root):
     assert "context size" not in lowered, (
         "schema.md Token Usage Guide must not reintroduce the forbidden literal 'context size'"
     )
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 3. Neither touch-point claims per-agent token stats are guaranteed/complete.
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-def test_skill_step6_does_not_claim_guaranteed_complete(repo_root):
-    text = (repo_root / SKILL_PATH).read_text()
-    section = _step6_section(text)
-    lowered = section.lower()
-    assert "not guaranteed or complete" in lowered or (
-        "not" in lowered and "guaranteed" in lowered and "complete" in lowered
-    ), "step-⑥ section must say per-agent token stats are not guaranteed or complete"
-    # Negative: no bare affirmative claim of completeness/guarantee.
-    assert "guaranteed and complete" not in lowered
-    assert re.search(r"(?<!not )(?<!nor )guaranteed accounting", lowered) is None
 
 
 def test_schema_token_guide_does_not_claim_guaranteed_complete(repo_root):
@@ -154,8 +173,7 @@ def test_schema_token_guide_does_not_claim_guaranteed_complete(repo_root):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 4. Portability guard: no shipped skills/** file hardcodes a runtime-specific
-#    token field name.
+# 4. Portability guard: no runtime-specific token field name in skills/**
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -184,8 +202,7 @@ def test_no_hardcoded_runtime_token_field_names_in_token_guidance(repo_root):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 5. The empirical capability note (CC background-only exposure, Codex unverified,
-#    OTel gen_ai.usage.* target) lives in the repo's own AGENTS.md, never shipped.
+# 5. The empirical capability note stays maintainer-only (AGENTS.md, not shipped)
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -205,8 +222,6 @@ def test_agents_md_has_maintainer_token_capability_note(repo_root):
 
 
 def test_cc_background_capability_detail_not_in_shipped_skills(repo_root):
-    """The empirical 'background Task completions' capability detail is maintainer-only
-    (AGENTS.md) — it must not leak into shipped skills/** as a runtime-specific hack."""
     offenders = []
     for path in (repo_root / "skills").rglob("*"):
         if not path.is_file():

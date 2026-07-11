@@ -1,151 +1,169 @@
-"""Structural guards for the human gate-override write-through adoption (SQD-958).
+"""Guards for the human gate-override write-through.
 
-At a default-mode squad-run review gate a human may **reject** — *including after an agent recorded
-`approved`*. SQD-958 makes that send-back a durable, attributable server record rather than a
-terminal-scrollback note: squad-run prompts for a mandatory `reason`, then `POST`s
-`/task/:id/override-review` (record-only — appends a superseding `changes_requested`/`fail` verdict,
-flips the derived `last_*_status`) BEFORE running its existing verdict→move table, which now computes
-the backward move SQD-955 made legal. Attribution is delegation: the body carries `actor_kind=human`
-even though it is relayed over the run's user-scoped PAT.
+At a default-mode squad-run review gate a human may **reject** — *including after an agent
+recorded `approved`*. The send-back is a durable, attributable server record: a mandatory
+`reason` is required, then `/task/:id/override-review` is POSTed (record-only — appends a
+superseding verdict that flips the derived `last_*_status`) BEFORE the verdict→move logic
+computes the backward move. Attribution is delegation (`actor_kind=human`, stamped
+`executed_by`/`on_behalf_of` server-side).
 
-These are deterministic grep invariants (mirroring test_complete_adoption.py / test_cancel_adoption.py)
-that keep the authored docs encoding the contract so the adoption can't silently regress — a dropped
-reason prompt, a move that skips the override record, a lost `actor_kind=human` delegation marker, or
-an endpoint that falls out of either the Move Protocol or API Endpoints section of shared.md.
+The mechanism now lives in `pipeline.py advance --human-reject` (behavioral unit tests below,
+with the board stubbed) — squad-run/SKILL.md carries the gate instruction and the
+no-silent-downgrade rule, and references/api.md documents the endpoint contract.
 
-Hermetic: reads the committed skill files only, no network.
+Hermetic: pipeline_mod._req is monkeypatched; no network.
 """
 import re
+
+import pytest
 
 
 def _read(repo_root, rel):
     return (repo_root / rel).read_text()
 
 
-def _section(text, heading):
-    """Return the body of a `### <heading>` section (up to the next `### ` heading or EOF)."""
-    m = re.search(
-        r"^###\s+" + re.escape(heading) + r"\b.*?(?=^###\s|\Z)",
-        text,
-        re.MULTILINE | re.DOTALL,
-    )
-    return m.group(0) if m else ""
+# ── squad-run/SKILL.md: the gate instruction ───────────────────────────────────
 
 
-# ── squad-run/SKILL.md: the gate-reject write-through block ────────────────────
-
-
-def test_skill_gate_reject_prompts_reason_and_posts_override_before_move(repo_root):
-    """The squad-run gate-reject block prompts for a mandatory reason AND `POST`s
-    `/task/$ID/override-review` — and does so BEFORE the verdict→move (records the override, then
-    re-reads the flipped verdict and falls through to the move table)."""
+def test_skill_gate_reject_requires_reason_and_uses_human_reject(repo_root):
+    """The SKILL.md gate instructs: on human reject, a mandatory non-empty reason, passed to
+    `advance --human-reject`."""
     text = _read(repo_root, "skills/squad-run/SKILL.md")
-
-    # The override write-through is gated on a human REJECT.
-    assert re.search(r"GATE_DECISION.*=\s*reject", text), (
-        "SKILL.md must gate the override write-through on a human reject (GATE_DECISION = reject)"
+    assert "--human-reject" in text, "SKILL.md must route human rejects through advance --human-reject"
+    assert re.search(r"mandatory[^\n]*reason|reason[^\n]*(is )?required", text, re.IGNORECASE), (
+        "SKILL.md must state the reject reason is mandatory"
     )
-
-    # (a) Mandatory reason prompt.
-    reason_idx = text.find("REASON=")
-    assert reason_idx != -1, "SKILL.md gate-reject block must prompt for a REASON"
-    assert re.search(r"[Mm]andatory reason|reason[^\n]*required", text), (
-        "SKILL.md must state the reason is mandatory/required"
-    )
-
-    # (a) POSTs the override endpoint.
-    post_idx = text.find("api POST /task/$ID/override-review")
-    assert post_idx != -1, (
-        "SKILL.md gate-reject block must `api POST /task/$ID/override-review`"
-    )
-
-    # The reason is prompted BEFORE the override POST.
-    assert reason_idx < post_idx, (
-        "SKILL.md must prompt for the reason BEFORE POSTing the override"
-    )
-
-    # BEFORE the move: the override is recorded, then the verdict is re-read and the move table runs.
-    assert re.search(r"override[^\n]*BEFORE the\s+move|BEFORE the\s+\n?#?\s*move", text, re.IGNORECASE) or \
-        re.search(r"record(?:ed)?[^\n]*BEFORE the[^\n]*move", text, re.IGNORECASE), (
-        "SKILL.md must state the override is recorded BEFORE the move"
-    )
-    # The re-read of the now-flipped verdict comes AFTER the POST (so the move table sees the flip).
-    reread_idx = text.find("Re-read the now-flipped", post_idx)
-    assert reread_idx != -1 and reread_idx > post_idx, (
-        "SKILL.md must re-read the flipped verdict AFTER the override POST, before falling through to the move table"
+    assert re.search(r"even after (the )?agent[^\n]*approved|including after", text, re.IGNORECASE), (
+        "SKILL.md must state the human may reject even after an agent recorded approved"
     )
 
 
-def test_skill_references_actor_kind_human_and_delegation(repo_root):
-    """The gate-reject block records the override with `actor_kind=human` (delegation, not
-    impersonation) relayed over the run's user-scoped PAT."""
+def test_skill_surfaces_403_never_fix_in_place(repo_root):
+    """A 403 (PAT lacks the elevated task:override-review scope) is surfaced to the user,
+    never silently downgraded to a fix-in-place."""
     text = _read(repo_root, "skills/squad-run/SKILL.md")
-    assert "actor_kind=human" in text, (
-        "SKILL.md must record the override with actor_kind=human (delegation attribution)"
-    )
-    assert re.search(r"delegation", text, re.IGNORECASE), (
-        "SKILL.md must frame the override as delegation (not impersonation)"
-    )
-    # A 403 (PAT lacks the elevated scope) is surfaced, never downgraded to a silent fix-in-place.
-    assert re.search(r"task:override-review", text), (
-        "SKILL.md must name the elevated task:override-review scope"
-    )
-    assert re.search(r"fix-in-place|fix in place", text, re.IGNORECASE), (
+    assert "task:override-review" in text, "SKILL.md must name the elevated scope"
+    assert re.search(r"fix.in.place", text, re.IGNORECASE), (
         "SKILL.md must state a 403 is surfaced, NOT downgraded to a silent fix-in-place"
     )
 
 
-# ── squad/shared.md: endpoint documented in BOTH Move Protocol AND API Endpoints ─
+# ── pipeline.py advance --human-reject: behavioral contract ────────────────────
 
 
-def test_shared_move_protocol_documents_override(repo_root):
-    """shared.md's Move Protocol section documents the human gate-override: record the override
-    (`/override-review`, mandatory reason, record-only) BEFORE the standard read→move runs against
-    the flipped derived status."""
-    text = _read(repo_root, "skills/squad/shared.md")
-    move = _section(text, "Move Protocol")
-    assert move, "shared.md must have a `### Move Protocol` section"
-    assert "override-review" in move, (
-        "shared.md Move Protocol must document the /override-review endpoint"
-    )
-    assert re.search(r"reason", move, re.IGNORECASE), (
-        "shared.md Move Protocol must mention the mandatory reason"
-    )
-    assert re.search(r"record-only|never changes? `?status`?", move, re.IGNORECASE), (
-        "shared.md Move Protocol must state the override is record-only (never changes status)"
-    )
-    assert re.search(r"impl_review→impl|backward move|reject-loop", move, re.IGNORECASE), (
-        "shared.md Move Protocol must document the backward move the override drives "
-        "(by feature, not an internal board id — shipped docs carry no SQD-* references)"
+class _Args:
+    def __init__(self, **kw):
+        self.id = kw.get("id", "T-1")
+        self.human_reject = kw.get("human_reject", False)
+        self.reason = kw.get("reason")
+        self.cid = kw.get("cid")
+        self.force = kw.get("force", False)
+
+
+def _stub(pipeline_mod, monkeypatch, task_fields):
+    """Stub _req: records calls; GET returns task_fields (updated by override), POST/PATCH ok."""
+    calls = []
+
+    def fake_req(method, path, body=None):
+        calls.append((method, path, body))
+        if method == "GET":
+            return 0, dict(task_fields)
+        if method == "POST" and path.endswith("/override-review"):
+            # The server flips the derived verdict for the stage.
+            task_fields["last_review_status"] = "changes_requested"
+            return 0, {"success": True}
+        return 0, {"success": True}
+
+    monkeypatch.setattr(pipeline_mod, "_req", fake_req)
+    monkeypatch.setattr(pipeline_mod, "_emit_steering", lambda *a, **k: None)
+    return calls
+
+
+def test_advance_human_reject_requires_reason(pipeline_mod, monkeypatch, capsys):
+    """--human-reject without --reason exits 2 and sends NOTHING."""
+    calls = _stub(pipeline_mod, monkeypatch,
+                  {"status": "impl_review", "level": 3, "version": 7,
+                   "impl_review_count": 1, "last_review_status": "approved"})
+    with pytest.raises(SystemExit) as exc:
+        pipeline_mod.cmd_advance(_Args(human_reject=True, reason=None))
+    assert exc.value.code == 2
+    assert not [c for c in calls if c[0] in ("POST", "PATCH")], (
+        "no write may be issued when the mandatory reason is missing"
     )
 
 
-def test_shared_api_endpoints_documents_override(repo_root):
-    """shared.md's API Endpoints section documents the executable `api POST /task/$ID/override-review`
-    call with the required reason, the elevated task:override-review scope, and delegation attribution."""
-    text = _read(repo_root, "skills/squad/shared.md")
-    endpoints = _section(text, "API Endpoints")
-    assert endpoints, "shared.md must have a `### API Endpoints` section"
-    assert re.search(r"api POST /task/\$ID/override-review", endpoints), (
-        "shared.md API Endpoints must document the executable `api POST /task/$ID/override-review` call"
+def test_advance_human_reject_posts_override_before_move(pipeline_mod, monkeypatch, capsys):
+    """The override POST (gate + reason + expected_version) precedes the move PATCH, and the
+    move is computed from the RE-READ, flipped verdict (the backward reject-loop move)."""
+    calls = _stub(pipeline_mod, monkeypatch,
+                  {"status": "impl_review", "level": 3, "version": 7,
+                   "impl_review_count": 1, "last_review_status": "approved"})
+    pipeline_mod.cmd_advance(_Args(human_reject=True, reason="stale snippet", cid="cid-1"))
+
+    override_idx = next(i for i, c in enumerate(calls)
+                        if c[0] == "POST" and c[1].endswith("/override-review"))
+    body = calls[override_idx][2]
+    assert body["gate"] == "impl_review"
+    assert body["reason"] == "stale snippet"
+    assert body["expected_version"] == 7, "the override must carry the optimistic-concurrency guard"
+    assert body["correlation_id"] == "cid-1"
+
+    move_idx = next(i for i, c in enumerate(calls) if c[0] == "PATCH")
+    assert override_idx < move_idx, "the override must be recorded BEFORE the move"
+    move_body = calls[move_idx][2]
+    assert move_body["status"] == "impl", (
+        "the move must follow the FLIPPED verdict (impl_review → impl backward move)"
     )
-    assert re.search(r"reason[^\n]*REQUIRED|REQUIRED[^\n]*reason|reason.*→\s*400", endpoints, re.IGNORECASE), (
-        "shared.md API Endpoints must state reason is REQUIRED (omit/empty → 400)"
-    )
-    assert "task:override-review" in endpoints, (
-        "shared.md API Endpoints must name the elevated task:override-review scope"
-    )
-    assert "actor_kind=human" in endpoints, (
-        "shared.md API Endpoints must document the actor_kind=human delegation marker"
+    assert move_body["actor"] == "Orchestrator"
+
+
+def test_advance_human_reject_override_failure_aborts_without_move(pipeline_mod, monkeypatch):
+    """A failed override write (e.g. 403 missing scope) aborts — no move is issued (the
+    no-silent-downgrade rule: the server record is the source of truth)."""
+    calls = []
+
+    def fake_req(method, path, body=None):
+        calls.append((method, path, body))
+        if method == "GET":
+            return 0, {"status": "impl_review", "level": 3, "version": 7,
+                       "impl_review_count": 1, "last_review_status": "approved"}
+        if method == "POST" and path.endswith("/override-review"):
+            return 4, {"error": "FORBIDDEN"}
+        return 0, {"success": True}
+
+    monkeypatch.setattr(pipeline_mod, "_req", fake_req)
+    monkeypatch.setattr(pipeline_mod, "_emit_steering", lambda *a, **k: None)
+    with pytest.raises(SystemExit) as exc:
+        pipeline_mod.cmd_advance(_Args(human_reject=True, reason="r"))
+    assert exc.value.code == 4
+    assert not [c for c in calls if c[0] == "PATCH"], (
+        "a failed override must abort the gate — no move, no fix-in-place"
     )
 
 
-def test_shared_documents_override_in_both_sections(repo_root):
-    """Belt-and-suspenders: the endpoint is present in BOTH the Move Protocol and API Endpoints
-    sections (the done_when explicitly requires both), not just one."""
-    text = _read(repo_root, "skills/squad/shared.md")
-    move = _section(text, "Move Protocol")
-    endpoints = _section(text, "API Endpoints")
-    assert "override-review" in move and "override-review" in endpoints, (
-        "shared.md must document /override-review in BOTH Move Protocol AND API Endpoints sections"
+def test_advance_human_reject_only_valid_at_review_gates(pipeline_mod, monkeypatch):
+    """--human-reject outside a review gate (e.g. status impl) is a usage error."""
+    _stub(pipeline_mod, monkeypatch,
+          {"status": "impl", "level": 2, "version": 3, "impl_review_count": 0})
+    with pytest.raises(SystemExit) as exc:
+        pipeline_mod.cmd_advance(_Args(human_reject=True, reason="r"))
+    assert exc.value.code == 2
+
+
+# ── references/api.md: the endpoint contract doc ───────────────────────────────
+
+
+def test_api_reference_documents_override(repo_root):
+    """references/api.md documents /override-review: record-only, reason REQUIRED, the elevated
+    scope, the flipped derived verdict → backward move, and delegation attribution."""
+    text = _read(repo_root, "skills/squad/references/api.md")
+    assert "override-review" in text
+    assert re.search(r"record-only", text, re.IGNORECASE), (
+        "the verdicts section must state these endpoints never change status"
+    )
+    assert re.search(r"reason REQUIRED", text), "reason must be documented as REQUIRED"
+    assert "task:override-review" in text, "the elevated scope must be named"
+    assert "actor_kind=human" in text, "delegation attribution must be documented"
+    assert re.search(r"backward|reject-loop", text), (
+        "the flipped-verdict → backward move consequence must be documented"
     )

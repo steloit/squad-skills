@@ -1,186 +1,255 @@
-"""Contract guards for agent-attributed writes + step events (#SQD-981).
+"""Contract guards for agent-attributed writes + step events.
 
-Design A (client-only, builds on the shipped SQD-980 server contract): the AGENT that
-does the work self-attributes its record-write (`actor:<Nickname>`, `model:<its model>`),
-and the ORCHESTRATOR — the only component that sees a subagent's real runtime usage —
-attributes the per-step activity event to that SAME agent (`actor:<Nickname>`,
-`model:<agent model>`, `tokens:<runtime usage>`), never `actor:"Orchestrator"`. Only the
-orchestrator's OWN machine events (status-move PATCHes, the format-normalize note, the
-commit note) keep `actor:"Orchestrator"`. A step's tokens are recorded ONCE — on the
-orchestrator's per-step event — so the verdict templates (Critic/Inspector/Ranger) drop
-their self-guessed `tokens:<ESTIMATED_TOKENS>` (an agent cannot know its own usage) while
-keeping `model`. The token source is described in portable, runtime-agnostic prose (never
-a hardcoded Claude-Code field name) so any agent runtime can resolve its own equivalent.
+The contract survived the skills-efficiency re-architecture but the mechanism
+moved: the per-step activity event is now issued by the engine
+(``pipeline.py record``) rather than a SKILL.md bash snippet. The attribution
+model is unchanged:
 
-These are deterministic grep/structural invariants (mirroring
-test_activity_adoption.py / test_correlation_id_threading.py) — stdlib-only, hermetic,
-using the shared `repo_root` fixture.
+- the per-step event is attributed to the AGENT that did the work
+  (``actor: <Nickname>``, ``model: <the agent's resolved model>``), with
+  ``tokens`` included only when the orchestrator passed a runtime-reported
+  figure — never ``actor: "Orchestrator"``;
+- the orchestrator's own machine events keep ``actor: "Orchestrator"``: the
+  dispatch entry PATCH, every status-move PATCH (advance/finalize), the
+  format-normalize notes and the finalize commit note (``model: "system"``);
+- the field-write templates (Planner/Builder/Shield) self-attribute their
+  record-write PATCH with ``actor`` + ``model`` in the SAME body;
+- the verdict templates (Critic/Inspector/Ranger) carry ``model`` but never a
+  self-guessed ``tokens`` figure (the engine's step event is the single token
+  source of truth).
+
+Also kept from the old suite (still true, location unchanged): schema.md's
+Token Usage Guide is runtime-sourced (never estimated), and no shipped
+``skills/**`` file hardcodes a runtime-specific token field name.
+
+Hermetic: ``_req`` is always stubbed; no network.
 """
+import json
 import re
+import subprocess
+from types import SimpleNamespace
 
 
 SKILL_PATH = "skills/squad-run/SKILL.md"
 SCHEMA_PATH = "skills/squad/schema.md"
 
-# Field-write templates: agent PATCHes its own work-product (plan / implementation_notes).
+# Field-write templates: the agent PATCHes its own work-product.
 _FIELD_WRITE_TEMPLATES = {
     "skills/squad/templates/plan-agent.md": "Planner",
     "skills/squad/templates/worker-agent.md": "Builder",
     "skills/squad/templates/tdd-tester.md": "Shield",
 }
 
-# Verdict templates: agent POSTs a verdict; token estimate must be dropped, model kept.
+# Verdict templates: the agent POSTs a verdict; no self-guessed tokens.
 _VERDICT_TEMPLATES = [
     "skills/squad/templates/review-agent.md",
     "skills/squad/templates/code-review-agent.md",
     "skills/squad/templates/test-runner.md",
 ]
 
-
-def _step6_section(text):
-    """Extract the '#### ⑥ Agent-attributed step event' subsection (heading through the
-    next '#### ' heading) so assertions can be scoped away from the surrounding
-    orchestrator machine-event snippets (format-normalize / commit note) that legitimately
-    keep `actor:"Orchestrator"`."""
-    match = re.search(
-        r"#### ⑥ Agent-attributed step event(.*?)\n#### ",
-        text,
-        re.DOTALL,
-    )
-    assert match, "SKILL.md must have a '#### ⑥ Agent-attributed step event' subsection"
-    return match.group(1)
+_AGENT_MODEL_KEYS = {
+    "Planner": "planner", "Critic": "critic", "Builder": "builder",
+    "Shield": "shield", "Inspector": "inspector", "Ranger": "ranger",
+}
 
 
-def _step6_bash_block(text):
-    """Extract just the ~~~bash ... ~~~ fenced snippet inside the step-⑥ section — the
-    concrete, copy-pasteable POST body."""
-    section = _step6_section(text)
-    match = re.search(r"~~~bash(.*?)~~~", section, re.DOTALL)
-    assert match, "step-⑥ section must contain a ~~~bash ... ~~~ snippet"
-    return match.group(1)
+def _stub_req(monkeypatch, pipeline_mod, handler=None):
+    calls = []
+
+    def fake_req(method, path, body=None):
+        calls.append((method, path, body))
+        if handler:
+            return handler(method, path, body)
+        return 0, {}
+
+    monkeypatch.setattr(pipeline_mod, "_req", fake_req)
+    return calls
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 1. Step ⑥ activity POST is agent-attributed (actor/model/tokens/correlation_id),
-#    scoped to the step-⑥ section so the file's other genuine actor:"Orchestrator"
-#    lines (status moves / format-normalize / commit) don't collide.
-# ──────────────────────────────────────────────────────────────────────────────
+def _claude_models(repo_root):
+    cfg = json.loads((repo_root / "skills/squad/models.json").read_text())
+    return cfg["providers"]["claude"]
 
 
-def test_step6_snippet_is_agent_attributed(repo_root):
-    """The step-⑥ concrete snippet sets actor to the agent's nickname (a variable, not a
-    literal 'Orchestrator'), carries the agent's model, sources tokens from the runtime's
-    reported per-subagent usage, and threads correlation_id."""
-    text = (repo_root / SKILL_PATH).read_text()
-    snippet = _step6_bash_block(text)
-
-    assert "os.environ['AGENT_NICK']" in snippet, (
-        "step-⑥ snippet must set actor from the agent's own nickname (AGENT_NICK), "
-        "not a hardcoded value"
-    )
-    assert "os.environ['AGENT_MODEL']" in snippet, (
-        "step-⑥ snippet must set model from the agent's own resolved model (AGENT_MODEL)"
-    )
-    assert "STEP_TOKENS" in snippet, (
-        "step-⑥ snippet must source tokens from the runtime's reported per-subagent usage "
-        "(STEP_TOKENS), not a manual estimate"
-    )
-    assert "correlation_id" in snippet, "step-⑥ snippet must carry correlation_id"
-    assert '"CID"' in snippet or "CID=" in snippet, (
-        "step-⑥ snippet must thread the step's $CORRELATION_ID via CID"
-    )
-
-    # Negative: the concrete POST body itself must NOT hardcode actor:"Orchestrator".
-    assert 'actor: "Orchestrator"' not in snippet and "actor:\"Orchestrator\"" not in snippet, (
-        "step-⑥ agent-attributed snippet must NOT hardcode actor:\"Orchestrator\""
-    )
-    assert "'Orchestrator'" not in snippet, (
-        "step-⑥ agent-attributed snippet must NOT reference 'Orchestrator' as the actor value"
-    )
+def _record_args(**kw):
+    base = dict(id="7", agent="builder", message="did the work", tokens=None, cid="cid-1")
+    base.update(kw)
+    return SimpleNamespace(**base)
 
 
-def test_step6_omits_tokens_when_runtime_reports_nothing(repo_root):
-    """The step-⑥ snippet must omit the tokens key entirely (never null, never 0) when the
-    runtime's usage signal is empty — an `if tok:` (or equivalent truthy) guard, not an
-    unconditional assignment."""
-    text = (repo_root / SKILL_PATH).read_text()
-    snippet = _step6_bash_block(text)
-    assert re.search(r"if\s+tok\s*:\s*b\[['\"]tokens['\"]\]", snippet), (
-        "step-⑥ snippet must guard the 'tokens' key assignment so it's omitted when the "
-        "runtime reports nothing (never null/0)"
-    )
-    assert "tokens'] = None" not in snippet and 'tokens"] = None' not in snippet, (
-        "step-⑥ snippet must never send tokens: null"
-    )
-
-
-def test_step6_section_states_agent_vs_orchestrator_distinction(repo_root):
-    """The step-⑥ section must explicitly distinguish this agent-attributed event from the
-    orchestrator's own machine events (status moves / format-normalize / commit note)."""
-    text = (repo_root / SKILL_PATH).read_text()
-    section = _step6_section(text)
-    assert "not" in section.lower() and "orchestrator" in section.lower(), (
-        "step-⑥ section must explicitly say this event is NOT actor:'Orchestrator'"
-    )
-    assert "format-normalize" in section.lower() or "format normaliz" in section.lower(), (
-        "step-⑆ section must name the format-normalize note as a genuine orchestrator event"
-    )
-    assert "commit" in section.lower(), (
-        "step-⑥ section must name the commit note as a genuine orchestrator event"
-    )
+def _record_handler(method, path, body):
+    if method == "GET":
+        return 0, {"status": "impl", "level": 2}
+    return 0, {"success": True}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 2. Genuine machine events (status-move / format-normalize / commit note) still
-#    carry actor:"Orchestrator" — the fix must not sweep these into agent attribution.
+# 1. `pipeline.py record` — the per-step event is agent-attributed
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def test_format_normalize_note_still_orchestrator(repo_root):
-    """The Impl-Step Format Normalization block's two activity notes (no-formatter-resolved
-    skip, and non-zero-exit) must both still be actor:"Orchestrator", model:"system" — these
-    are genuine machine events, not agent work."""
-    text = (repo_root / SKILL_PATH).read_text()
-    match = re.search(
-        r"#### Impl-Step Format Normalization(.*?)\n#### ",
-        text,
-        re.DOTALL,
+def test_record_posts_agent_attributed_event(pipeline_mod, repo_root, monkeypatch, capsys):
+    monkeypatch.setenv("SQUAD_MODEL_PROVIDER", "claude")
+    calls = _stub_req(monkeypatch, pipeline_mod, _record_handler)
+
+    pipeline_mod.cmd_record(_record_args(agent="builder", message="built it"))
+
+    posts = [c for c in calls if c[0] == "POST"]
+    assert len(posts) == 1 and posts[0][1] == "/task/7/activity"
+    body = posts[0][2]
+    assert body["actor"] == "Builder", (
+        "the step event must be attributed to the AGENT's nickname"
     )
-    assert match, "SKILL.md must have the 'Impl-Step Format Normalization' section"
-    section = match.group(1)
-    occurrences = len(re.findall(r'actor:"Orchestrator",\s*model:"system"', section))
-    assert occurrences >= 2, (
-        "format-normalize section must keep both its activity notes as "
-        f"actor:\"Orchestrator\", model:\"system\" (found {occurrences})"
+    assert body["actor"] != "Orchestrator", (
+        "the per-step event must never be actor:'Orchestrator'"
     )
+    assert body["model"] == _claude_models(repo_root)["builder"], (
+        "the step event must carry the agent's own resolved model"
+    )
+    assert body["message"] == "built it"
+    assert body["correlation_id"] == "cid-1"
 
 
-def test_commit_note_still_orchestrator(repo_root):
-    """The done-transition commit-hash activity event must stay actor: "Orchestrator" — a
-    genuine machine event recording what the orchestrator committed, not agent work."""
-    text = (repo_root / SKILL_PATH).read_text()
-    match = re.search(r"→ Done Transition(.*?)$", text, re.DOTALL)
-    assert match, "SKILL.md must have the '→ Done Transition' section"
-    section = match.group(1)
-    assert re.search(r"""['"]?actor['"]?:\s*['"]Orchestrator['"]""", section), (
-        "the commit-hash activity event under Done Transition must carry actor: \"Orchestrator\""
-    )
-    assert re.search(r"""['"]?model['"]?:\s*['"]system['"]""", section), (
-        "the commit-hash activity event under Done Transition must carry model: \"system\""
-    )
+def test_record_resolves_each_agents_model_from_models_json(
+        pipeline_mod, repo_root, monkeypatch, capsys):
+    monkeypatch.setenv("SQUAD_MODEL_PROVIDER", "claude")
+    models = _claude_models(repo_root)
+    for nickname, key in _AGENT_MODEL_KEYS.items():
+        calls = _stub_req(monkeypatch, pipeline_mod, _record_handler)
+        pipeline_mod.cmd_record(_record_args(agent=nickname.lower()))
+        capsys.readouterr()
+        body = [c for c in calls if c[0] == "POST"][0][2]
+        assert body["actor"] == nickname
+        assert body["model"] == models[key], (
+            f"{nickname}'s step event must carry models.json's {key} model"
+        )
 
 
-def test_status_move_patches_still_orchestrator(repo_root):
-    """The done-commit and impl_review-commit status-move PATCHes must keep
-    actor:"Orchestrator" — these are the orchestrator's own state-transition writes."""
-    text = (repo_root / SKILL_PATH).read_text()
-    assert 'api PATCH /task/$ID --json \'{"status": "impl_review", "current_agent": null, "actor": "Orchestrator"}\'' in text
-    assert 'api PATCH /task/$ID --json \'{"status": "done", "current_agent": null, "actor": "Orchestrator"}\'' in text
+def test_record_includes_tokens_only_when_reported(pipeline_mod, monkeypatch, capsys):
+    monkeypatch.setenv("SQUAD_MODEL_PROVIDER", "claude")
+    calls = _stub_req(monkeypatch, pipeline_mod, _record_handler)
+    pipeline_mod.cmd_record(_record_args(tokens=12345))
+    capsys.readouterr()
+    body = [c for c in calls if c[0] == "POST"][0][2]
+    assert body["tokens"] == 12345
+
+    calls = _stub_req(monkeypatch, pipeline_mod, _record_handler)
+    pipeline_mod.cmd_record(_record_args(tokens=None))
+    capsys.readouterr()
+    body = [c for c in calls if c[0] == "POST"][0][2]
+    assert "tokens" not in body, (
+        "tokens must be omitted entirely when the runtime reported nothing "
+        "(never null, never 0)"
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 3. Field-write templates (Planner/Builder/Shield) carry actor + model in their
-#    PATCH bodies.
+# 2. Genuine machine events keep actor:"Orchestrator"
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def test_dispatch_entry_patch_is_orchestrator(pipeline_mod, monkeypatch, capsys):
+    monkeypatch.setenv("SQUAD_MODEL_PROVIDER", "claude")
+    monkeypatch.setattr(pipeline_mod.api, "resolve_project", lambda: "proj")
+
+    def handler(method, path, body):
+        if method == "GET" and "fields=status,level" in path:
+            return 0, {"status": "todo", "level": 2}
+        if method == "GET" and path.startswith("/projects/"):
+            return 0, {"brief": ""}
+        if method == "GET" and path.endswith("/relationships"):
+            return 0, {"blocked_by": []}
+        if method == "GET":
+            return 0, {"title": "T", "description": "D"}
+        return 0, {"success": True}
+
+    calls = _stub_req(monkeypatch, pipeline_mod, handler)
+    pipeline_mod.cmd_dispatch(SimpleNamespace(id="7", agent=None))
+    capsys.readouterr()
+
+    patches = [c for c in calls if c[0] == "PATCH"]
+    assert patches, "dispatch must issue the entry PATCH"
+    body = patches[0][2]
+    assert body["actor"] == "Orchestrator", (
+        "the entry PATCH is the orchestrator's own state write"
+    )
+    assert body["status"] == "plan" and body["current_agent"] == "Planner"
+
+
+def test_advance_move_patch_is_orchestrator(pipeline_mod, monkeypatch, capsys):
+    monkeypatch.setattr(pipeline_mod, "_emit_steering", lambda *a, **k: None)
+
+    def handler(method, path, body):
+        if method == "GET":
+            return 0, {"status": "plan_review", "level": 3, "version": 2,
+                       "plan_review_count": 1, "last_plan_review_status": "approved"}
+        return 0, {"success": True}
+
+    calls = _stub_req(monkeypatch, pipeline_mod, handler)
+    pipeline_mod.cmd_advance(SimpleNamespace(
+        id="7", human_reject=False, reason=None, cid=None, force=False))
+    capsys.readouterr()
+
+    patches = [c for c in calls if c[0] == "PATCH"]
+    assert patches and patches[0][2] == {
+        "status": "impl", "current_agent": None, "actor": "Orchestrator"}
+
+
+def test_finalize_done_patch_and_commit_note_are_orchestrator(
+        pipeline_mod, tmp_path, monkeypatch, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for cmd in (["git", "init", "-q"],
+                ["git", "config", "user.email", "t@example.com"],
+                ["git", "config", "user.name", "T"],
+                ["git", "config", "commit.gpgsign", "false"]):
+        subprocess.run(cmd, cwd=repo, check=True)
+    (repo / "a.txt").write_text("x\n")
+    monkeypatch.chdir(repo)
+
+    def handler(method, path, body):
+        if method == "GET":
+            return 0, {"id": 7, "title": "t", "level": 2, "status": "impl_review"}
+        return 0, {"success": True}
+
+    calls = _stub_req(monkeypatch, pipeline_mod, handler)
+    pipeline_mod.cmd_finalize(SimpleNamespace(id="7", approval_tree=None))
+    capsys.readouterr()
+
+    patches = [c for c in calls if c[0] == "PATCH"]
+    assert patches and patches[0][2]["actor"] == "Orchestrator"
+    posts = [c for c in calls if c[0] == "POST"]
+    assert posts, "finalize must record the commit event"
+    note = posts[0][2]
+    assert note["actor"] == "Orchestrator" and note["model"] == "system", (
+        "the commit note is a genuine machine event"
+    )
+    assert note["message"].startswith("Committed ")
+
+
+def test_normalize_notes_are_orchestrator_system(pipeline_mod, tmp_path, monkeypatch, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for cmd in (["git", "init", "-q"],
+                ["git", "config", "user.email", "t@example.com"],
+                ["git", "config", "user.name", "T"]):
+        subprocess.run(cmd, cwd=repo, check=True)
+    (repo / "a.txt").write_text("x\n")
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(pipeline_mod, "FORMATTERS", [])
+    calls = _stub_req(monkeypatch, pipeline_mod)
+
+    pipeline_mod.cmd_normalize(SimpleNamespace(id="7"))
+    capsys.readouterr()
+
+    posts = [c for c in calls if c[0] == "POST"]
+    assert posts, "the no-formatter skip must be logged"
+    assert posts[0][2]["actor"] == "Orchestrator"
+    assert posts[0][2]["model"] == "system"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 3. Field-write templates carry actor + model in the SAME PATCH body
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -188,32 +257,43 @@ def test_field_write_templates_carry_actor_and_model(repo_root):
     missing = []
     for rel, nickname in _FIELD_WRITE_TEMPLATES.items():
         text = (repo_root / rel).read_text()
-        has_actor = f'"actor": "{nickname}"' in text or f"\\\"actor\\\": \\\"{nickname}\\\"" in text
-        has_model = re.search(r'\\?"model\\?":\s*\\?"<MODEL_' + nickname.upper() + r'>\\?"', text)
+        has_actor = f"'actor': '{nickname}'" in text
+        has_model = f"'model': '<MODEL_{nickname.upper()}>'" in text
         if not (has_actor and has_model):
             missing.append(rel)
     assert not missing, (
-        f"these field-write templates must carry actor+model in their PATCH body: {missing}"
+        f"these field-write templates must self-attribute their record-write "
+        f"with actor+model: {missing}"
     )
 
 
-def test_field_write_templates_actor_model_in_same_patch_body(repo_root):
-    """actor/model must land in the SAME PATCH call as the domain write (plan /
-    implementation_notes), not a separate follow-up write."""
+def test_field_write_actor_model_in_same_body_as_domain_write(repo_root):
+    """actor/model must land in the SAME json.dumps body as the domain field,
+    not a separate follow-up write."""
+    domain_field = {
+        "skills/squad/templates/plan-agent.md": "'plan'",
+        "skills/squad/templates/worker-agent.md": "'implementation_notes'",
+        "skills/squad/templates/tdd-tester.md": "'implementation_notes'",
+    }
     for rel, nickname in _FIELD_WRITE_TEMPLATES.items():
         text = (repo_root / rel).read_text()
-        patch_lines = [ln for ln in text.splitlines() if "api PATCH /task/<ID>" in ln]
-        assert patch_lines, f"{rel} must have an `api PATCH /task/<ID>` line"
-        line = patch_lines[0]
-        assert f'\\"actor\\": \\"{nickname}\\"' in line, (
-            f"{rel}: actor:\"{nickname}\" must be in the same PATCH body as the domain write"
+        blocks = re.findall(r"```bash\n(.*?)```", text, re.DOTALL)
+        patch_blocks = [b for b in blocks if "api PATCH /task/<ID>" in b]
+        assert patch_blocks, f"{rel} must PATCH its record-write via the api helper"
+        block = patch_blocks[-1]
+        assert domain_field[rel] in block, (
+            f"{rel}: the PATCH body must carry the domain field"
         )
-        assert "MODEL_" in line, f"{rel}: model must be in the same PATCH body as the domain write"
+        assert f"'actor': '{nickname}'" in block, (
+            f"{rel}: actor must be in the same PATCH body as the domain write"
+        )
+        assert "MODEL_" in block, (
+            f"{rel}: model must be in the same PATCH body as the domain write"
+        )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 4. Verdict templates (Critic/Inspector/Ranger) drop the self-guessed tokens
-#    estimate but keep model.
+# 4. Verdict templates keep model, never self-guess tokens
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -221,27 +301,33 @@ def test_verdict_templates_drop_token_estimate_keep_model(repo_root):
     for rel in _VERDICT_TEMPLATES:
         text = (repo_root / rel).read_text()
         assert "ESTIMATED_TOKENS" not in text, (
-            f"{rel} must no longer carry a tokens:<ESTIMATED_TOKENS> self-guess"
+            f"{rel} must not carry a tokens self-guess"
         )
-        assert not re.search(r'"tokens":\s*<?\d*ESTIMATED', text)
-        assert '"tokens"' not in text, (
+        assert "'tokens'" not in text and '"tokens"' not in text, (
             f"{rel}'s verdict POST body must not carry a tokens field at all "
-            "(the orchestrator's step-⑥ event is the single source of truth)"
+            "(the engine's step event is the single source of truth)"
         )
-        assert '"model"' in text, f"{rel} must still send model in its verdict POST"
+        assert "'model'" in text, f"{rel} must still send model in its verdict POST"
+
+
+def test_estimated_tokens_placeholder_gone_from_skills(repo_root):
+    offenders = []
+    for path in (repo_root / "skills").rglob("*"):
+        if path.is_file() and "ESTIMATED_TOKENS" in path.read_text(encoding="utf-8", errors="ignore"):
+            offenders.append(str(path.relative_to(repo_root)))
+    assert not offenders, f"<ESTIMATED_TOKENS> self-guess must be gone from skills/**: {offenders}"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 5. schema.md's token guidance sources the runtime's reported usage (portable),
-#    not a manual context-size estimate.
+# 5. schema.md token guidance stays runtime-sourced, portable
 # ──────────────────────────────────────────────────────────────────────────────
 
 
 def test_schema_token_guide_is_runtime_sourced_not_estimated(repo_root):
     text = (repo_root / SCHEMA_PATH).read_text()
-    assert "Token Usage Guide" in text, "schema.md must rename to 'Token Usage Guide'"
+    assert "Token Usage Guide" in text, "schema.md must keep the 'Token Usage Guide'"
     assert "Token Estimation Guide" not in text, (
-        "schema.md must drop the old 'Token Estimation Guide' heading"
+        "schema.md must not resurrect the old 'Token Estimation Guide' heading"
     )
     lowered = text.lower()
     assert "estimate" not in lowered.split("token usage guide")[-1].split("## table")[0], (
@@ -262,8 +348,7 @@ def test_schema_token_guide_is_runtime_sourced_not_estimated(repo_root):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 6. Portability guard: no shipped skills/** file hardcodes a Claude-Code-specific
-#    token field name; the token source stays prose-portable.
+# 6. Portability guard: no runtime-specific token field name in skills/**
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -278,9 +363,6 @@ _CC_SPECIFIC_TOKEN_PATTERNS = [
 
 
 def test_no_hardcoded_claude_code_token_field_names(repo_root):
-    """No shipped skills/** file may hardcode a Claude-Code/Anthropic-specific usage field
-    name (e.g. input_tokens/output_tokens) — the guidance must stay portable prose so
-    Codex and other runtimes can resolve their own equivalent."""
     offenders = []
     for path in (repo_root / "skills").rglob("*"):
         if not path.is_file():
@@ -290,13 +372,3 @@ def test_no_hardcoded_claude_code_token_field_names(repo_root):
             if pat.search(text):
                 offenders.append((str(path.relative_to(repo_root)), pat.pattern))
     assert not offenders, f"shipped skills/** must not hardcode CC-specific token fields: {offenders}"
-
-
-def test_estimated_tokens_placeholder_gone_from_skills(repo_root):
-    """The old <ESTIMATED_TOKENS> self-guess placeholder must be gone from every shipped
-    skills/** file (not just the three verdict templates)."""
-    offenders = []
-    for path in (repo_root / "skills").rglob("*"):
-        if path.is_file() and "ESTIMATED_TOKENS" in path.read_text(encoding="utf-8", errors="ignore"):
-            offenders.append(str(path.relative_to(repo_root)))
-    assert not offenders, f"<ESTIMATED_TOKENS> self-guess must be gone from skills/**: {offenders}"

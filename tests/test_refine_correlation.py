@@ -72,8 +72,9 @@ def test_schema_documents_spec_correlation_id(repo_root):
 
 
 def test_shared_documents_spec_correlation_id(repo_root):
-    """shared.md must note squad-refine threads correlation_id on the spec write + note."""
-    text = (repo_root / "skills" / "squad" / "shared.md").read_text()
+    """The shared correlation_id doc (now references/api.md) must note squad-refine threads
+    one id through the spec write + Refiner note."""
+    text = (repo_root / "skills" / "squad" / "references" / "api.md").read_text()
     assert "squad-refine" in text and "correlation_id" in text, (
         "shared.md must mention squad-refine and correlation_id"
     )
