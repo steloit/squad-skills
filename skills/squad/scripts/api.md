@@ -71,7 +71,7 @@ api.py POST /task/<id>/spec --json @body.json
 api.py PATCH /task/<id> --json '{"status":"done"}'
 
 # body from stdin
-echo '{"text":"hi"}' | api.py POST /task/<id>/comment --json -
+echo '{"actor":"Orchestrator","model":"system","message":"hi"}' | api.py POST /task/<id>/activity --json -
 ~~~
 
 The full contract also lives in `api.py --help`. A live read-only smoke
