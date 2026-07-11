@@ -35,6 +35,7 @@ import pipeline  # noqa: E402  (reuses the shared board-request core)
 
 
 def _create(payload):
+    payload.setdefault("project", pipeline.api.resolve_project())
     rc, resp = pipeline._req("POST", "/task", payload)
     if rc != 0:
         return rc, None
