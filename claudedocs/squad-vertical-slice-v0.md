@@ -1,5 +1,9 @@
 # Vertical Slice v0 — Issue → Verified PR, Run recorded
 
+> **HISTORICAL DESIGN RECORD** (frozen — see [claudedocs/README.md](./README.md)).
+> Implemented 2026-07-12 as **steloit/squad-engine**; the engine's `ARCHITECTURE.md`
+> describes the system as built (including deltas from this spec).
+
 Status: spec · 2026-07-12 · implements the three-layer architecture (see
 `squad-execution-architecture.md`, ADR 2026-07-12). This spec is written spec-first,
 with EARS acceptance criteria — dogfooding the workflow it builds.

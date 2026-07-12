@@ -1,5 +1,12 @@
 # Squad Execution Architecture — the model I'd build from scratch
 
+> **HISTORICAL DESIGN RECORD** (frozen — see [claudedocs/README.md](./README.md)).
+> Implemented 2026-07-12 as **steloit/squad-engine**. The implementation has since
+> moved past this document in evidence-driven ways it does not reflect: routing is
+> now fully deterministic (this proposal kept LLM self-assessment as an input),
+> security reviews default to a cross-family reviewer, and spec handoff is a file
+> contract, not stdout. Current truth: engine `ARCHITECTURE.md` + `PLAYBOOK.md`.
+
 Status: proposal · 2026-07-12 · supersedes the 6-role pipeline
 Basis: three production-focused research sweeps (agentic loops, harness engineering, spec-driven development) + our own board data. This document argues for a specific architecture and is willing to conclude "cut it."
 

@@ -102,6 +102,15 @@ Two tiers — full detail in **[EVALS.md](EVALS.md)**:
 
 `ToolCorrectnessMetric` is **intentionally not wired in yet**. While the skills talk to the board over `Bash(curl)`, every tool call is just "Bash" — there's nothing meaningful to score. It becomes valuable **after an MCP migration** exposes typed `squad_*` tools; the harness is structured so it drops in then without rework.
 
+## Design history
+
+The architecture research and proposals behind the wider Squad system —
+including the document that led to the **squad-engine** execution harness
+(steloit/squad-engine) — are preserved as frozen historical records in
+[`claudedocs/`](./claudedocs/README.md). They answer *why it's built this
+way*; the engine's own `ARCHITECTURE.md`/`PLAYBOOK.md` answer *how it works
+today*.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). Derived from prior MIT-licensed work; see [NOTICE](NOTICE) for attribution.
