@@ -1,3 +1,10 @@
+> **FROZEN (2026-07-13).** This repository is now the historical record of the
+> Squad skills era: architecture research (`claudedocs/`), and Skills v1 as
+> published (installable and functional, but no longer developed). Execution
+> moved to the deterministic runtime (**steloit/squad-engine**); what skills
+> want to become without execution responsibilities is being rediscovered from
+> scratch in a new repository, one production-proven skill at a time.
+
 <p align="center">
   <strong>Steloit Squad</strong> — AI-team kanban pipeline + code-review skills
 </p>
