@@ -2,7 +2,7 @@ name: validate-skills
 
 on:
   push:
-    branches: [main]
+    branches: [main, v2]
   pull_request:
 
 jobs:
