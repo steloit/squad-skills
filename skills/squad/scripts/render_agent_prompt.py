@@ -9,23 +9,15 @@ import sys
 
 MODEL_KEYS = {
     "MODEL_REFINER": "refiner",
-    "MODEL_PLANNER": "planner",
-    "MODEL_CRITIC": "critic",
-    "MODEL_BUILDER": "builder",
-    "MODEL_SHIELD": "shield",
-    "MODEL_INSPECTOR": "inspector",
-    "MODEL_RANGER": "ranger",
+    "MODEL_WORKER": "worker",
+    "MODEL_REVIEWER": "reviewer",
     "MODEL_COACH": "coach",
 }
 
 EFFORT_KEYS = {
     "EFFORT_REFINER": "refiner",
-    "EFFORT_PLANNER": "planner",
-    "EFFORT_CRITIC": "critic",
-    "EFFORT_BUILDER": "builder",
-    "EFFORT_SHIELD": "shield",
-    "EFFORT_INSPECTOR": "inspector",
-    "EFFORT_RANGER": "ranger",
+    "EFFORT_WORKER": "worker",
+    "EFFORT_REVIEWER": "reviewer",
     "EFFORT_COACH": "coach",
 }
 

@@ -130,9 +130,9 @@ When the gate is ON, an orchestrating skill emits ONE abstracted `user_steering`
 
 | Skill | Correction gate (the `AskUserQuestion` moment) | modality | valence | target | severity | attributability |
 |-------|-----------------------------------------------|----------|---------|--------|----------|-----------------|
-| squad-run | Critic **changes_requested** @ plan_review (or default-mode human reject of the plan) | `evaluative` | `negative` | `planning` | `moderate` | `violated_constraint` |
-| squad-run | Inspector **changes_requested** @ impl_review | `evaluative` | `negative` | `verification` | `moderate` | `violated_constraint` |
-| squad-run | Ranger **fail** @ test | `evaluative` | `negative` | `verification` | `major` | `violated_constraint` |
+| squad-run | Reviewer **changes_requested** @ plan_review (or default-mode human reject of the plan) | `evaluative` | `negative` | `planning` | `moderate` | `violated_constraint` |
+| squad-run | Reviewer **changes_requested** @ impl_review | `evaluative` | `negative` | `verification` | `moderate` | `violated_constraint` |
+| squad-run | Worker **fail** @ test | `evaluative` | `negative` | `verification` | `major` | `violated_constraint` |
 | squad-refine | ⑥ "Edit more" (spec sent back to interview) | `corrective` | `negative` | `scope` | `moderate` | `latent_preference` |
 | squad-refine | ⑥ "Cancel" (spec discarded) | `corrective` | `negative` | `scope` | `moderate` | `ambiguous` |
 | squad-refine | ④ interview redirect (a Q&A answer that changes direction) | `corrective` | `na` | `scope` | `trivial` | `latent_preference` |
@@ -166,8 +166,8 @@ Level is set at task creation and stored in the `level` column.
 ## Command Resolution
 
 The pipeline runs a repo's **real** build / lint / test / format commands, and those commands differ
-per language and per repo. This is *where* an agent-driven step (Ranger test-runner, the Builder +
-Shield self-checks) gets them — a tool-agnostic resolution ladder. The skill never shells out to
+per language and per repo. This is *where* an agent-driven step (the Worker's test dispatch, the
+impl dispatch's self-checks) gets them — a tool-agnostic resolution ladder. The skill never shells out to
 locate or parse a context file — the running agent (Claude Code / Codex / Cursor / Aider / Copilot)
 **already has its own project-context file in working memory**, so resolution is "use what you already
 loaded", not "go read a file".
@@ -198,26 +198,27 @@ loaded", not "go read a file".
 
 ## Role Boundary (Stay in Your Lane / Report — Don't Fix)
 
-Every pipeline agent owns exactly ONE lane and **writes only its own artifact** — the single
-file / output its role produces — and edits nothing else on the *worked* repo:
+Every pipeline dispatch owns exactly ONE lane and **writes only its own artifact** — the single
+file / output that dispatch produces — and edits nothing else on the *worked* repo. The two
+agents' lanes are **per-dispatch** (per column), not per-identity:
 
-- **Planner** authors the `plan` (with `decision_log` / `done_when`); **Builder** owns the
-  production source; **Shield** owns the tests; **Critic / Inspector / Ranger** each record a
-  verdict. An agent stays inside that lane for the whole step.
-- A **review / verify agent records a verdict and edits nothing it evaluates** — the Critic does
-  not rewrite the plan, the Inspector does not edit the code it reviews, and the Ranger does not
-  patch source or interfaces to turn a failing check green.
-- A **test-authoring agent (Shield) writes tests, not production source** — it never edits
-  production / source files to make a failing test pass.
-- On finding a problem **outside its lane**, an agent **REPORTS** it — records `fail` (Ranger) or
-  `changes_requested` (Critic / Inspector) with the failing output as evidence, and edits no files
-  — and the orchestrator routes the card back to `impl`, where **Builder owns the fix**. Report,
-  don't fix.
+- **Worker@plan** authors the `plan` (with `decision_log` / `done_when`) and edits no code;
+  **Worker@impl** owns the production source **and** the tests (one dispatch authors both);
+  **Reviewer** (at `plan_review` and `impl_review`) records a verdict; **Worker@test** runs the
+  checks and records a verdict. A dispatch stays inside its lane for the whole step.
+- The **Reviewer records a verdict and edits nothing it evaluates** — it does not rewrite the
+  plan and does not edit the code it reviews.
+- **Worker@test runs checks, it does not fix** — it never patches source, tests, or interfaces
+  to turn a failing check green.
+- On finding a problem **outside its lane**, a dispatch **REPORTS** it — records `fail`
+  (Worker@test) or `changes_requested` (Reviewer) with the failing output as evidence, and edits
+  no files — and the orchestrator routes the card back to `impl`, where **Worker@impl owns the
+  fix**. Report, don't fix.
 
-**Builder's lane is the production source, so authoring it is NOT a boundary violation** — this
-principle constrains the review / verify / test-author roles, not the author. Builder's own
-**surgical-changes** scope discipline still applies (touch only what the plan requires); the Role
-Boundary adds no new limit on the Builder lane.
+**Worker@impl's lane is the production source plus the tests, so authoring them is NOT a boundary
+violation** — this principle constrains the review / verify dispatches, not the author. The impl
+dispatch's own **surgical-changes** scope discipline still applies (touch only what the plan
+requires); the Role Boundary adds no new limit on the impl lane.
 
 **Two distinct axes — do not conflate them:**
 
@@ -235,20 +236,24 @@ you are changing. An agent may hit one, both, or neither — never fold one into
 > Role Boundary governs *worked-repo artifacts / files* — who may edit the plan text, the source, or
 > the tests. Different axis, different surface; don't read them as the same rule.
 
-## 7-Column AI Team Pipeline
+## Pipeline (7 board columns, 2 agents)
 
 ```
 Req → Plan → Review Plan → Impl → Review Impl → Test → Done
 ```
 
-| Column | Status | Agent | Model Key |
+The board keeps its 7 columns (the wire contract); two agents cover them — the **Worker**
+(end-to-end: plan, impl + tests, test run) and the **Reviewer** (validates output, provides
+feedback). One dispatch per column, selected by the template's `FOCUS`:
+
+| Column | Status | Agent (dispatch) | Model Key |
 |--------|--------|-------|-------|
 | Req | `todo` | User | - |
-| Plan | `plan` | Plan Agent | `planner` |
-| Review Plan | `plan_review` | Review Agent | `critic` |
-| Impl | `impl` | Worker → TDD Tester (sequential) | `builder` → `shield` |
-| Review Impl | `impl_review` | Code Review Agent | `inspector` |
-| Test | `test` | Test Runner | `ranger` |
+| Plan | `plan` | Worker (`FOCUS=plan`) | `worker` |
+| Review Plan | `plan_review` | Reviewer (`FOCUS=plan_review`) | `reviewer` |
+| Impl | `impl` | Worker (`FOCUS=impl` — implements + writes tests) | `worker` |
+| Review Impl | `impl_review` | Reviewer (`FOCUS=impl_review`) | `reviewer` |
+| Test | `test` | Worker (`FOCUS=test`) | `worker` |
 | Done | `done` | - | - |
 
 Model keys are resolved to real provider models through `models.json`.
@@ -382,15 +387,15 @@ api POST /task --json "{\"title\": \"...\", \"project\": \"$PROJECT\", \"priorit
 # Omit when not threading.
 
 # Plan review result (record-only)
-api POST /task/$ID/plan-review --json '{"reviewer": "Critic", "model": "<MODEL_CRITIC>", "status": "approved", "comment": "...", "correlation_id": "<correlation_id>"}'
+api POST /task/$ID/plan-review --json '{"reviewer": "Reviewer", "model": "<MODEL_REVIEWER>", "status": "approved", "comment": "...", "correlation_id": "<correlation_id>"}'
 # → {"success":true,"comment":{...},"version":<int>} — verdict recorded; status unchanged.
 
 # Impl review result (record-only)
-api POST /task/$ID/review --json '{"reviewer": "Inspector", "model": "<MODEL_INSPECTOR>", "status": "approved", "comment": "...", "correlation_id": "<correlation_id>"}'
+api POST /task/$ID/review --json '{"reviewer": "Reviewer", "model": "<MODEL_REVIEWER>", "status": "approved", "comment": "...", "correlation_id": "<correlation_id>"}'
 # → {"success":true,"comment":{...},"version":<int>} — verdict recorded; status unchanged.
 
 # Test result (record-only)
-api POST /task/$ID/test-result --json '{"tester": "test-runner", "status": "pass", "lint": "...", "build": "...", "tests": "...", "comment": "...", "correlation_id": "<correlation_id>"}'
+api POST /task/$ID/test-result --json '{"tester": "Worker", "status": "pass", "lint": "...", "build": "...", "tests": "...", "comment": "...", "correlation_id": "<correlation_id>"}'
 # → {"success":true,"result":{...},"version":<int>} — verdict recorded; status unchanged.
 
 # Human gate-override (record-only) — a HUMAN supervisor sends a card BACK at a review
@@ -543,7 +548,7 @@ A task has two distinct append-only channels, backed by the `task_activities` an
 The single atomic append path (no read-modify-write). Body `{actor, model, message, tokens?, correlation_id?}`:
 
 ```json
-{"actor": "Builder", "model": "<MODEL_BUILDER>", "message": "Implementation complete.", "tokens": 25000, "correlation_id": "<correlation_id>"}
+{"actor": "Builder", "model": "<MODEL_WORKER>", "message": "Implementation complete.", "tokens": 25000, "correlation_id": "<correlation_id>"}
 ```
 
 - `actor`, `model`, `message` — required, must be **non-empty strings**.
@@ -555,9 +560,17 @@ The single atomic append path (no read-modify-write). Body `{actor, model, messa
 
 #### Actor vocabulary (the `actor` field)
 
+The `actor` field is server-validated against a fixed **wire-label** enum that predates the
+2-agent pipeline: `Planner` / `Critic` / `Builder` / `Shield` / `Inspector` / `Ranger` /
+`Refiner` / `Orchestrator` / `Heartbeat`. The pipeline's two agents write under the label of the
+**column** they ran (Worker: `plan`→`Planner`, `impl`→`Builder`, `test`→`Ranger`; Reviewer:
+`plan_review`→`Critic`, `impl_review`→`Inspector` — see `squad-run/SKILL.md` → **Wire Actor
+Labels**); free-string fields (`current_agent`, verdict `reviewer`/`tester`, signatures) carry the
+real nicknames `Worker`/`Reviewer`.
+
 | Actor | When | `model` |
 |-------|------|---------|
-| `Planner` / `Critic` / `Builder` / `Shield` / `Inspector` / `Ranger` | the orchestrator records one event per pipeline agent step | resolved LLM from `models.json` |
+| `Planner` / `Critic` / `Builder` / `Shield` / `Inspector` / `Ranger` | wire labels — the orchestrator records one event per pipeline agent step under the step's column label | resolved LLM from `models.json` |
 | `Refiner` | squad-refine records the refine summary | resolved LLM (e.g. `opus`) |
 | `Orchestrator` | skill-level events from squad-run / squad-batch-run / squad-kickstart: the commit record, batch "Verified", kickstart "Impact", move failures | `system` |
 | `Heartbeat` | squad-heartbeat stagnation warnings | `system` |
@@ -610,8 +623,8 @@ The card description is this structured body (Markdown is fine; keep the field l
 
 - **Evidence bar.** No `file:line` or repro → do not file. Vague "this felt awkward" is not a report.
 - **Per-invocation cap N=3.** A single skill run files at most **3** reports. One squad-run pipeline
-  pass counts as **one** invocation across all 6 agents (not 3 per agent) — the orchestrator owns the
-  budget for a run; standalone runs (one refine, one explore) own their own.
+  pass counts as **one** invocation across all agent steps (not 3 per step) — the orchestrator owns
+  the budget for a run; standalone runs (one refine, one explore) own their own.
 - **Dedup against the board.** Before filing, read open friction cards and skip (or append your
   evidence to a **`friction`-tagged** card) that already covers the same friction — match on `area` + the **normalized title**
   (lowercase, collapse whitespace, drop punctuation). Don't re-file a duplicate.
@@ -851,15 +864,14 @@ The task's **`activity`** event stream accumulates the full chronological histor
 
 The `model` value should be the resolved provider model from `models.json` (not a hardcoded provider name in the template).
 
-| Nickname | Reads | Writes (signed) |
+| Dispatch | Reads | Writes (signed) |
 |----------|-------|-----------------|
 | `Refiner` | `title`, `description` | `spec` (via `/task/:id/spec`; `description` untouched) |
-| `Planner` | `description`, `spec` | `plan`, `decision_log`, `done_when` |
-| `Critic` | `description`, `spec`, `plan`, `decision_log`, `done_when` | `plan_review_comments` (records verdict) |
-| `Builder` | `description`, `spec`, `plan`, `done_when`, `plan_review_comments` | `implementation_notes` |
-| `Shield` | `description`, `spec`, `implementation_notes` | `implementation_notes` (append) |
-| `Inspector` | `description`, `spec`, `plan`, `done_when`, `implementation_notes` | `review_comments` (records verdict) |
-| `Ranger` | `title`, `implementation_notes` | `test_results` (records verdict) |
+| `Worker@plan` | `description`, `spec`, `plan_review_comments` | `plan`, `decision_log`, `done_when` |
+| `Reviewer@plan_review` | `description`, `spec`, `plan`, `decision_log`, `done_when` | `plan_review_comments` (records verdict) |
+| `Worker@impl` | `description`, `spec`, `plan`, `done_when`, `plan_review_comments`, `review_comments` | `implementation_notes` (source + tests in one dispatch) |
+| `Reviewer@impl_review` | `description`, `spec`, `plan`, `done_when`, `implementation_notes` | `review_comments` (records verdict) |
+| `Worker@test` | `title`, `implementation_notes` | `test_results` (records verdict) |
 
 Agents write only their own domain field above; they do **not** append to the activity stream themselves. The orchestrating skill (`squad-run`) appends one signed `POST /api/task/:id/activity` event per agent step (actor=the agent's nickname, model=its resolved model, optional `tokens`), reads the domain fields, and performs every status move (see Move Protocol).
 
@@ -872,7 +884,7 @@ A card carries two sources of intent — the human's `description` (the original
 - When the task has **no spec**, the `description` **is** the authoritative source of intent — never ignore it.
 - When the spec does **not conflict** with the description, proceed unchanged — this rule is a no-op.
 
-> **Planner entry move**: the orchestrator (squad-run) performs the `todo → plan` move and sets `current_agent:"Planner"` in one PATCH *before* the Planner runs — the Planner does not move `todo → plan` itself. The Planner runs at `plan` and exits with a single level-aware move (`plan → plan_review` for L3, `plan → impl` for L2). A Critic reject (`plan_review → plan`, server-side) re-dispatches the Planner at `plan`.
+> **Plan entry move**: the orchestrator (squad-run) performs the `todo → plan` move and sets `current_agent:"Worker"` in one PATCH *before* the Worker's plan dispatch runs — the Worker does not move `todo → plan` itself. Worker@plan runs at `plan` and exits with a single level-aware move (`plan → plan_review` for L3, `plan → impl` for L2). A Reviewer reject (`plan_review → plan`, server-side) re-dispatches Worker@plan.
 
 ## Task Relationships & Epics
 
@@ -932,11 +944,11 @@ api GET /task/$DEP_ID?fields=title,status,decision_log,implementation_notes
 ```
 All fields are fetched once and cached. Per-agent filtering happens at context assembly time.
 
-| Agent | Fields Injected | Truncation |
+| Dispatch | Fields Injected | Truncation |
 |-------|----------------|------------|
-| `Planner` | `decision_log` + `implementation_notes` | 500 chars each |
-| `Builder` | `implementation_notes` | 500 chars |
-| `Inspector` | `decision_log` | 300 chars |
+| `Worker@plan` | `decision_log` + `implementation_notes` | 500 chars each |
+| `Worker@impl` | `implementation_notes` | 500 chars |
+| `Reviewer@impl_review` | `decision_log` | 300 chars |
 
 Truncation format: first N chars + `...[truncated]` suffix when the field exceeds the limit.
 
@@ -946,12 +958,12 @@ Context format per dependency:
 [IN PROGRESS] ← only if status not in {done, cancelled} (a done OR cancelled dep is resolved — no marker)
 
 **Decision Log:**
-<decision_log truncated per agent rule>
+<decision_log truncated per dispatch rule>
 
 **Implementation Notes:**
-<implementation_notes truncated per agent rule>
+<implementation_notes truncated per dispatch rule>
 ```
-Fields not applicable to the current agent are omitted entirely.
+Fields not applicable to the current dispatch are omitted entirely.
 
 ### Sub-task readiness nudge (soft)
 
@@ -966,11 +978,12 @@ Fields not applicable to the current agent are omitted entirely.
 
 ### Review Feedback Injection
 
-These placeholders carry feedback from previous review cycles (re-runs):
+A single placeholder, `<review_feedback>`, carries feedback from previous review cycles
+(re-runs) — the source field depends on the dispatch:
 
-| Placeholder | Source Field | When Populated |
+| Dispatch | Source Field | When Populated |
 |-------------|-------------|----------------|
-| `<critic_feedback>` | `plan_review_comments` | Planner re-run: last entry's `comment` from the JSON array |
-| `<inspector_feedback>` | `review_comments` | Builder re-run: last entry's `comment` from the JSON array |
+| `Worker@plan` re-run | `plan_review_comments` | last entry's `comment` from the JSON array |
+| `Worker@impl` re-run | `review_comments` | last entry's `comment` from the JSON array |
 
 If the source field is empty or null (first run), the placeholder resolves to empty string.

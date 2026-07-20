@@ -75,7 +75,7 @@ def test_vale_ci_has_all_required_triggers(repo_root):
     assert re.search(r"^\s*workflow_dispatch:", txt, re.MULTILINE), (
         "vale CI must trigger on workflow_dispatch (manual re-run)"
     )
-    assert re.search(r"branches:\s*\[\s*main\s*\]|-\s*main", txt), "push trigger must restrict to [main]"
+    assert re.search(r"branches:\s*\[\s*main,\s*v2\s*\]|-\s*main", txt), "push trigger must restrict to [main, v2]"
 
 
 # ──────────────────────────────────────────────────────────────────────────────

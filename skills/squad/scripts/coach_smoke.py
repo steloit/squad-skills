@@ -8,8 +8,8 @@ Two hard-coded smokes from the approved plan:
   B (precision): a deliberately friction-free trajectory (only a worked-project bug at
                  demo/src/app.js:42) → expect 0 reports.
 
-The Coach is an LLM, so the live judgment passes on a 2-of-3-runs basis (Shield runs the live
-model dispatch). This harness is the DETERMINISTIC part: it renders templates/coach.md with each
+The Coach is an LLM, so the live judgment passes on a 2-of-3-runs basis (a live
+model dispatch harness runs it). This harness is the DETERMINISTIC part: it renders templates/coach.md with each
 seeded trajectory and emits the ready-to-dispatch prompt, asserting the seeded evidence is present
 and the render is --strict-clean (no leftover <MODEL_COACH>/<EFFORT_COACH>).
 
@@ -59,9 +59,9 @@ SMOKE_B = {
     "source_task": "2",
     "run_summary": "squad-run pipeline completed demo task 2 to done.",
     "trajectory": (
-        "[activity] All 6 agents ran clean: each board call returned 200 first try; no reject loops,\n"
+        "[activity] All agent steps ran clean: each board call returned 200 first try; no reject loops,\n"
         "    no retries, no circuit-breaker trips. The only issue found was a NullPointerException in\n"
-        "    demo/src/app.js:42 - a bug in the WORKED PROJECT, which the Builder fixed."
+        "    demo/src/app.js:42 - a bug in the WORKED PROJECT, which the Worker fixed."
     ),
     "friction_signals": "none (zero errors against Squad's own skills/board/orchestrator/templates).",
     "expect_reports": 0,

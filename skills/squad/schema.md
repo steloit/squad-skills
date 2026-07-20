@@ -20,10 +20,10 @@ addressed by their **display id** `<KEY>-<seq>` (e.g. `ABC-42`) in every API pat
 | `description` | string\|null | The human's **original request** — immutable; agents NEVER overwrite it. The refined, testable requirements live in **`spec`**. |
 | `spec` | object\|null | The Refiner's structured spec `{goal, requirements[], qa[], version}` (null until refined). Written ONLY via `POST /task/:id/spec` — which also accepts an optional client-supplied `correlation_id` grouping uuid (omit when not grouping; see below). |
 | `spec_version` | number | `0` = no spec yet; bumped on each spec write (under the task-`version` CAS) |
-| `plan` | string\|null | Implementation plan in markdown (Planner) |
-| `implementation_notes` | string\|null | Implementation log in markdown (Builder + Shield) |
-| `decision_log` | string\|null | Key architecture decisions by Planner (markdown table) |
-| `done_when` | string\|null | Verifiable completion criteria by Planner (markdown checklist) |
+| `plan` | string\|null | Implementation plan in markdown (Worker@plan) |
+| `implementation_notes` | string\|null | Implementation log in markdown (Worker@impl — source + tests) |
+| `decision_log` | string\|null | Key architecture decisions by Worker@plan (markdown table) |
+| `done_when` | string\|null | Verifiable completion criteria by Worker@plan (markdown checklist) |
 | `tags` | string[] | structured array (NOT a stringified blob) |
 | `review_comments` / `plan_review_comments` / `test_results` | object[] | structured arrays of verdict objects (see JSON Formats below) |
 | `current_agent` | string\|null | Currently active agent nickname |
@@ -70,24 +70,39 @@ A **projected read** (`?fields=a,b,c`) returns only the requested fields (plus `
 
 ## Agent Nicknames
 
-Each agent has a fixed nickname used in all log records, field headers, and `current_agent`.
+Each agent has a fixed nickname used in field headers and `current_agent` (both free-string surfaces).
 
 | Nickname | Role | Model Key | Writes to |
 |----------|------|-------|-----------|
 | `Refiner` | Requirements Refiner | `refiner` | `spec` (via `POST /task/:id/spec`; `description` untouched) |
-| `Planner` | Plan Agent | `planner` | `plan`, `decision_log`, `done_when` |
-| `Critic` | Plan Review Agent | `critic` | `plan_review_comments` |
-| `Builder` | Worker Agent | `builder` | `implementation_notes` |
-| `Shield` | TDD Tester | `shield` | `implementation_notes` (append) |
-| `Inspector` | Code Review Agent | `inspector` | `review_comments` |
-| `Ranger` | Test Runner | `ranger` | `test_results` |
+| `Worker` | Worker Agent (end-to-end) | `worker` | `plan`, `decision_log`, `done_when` (@plan) · `implementation_notes` incl. tests (@impl) · `test_results` (@test) |
+| `Reviewer` | Review Agent | `reviewer` | `plan_review_comments` (@plan_review) · `review_comments` (@impl_review) |
+
+## Wire Actor Labels
+
+The `actor` field (generic task PATCH + activity append) is **server-validated** against a fixed
+enum that predates the 2-agent pipeline — an unknown value (e.g. `Worker`) is a **400**:
+`Planner` / `Critic` / `Builder` / `Shield` / `Inspector` / `Ranger` / `Refiner` /
+`Orchestrator` / `Heartbeat`. Enum-bound writes therefore carry the **column's wire label**;
+every free-string field (`current_agent`, verdict `reviewer` / `tester`, signature headers) uses
+the real nicknames `Worker` / `Reviewer` directly. The enum itself is unchanged on the wire.
+
+| Column | Agent | Wire actor label |
+|--------|-------|------------------|
+| `plan` | Worker | `Planner` |
+| `plan_review` | Reviewer | `Critic` |
+| `impl` | Worker | `Builder` |
+| `impl_review` | Reviewer | `Inspector` |
+| `test` | Worker | `Ranger` |
+
+(`Shield` remains a valid enum member for historical records; v2 writes never send it.)
 
 ## Signature Header Rule
 
 **Every agent MUST prepend a signature header** to the content it writes:
 
 ```markdown
-> **Planner** `<MODEL_PLANNER>` · 2026-02-24T10:00:00Z
+> **Worker** `<MODEL_WORKER>` · 2026-02-24T10:00:00Z
 ```
 
 This makes every card field self-documenting — you can see at a glance who wrote what and when.
@@ -98,35 +113,35 @@ This makes every card field self-documenting — you can see at a glance who wro
 ```json
 [
   {
-    "reviewer": "Inspector",
-    "model": "<MODEL_INSPECTOR>",
+    "reviewer": "Reviewer",
+    "model": "<MODEL_REVIEWER>",
     "status": "changes_requested",
-    "comment": "> **Inspector** `<MODEL_INSPECTOR>` · 2026-02-20T14:30:00Z\n\n## Review Findings\n\n1. Missing error handling",
+    "comment": "> **Reviewer** `<MODEL_REVIEWER>` · 2026-02-20T14:30:00Z\n\n## Review Findings\n\n1. Missing error handling",
     "timestamp": "2026-02-20T14:30:00.000Z"
   }
 ]
 ```
 `status` must be `"approved"` or `"changes_requested"`.
-`reviewer` must be the agent's **nickname** (e.g. `"Inspector"`, `"Critic"`).
+`reviewer` is a free-string field — the agent's **nickname** (`"Reviewer"`).
 The verdict POSTs (`/plan-review`, `/review`) also accept an optional `correlation_id` — the client-supplied per-step grouping token (see below); omit when not threading a step.
 
 ### test_results
 ```json
 [
   {
-    "tester": "Ranger",
-    "model": "<MODEL_RANGER>",
+    "tester": "Worker",
+    "model": "<MODEL_WORKER>",
     "status": "pass",
     "lint": "0 errors, 0 warnings",
     "build": "Build successful",
     "tests": "42 passed, 0 failed",
-    "comment": "> **Ranger** `<MODEL_RANGER>` · 2026-02-20T15:00:00Z\n\nAll checks passed.",
+    "comment": "> **Worker** `<MODEL_WORKER>` · 2026-02-20T15:00:00Z\n\nAll checks passed.",
     "timestamp": "2026-02-20T15:00:00.000Z"
   }
 ]
 ```
 `status` must be `"pass"` or `"fail"`.
-`tester` must be the agent's **nickname** (`"Ranger"`).
+`tester` is a free-string field — the agent's **nickname** (`"Worker"`).
 The test-result POST (`/test-result`) also accepts an optional `correlation_id` — the client-supplied per-step grouping token (see below); omit when not threading a step.
 
 ## Table: task_activities
@@ -136,7 +151,7 @@ The immutable machine **event stream** for a task — one append-only event per 
 **Event shape as returned by the activity API:**
 
 ```json
-{"id": "<uuid>", "task_id": "ABC-42", "actor": "Planner", "model": "<MODEL_PLANNER>", "message": "Plan complete. 4 files to modify.", "tokens": 12000, "created_at": "2026-02-20T10:05:00.000Z"}
+{"id": "<uuid>", "task_id": "ABC-42", "actor": "Planner", "model": "<MODEL_WORKER>", "message": "Plan complete. 4 files to modify.", "tokens": 12000, "created_at": "2026-02-20T10:05:00.000Z"}
 ```
 
 - `id` is an opaque string (used as the `?before=<id>` pagination cursor); `task_id` is the **display id** `<KEY>-<seq>` (e.g. `ABC-42`), not a number. There is no `project` field on the event.
@@ -168,7 +183,7 @@ Comment shape as returned by the API: `{"id": "<uuid>", "task_id": "ABC-42", "au
 
 | Actor | Source | `model` |
 |-------|--------|---------|
-| `Planner` / `Critic` / `Builder` / `Shield` / `Inspector` / `Ranger` | orchestrator records one event per pipeline agent step | resolved LLM |
+| `Planner` / `Critic` / `Builder` / `Shield` / `Inspector` / `Ranger` | **wire labels** (see Wire Actor Labels) — the orchestrator records one event per pipeline agent step under the step's column label | resolved LLM |
 | `Refiner` | squad-refine refine summary | resolved LLM |
 | `Orchestrator` | squad-run commit record, squad-batch-run "Verified", squad-kickstart "Impact", move failures | `system` |
 | `Heartbeat` | squad-heartbeat stagnation warnings | `system` |
@@ -177,7 +192,7 @@ Comment shape as returned by the API: `{"id": "<uuid>", "task_id": "ABC-42", "au
 
 ### Optional `actor` on the task PATCH
 
-`PATCH /api/orgs/:org/task/:id` accepts an optional `actor` field — a **display ROLE** from the actor vocabulary above (`Planner` / `Critic` / `Builder` / `Shield` / `Inspector` / `Ranger` / `Refiner` / `Orchestrator` / `Heartbeat`) that attributes the resulting status-move event. It is server-validated: an unknown value → **400**. It is a role label, **never a credential** — auth is always the `Authorization: Bearer` PAT. The orchestrator (squad-run) sends `actor:"Orchestrator"` on every status-move PATCH. A PATCH with no `actor` is back-compatible (the field is optional; a pre-PAT API ignores it as an unknown field).
+`PATCH /api/orgs/:org/task/:id` accepts an optional `actor` field — a **display ROLE** from the actor vocabulary above (`Planner` / `Critic` / `Builder` / `Shield` / `Inspector` / `Ranger` / `Refiner` / `Orchestrator` / `Heartbeat`) that attributes the resulting status-move event. It is server-validated: an unknown value → **400**. It is a role label, **never a credential** — auth is always the `Authorization: Bearer` PAT. The orchestrator (squad-run) sends `actor:"Orchestrator"` on every status-move PATCH; agent record writes send the column's **wire label** (see Wire Actor Labels above). A PATCH with no `actor` is back-compatible (the field is optional; a pre-PAT API ignores it as an unknown field).
 
 ### Optional `correlation_id` on writes
 

@@ -62,7 +62,7 @@ import argparse
 import json
 import sys
 
-EX_USAGE = 64  # sysexits.h — distinct from the 0..3 verdict codes (Critic ruling)
+EX_USAGE = 64  # sysexits.h — distinct from the 0..3 verdict codes (review ruling)
 
 # The ③ gap-analysis dimension vocabulary (squad-refine/SKILL.md ③). Mirrored here
 # only to validate the ledger's `dimension` field — an unknown dimension is a
@@ -82,7 +82,7 @@ DEFAULT_CAP = 6  # the safety cap (~5-6 rounds); the diminishing-returns backsto
 
 class _UsageParser(argparse.ArgumentParser):
     """argparse exits 2 on a usage error by default; override to EX_USAGE (64) so
-    the verdict code space 0..3 never collides with a usage failure (Critic ruling
+    the verdict code space 0..3 never collides with a usage failure (review ruling
     3). --help still exits 0 (argparse calls exit(0) directly, not error())."""
 
     def error(self, message):

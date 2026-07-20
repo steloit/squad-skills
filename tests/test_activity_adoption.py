@@ -124,7 +124,7 @@ def test_schema_documents_child_tables(repo_root):
 def test_templates_drop_self_append_comment(repo_root):
     """The agent templates no longer imply agent self-append of tokens to agent_log."""
     tpl_dir = repo_root / "skills" / "squad" / "templates"
-    for name in ("worker-agent.md", "plan-agent.md", "tdd-tester.md"):
+    for name in ("worker.md", "reviewer.md"):
         text = (tpl_dir / name).read_text()
         assert "agent_log" not in text, f"{name} still references agent_log self-append"
 
