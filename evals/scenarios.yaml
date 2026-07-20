@@ -196,7 +196,7 @@
 
 # ── SQD-590: squad-refine re-architecture — board-observable locking scenarios ─
 #
-# Three scenarios lock the Critic-required BOARD-OBSERVABLE outcomes:
+# Three scenarios lock the review-required BOARD-OBSERVABLE outcomes:
 #   (a) level-change recommendation when refined scope spans 2+ layers / adds
 #       test/CI surface — the #477 regression case (task stayed L2 despite RLS
 #       proofs + e2e + CI + Dockerfiles); deterministic gate: board task level == 3.
